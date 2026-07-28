@@ -1,0 +1,251 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { WebSocketServer } from 'ws';
+import { buildMapBoxes, buildColliders, PLAYER_SPAWNS, TOTAL_SLOTS, BOT_NAMES, BOT_COLORS } from '../src/shared/mapdata.js';
+import { ServerBot } from './botai.js';
+
+// ---------------------------------------------------------------------------
+// PIUM PIUM PIUM — servidor: sirve el cliente por HTTP y lleva la partida por
+// WebSocket. Los bots corren aquí y rellenan hasta TOTAL_SLOTS (10):
+// 1 humano → 9 bots, 7 humanos → 3 bots, 10+ humanos → 0 bots.
+// ---------------------------------------------------------------------------
+
+const PORT = process.env.PORT || 5173;
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const TICK = 1 / 15;
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+};
+
+const server = http.createServer((req, res) => {
+  const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  if (urlPath === '/salud') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    return;
+  }
+  let rel = urlPath === '/' ? 'index.html' : urlPath.slice(1);
+  const file = path.normalize(path.join(ROOT, rel));
+  if (!file.startsWith(ROOT) || rel.startsWith('server') || rel.startsWith('.')) {
+    res.writeHead(403); res.end(); return;
+  }
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404); res.end('no encontrado'); return; }
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
+      'Cache-Control': 'no-store',
+    });
+    res.end(data);
+  });
+});
+
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+// --- estado de la partida ---
+const colliders = buildColliders(buildMapBoxes());
+const players = new Map(); // id -> jugador
+const bots = [];
+let nextId = 1;
+let botSerial = 0;
+
+const now = () => Date.now() / 1000;
+
+function sanitizeName(raw) {
+  let n = String(raw || '').replace(/[^\p{L}\p{N}_\- ]/gu, '').trim().slice(0, 14);
+  if (!n) n = 'Pium_' + Math.floor(Math.random() * 999);
+  // nombre único
+  let base = n, i = 2;
+  const taken = () =>
+    [...players.values()].some((p) => p.name === n) || bots.some((b) => b.name === n);
+  while (taken()) n = base.slice(0, 11) + '_' + i++;
+  return n;
+}
+
+function pickSpawn() {
+  return PLAYER_SPAWNS[Math.floor(Math.random() * PLAYER_SPAWNS.length)];
+}
+
+function send(p, msg) {
+  if (p.ws.readyState === 1) p.ws.send(JSON.stringify(msg));
+}
+
+function broadcast(msg, exceptId = null) {
+  const raw = JSON.stringify(msg);
+  for (const p of players.values()) {
+    if (p.id !== exceptId && p.ws.readyState === 1) p.ws.send(raw);
+  }
+}
+
+// bots = TOTAL_SLOTS - humanos (nunca negativo)
+function rebalanceBots() {
+  const target = Math.max(0, TOTAL_SLOTS - players.size);
+  while (bots.length > target) {
+    const b = bots.pop();
+    broadcast({ t: 'botbye', id: b.id });
+  }
+  while (bots.length < target) {
+    const idx = botSerial++;
+    const b = new ServerBot(
+      'b' + idx,
+      BOT_NAMES[idx % BOT_NAMES.length] + (idx >= BOT_NAMES.length ? '_' + idx : ''),
+      BOT_COLORS[idx % BOT_COLORS.length],
+    );
+    bots.push(b);
+  }
+}
+
+function killPlayer(victim, killerName, isHead) {
+  victim.alive = false;
+  victim.hp = 0;
+  victim.deaths++;
+  broadcast({ t: 'kill', vn: victim.name, vid: victim.id, kn: killerName, h: !!isHead });
+  setTimeout(() => {
+    if (!players.has(victim.id)) return;
+    const sp = pickSpawn();
+    victim.alive = true;
+    victim.hp = 100;
+    victim.pos = { ...sp };
+    send(victim, { t: 'spawn', p: [sp.x, sp.y, sp.z] });
+  }, 2600);
+}
+
+function damagePlayer(victim, dmg, sourceName, isHead, killerPlayer = null) {
+  if (!victim.alive) return;
+  victim.hp -= dmg;
+  victim.lastDmg = now();
+  send(victim, { t: 'ouch', d: dmg, hp: Math.max(0, victim.hp), by: sourceName });
+  if (victim.hp <= 0) {
+    if (killerPlayer) killerPlayer.kills++;
+    killPlayer(victim, sourceName, isHead);
+  }
+}
+
+wss.on('connection', (ws) => {
+  const id = nextId++;
+  let me = null;
+
+  ws.on('message', (raw) => {
+    let m;
+    try { m = JSON.parse(raw); } catch { return; }
+
+    if (m.t === 'hola' && !me) {
+      const sp = pickSpawn();
+      me = {
+        id, ws,
+        name: sanitizeName(m.name),
+        color: BOT_COLORS[(id * 3) % BOT_COLORS.length],
+        pos: { ...sp }, ry: 0, rx: 0, speed: 0, sliding: false,
+        hp: 100, kills: 0, deaths: 0, alive: true, lastDmg: 0,
+      };
+      players.set(id, me);
+      rebalanceBots();
+      send(me, { t: 'hi', id, name: me.name, spawn: [sp.x, sp.y, sp.z], slots: TOTAL_SLOTS });
+      broadcast({ t: 'aviso', txt: `${me.name} entró a la partida` }, id);
+      console.log(`+ ${me.name} (${players.size} jugadores, ${bots.length} bots)`);
+      return;
+    }
+    if (!me) return;
+
+    if (m.t === 'st') {
+      // estado del jugador: posición, orientación, velocidad
+      if (Array.isArray(m.p) && m.p.length === 3) {
+        me.pos = { x: +m.p[0] || 0, y: +m.p[1] || 0, z: +m.p[2] || 0 };
+      }
+      me.ry = +m.ry || 0;
+      me.rx = +m.rx || 0;
+      me.speed = Math.min(20, +m.s || 0);
+      me.sliding = !!m.sl;
+    } else if (m.t === 'fire') {
+      if (Array.isArray(m.a) && Array.isArray(m.b)) {
+        broadcast({ t: 'fire', id, a: m.a, b: m.b, k: String(m.k || 'ar').slice(0, 8) }, id);
+      }
+    } else if (m.t === 'hit') {
+      if (!me.alive) return;
+      const dmg = Math.max(1, Math.min(120, Math.round(+m.d || 0)));
+      if (m.kind === 'bot') {
+        const bot = bots.find((b) => b.id === m.id);
+        if (bot && !bot.dead) {
+          const died = bot.takeDamage(dmg, me.pos);
+          if (died) {
+            me.kills++;
+            broadcast({ t: 'kill', vn: bot.name, vid: null, kn: me.name, h: !!m.h });
+          }
+        }
+      } else if (m.kind === 'pl') {
+        const victim = players.get(+m.id);
+        if (victim && victim.id !== me.id) {
+          damagePlayer(victim, dmg, me.name, !!m.h, me);
+        }
+      }
+    }
+  });
+
+  ws.on('close', () => {
+    if (me) {
+      players.delete(me.id);
+      broadcast({ t: 'aviso', txt: `${me.name} salió de la partida` });
+      console.log(`- ${me.name} (${players.size} jugadores)`);
+      rebalanceBots();
+    }
+  });
+  ws.on('error', () => {});
+});
+
+// --- bucle de simulación ---
+const botCtx = {
+  colliders,
+  get players() { return [...players.values()]; },
+  onShoot(bot, from, to) {
+    broadcast({ t: 'fire', bid: bot.id, a: [from.x, from.y, from.z], b: [to.x, to.y, to.z], k: 'smg' });
+  },
+  onHitPlayer(bot, player, dmg) {
+    damagePlayer(player, dmg, bot.name, false);
+  },
+};
+
+let last = now();
+setInterval(() => {
+  const t = now();
+  const dt = Math.min(0.1, t - last);
+  last = t;
+
+  for (const b of bots) b.update(dt, botCtx);
+
+  // regeneración de vida de jugadores
+  for (const p of players.values()) {
+    if (p.alive && p.hp < 100 && t - p.lastDmg > 4) {
+      p.hp = Math.min(100, p.hp + 14 * dt);
+    }
+  }
+
+  if (players.size === 0) return; // nadie conectado: no hace falta emitir
+
+  const snap = {
+    t: 'snap',
+    pl: [...players.values()].map((p) => ({
+      id: p.id, n: p.name, c: p.color,
+      p: [+p.pos.x.toFixed(2), +p.pos.y.toFixed(2), +p.pos.z.toFixed(2)],
+      ry: +p.ry.toFixed(2), rx: +p.rx.toFixed(2), s: +p.speed.toFixed(1),
+      hp: Math.round(p.hp), k: p.kills, d: p.deaths, al: p.alive ? 1 : 0,
+    })),
+    bots: bots.map((b) => ({
+      id: b.id, n: b.name, c: b.color,
+      p: [+b.pos.x.toFixed(2), +b.pos.y.toFixed(2), +b.pos.z.toFixed(2)],
+      ry: +b.yaw.toFixed(2), s: +b.speed.toFixed(1),
+      hp: Math.round(b.hp), al: b.dead ? 0 : 1, en: b.engaging ? 1 : 0,
+    })),
+  };
+  broadcast(snap);
+}, TICK * 1000);
+
+server.listen(PORT, () => {
+  console.log(`PIUM PIUM PIUM multijugador en http://localhost:${PORT}`);
+});

@@ -1,0 +1,5 @@
+node_modules/
+tools/
+_shots/
+*.zip
+.claude/settings.local.json

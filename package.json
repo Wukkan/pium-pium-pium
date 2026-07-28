@@ -1,0 +1,16 @@
+{
+  "name": "pium-pium-pium",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Shooter multijugador en el navegador (réplica de krunker.io) con bots de relleno",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
