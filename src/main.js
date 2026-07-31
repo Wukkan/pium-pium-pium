@@ -9,6 +9,7 @@ import { HUD } from './hud.js';
 import { Net } from './net.js';
 import { Remotes } from './remotes.js';
 import { KitManager } from './kits.js';
+import { GrenadeManager, explosionDamage } from './grenades.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — réplica de krunker.io, ahora multijugador.
@@ -63,11 +64,37 @@ const player = new Player(camera, world);
 const weapons = new WeaponSystem(camera, scene, player, effects, audio, hud);
 const net = new Net();
 const kitsMgr = new KitManager(scene);
+const grenades = new GrenadeManager(scene, world.colliders, effects, audio);
+grenades.onCount = (n) => hud.updateGrenades(n);
 
 function onHealed() {
   audio.medkit();
   hud.announce('+25 PV ❤');
 }
+
+// --- economía y rachas: se activan con cada baja mía ---
+let streak = 0;
+
+function onMyKill(isHead, victimName) {
+  const earned = 100 + (isHead ? 50 : 0);
+  streak++;
+  let bonus = 0;
+  if ([3, 5, 8, 10, 15, 20].includes(streak)) {
+    bonus = streak * 25;
+    hud.announce(`🔥 ¡RACHA x${streak}! (+$${bonus})`);
+    audio.streak(streak);
+  }
+  weapons.addMoney(earned + bonus);
+}
+
+function resetStreak() { streak = 0; }
+
+// lanzar granada con G
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyG' || !document.pointerLockElement) return;
+  if (state !== 'playing' || player.dead) return;
+  if (grenades.throwFrom(camera)) audio.nadeThrow();
+});
 
 let remotes = null;      // modo online
 let botsLocal = null;    // modo offline
@@ -98,24 +125,45 @@ function setupOffline() {
   botsLocal.ctx.onKill = (killer, victim) => hud.killfeed(killer, victim, false);
   botsLocal.ctx.onBotDeath = (bot) => kitsMgr.spawnLocal(bot.pos);
   weapons.getTargets = () => [...world.occluders, ...botsLocal.getHitMeshes()];
+
+  const localBotKilled = (bot, isHead) => {
+    kills++;
+    kitsMgr.spawnLocal(bot.pos);
+    hud.updateScore(kills, deaths);
+    hud.killfeed('Tú', bot.name, true);
+    hud.announce(isHead ? `☠ HEADSHOT — ${bot.name}` : `☠ Eliminaste a ${bot.name}`);
+    audio.kill();
+    onMyKill(isHead, bot.name);
+  };
+
   weapons.onTargetHit = (data, dmg, isHead, point) => {
     if (!data.bot) return;
     const killed = data.bot.takeDamage(dmg, player.pos);
-    if (killed) kitsMgr.spawnLocal(data.bot.pos);
     effects.popup(point, String(dmg), isHead);
     effects.impact(point, 0xcc4444, 4);
     hud.hitmarker(killed);
     audio.hit();
-    if (killed) {
-      kills++;
-      hud.updateScore(kills, deaths);
-      hud.killfeed('Tú', data.bot.name, true);
-      hud.announce(isHead ? `☠ HEADSHOT — ${data.bot.name}` : `☠ Eliminaste a ${data.bot.name}`);
-      audio.kill();
+    if (killed) localBotKilled(data.bot, isHead);
+  };
+
+  // explosión de granada propia: daño por cercanía a bots y a mí mismo
+  grenades.onExplode = (pos) => {
+    for (const bot of botsLocal.bots) {
+      if (bot.dead) continue;
+      const d = Math.hypot(bot.pos.x - pos.x, bot.pos.y + 1 - pos.y, bot.pos.z - pos.z);
+      const dmg = explosionDamage(d);
+      if (dmg <= 0) continue;
+      const killed = bot.takeDamage(dmg, player.pos);
+      effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.4, 0)), String(dmg), false);
+      if (killed) localBotKilled(bot, false);
     }
+    const dSelf = Math.hypot(player.pos.x - pos.x, player.pos.y + 1 - pos.y, player.pos.z - pos.z);
+    const dmgSelf = Math.round(explosionDamage(dSelf) / 2);
+    if (dmgSelf > 0) player.damage(dmgSelf, 'tu propia granada');
   };
   player.onDeath = (killerName) => {
     deaths++;
+    resetStreak();
     kitsMgr.spawnLocal({ x: player.pos.x, y: player.pos.y, z: player.pos.z });
     hud.updateScore(kills, deaths);
     hud.killfeed(killerName, 'Tú', false);
@@ -126,6 +174,7 @@ function setupOffline() {
       hud.showDeath(false);
       player.spawn(world.playerSpawns[Math.floor(Math.random() * world.playerSpawns.length)]);
       weapons.refill();
+      grenades.refill();
       hud.updateHealth(player.health, player.maxHealth);
       state = document.pointerLockElement ? 'playing' : 'menu';
       if (state === 'menu') hud.showMenu(true);
@@ -179,14 +228,35 @@ function setupOnline() {
       hud.hitmarker(true);
       hud.announce(m.h ? `☠ HEADSHOT — ${m.vn}` : `☠ Eliminaste a ${m.vn}`);
       audio.kill();
+      onMyKill(!!m.h, m.vn);
     }
     if (m.vid === net.id) {
+      resetStreak();
       player.dead = true;
       player.health = 0;
       hud.showDeath(true, m.kn);
       state = 'dead';
     }
   });
+
+  // granadas de otros jugadores (visuales, explotan en su sitio)
+  net.on('nade', (m) => grenades.spawnRemote(m.p, m.v));
+  grenades.onThrow = (pos, vel) => net.sendNade(pos, vel);
+
+  // explosión de granada propia: daño a entidades remotas vía servidor
+  grenades.onExplode = (pos) => {
+    const aplicar = (ent, kind) => {
+      if (!ent.alive) return;
+      const ep = ent.rig.group.position;
+      const d = Math.hypot(ep.x - pos.x, ep.y + 1 - pos.y, ep.z - pos.z);
+      const dmg = explosionDamage(d);
+      if (dmg <= 0) return;
+      effects.popup(ep.clone().add(new THREE.Vector3(0, 1.4, 0)), String(dmg), false);
+      net.sendHit(kind, ent.id, dmg, false);
+    };
+    for (const ent of remotes.players.values()) aplicar(ent, 'pl');
+    for (const ent of remotes.bots.values()) aplicar(ent, 'bot');
+  };
 
   net.on('ouch', (m) => {
     player.health = m.hp;
@@ -198,6 +268,7 @@ function setupOnline() {
   net.on('spawn', (m) => {
     player.spawn(new THREE.Vector3(m.p[0], m.p[1], m.p[2]));
     weapons.refill();
+    grenades.refill();
     hud.showDeath(false);
     hud.updateHealth(player.health, player.maxHealth);
     state = document.pointerLockElement ? 'playing' : 'menu';
@@ -313,6 +384,9 @@ player.spawn(new THREE.Vector3(0, 0.1, 30));
 hud.updateHealth(player.health, player.maxHealth);
 hud.updateAmmo(weapons);
 hud.updateScore(0, 0);
+hud.updateMoney(0);
+hud.updateSlots(weapons);
+hud.updateGrenades(grenades.count);
 
 // --- bucle de juego ---
 let lastTime = performance.now();
@@ -336,6 +410,7 @@ function tick(now) {
   if (remotes) remotes.update(dt);
   if (online && joined) net.tickState(dt, player);
   kitsMgr.update(dt);
+  grenades.update(dt, player.eyePosition(playerEye));
   effects.update(dt);
 
   hud.update(dt);
@@ -360,7 +435,7 @@ requestAnimationFrame(loop);
 
 // gancho de depuración/pruebas (no afecta al juego)
 window.__game = {
-  scene, camera, renderer, player, weapons, world, effects, net, tick,
+  scene, camera, renderer, player, weapons, world, effects, net, tick, grenades,
   getRemotes: () => remotes,
   getBots: () => botsLocal,
   getState: () => state,

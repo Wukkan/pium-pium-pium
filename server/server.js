@@ -191,6 +191,10 @@ wss.on('connection', (ws) => {
       if (Array.isArray(m.a) && Array.isArray(m.b)) {
         broadcast({ t: 'fire', id, a: m.a, b: m.b, k: String(m.k || 'ar').slice(0, 8) }, id);
       }
+    } else if (m.t === 'nade') {
+      if (Array.isArray(m.p) && m.p.length === 3 && Array.isArray(m.v) && m.v.length === 3) {
+        broadcast({ t: 'nade', id, p: m.p, v: m.v }, id);
+      }
     } else if (m.t === 'hit') {
       if (!me.alive) return;
       const dmg = Math.max(1, Math.min(120, Math.round(+m.d || 0)));

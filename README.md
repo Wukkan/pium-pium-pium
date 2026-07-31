@@ -34,9 +34,12 @@ y abre **http://localhost:5173**. Escribe tu nombre y pulsa **JUGAR**.
 | Shift | Deslizarse |
 | Clic izq / der | Disparar / Apuntar |
 | R | Recargar |
-| 1 / 2 / 3 | Rifle / Subfusil / Francotirador |
+| 1-5 | Pistola / Escopeta ($300) / Subfusil ($500) / Rifle ($800) / Francotirador ($1200) |
+| G | Lanzar granada (2 por vida) |
 | TAB | Marcador |
 | ESC | Menú |
+
+Empiezas con la pistola. Cada baja da **$100** (+$50 headshot, + bonus por racha) para desbloquear el resto de armas. Las rachas de bajas se anuncian a las 3, 5, 8, 10...
 
 ## Créditos
 

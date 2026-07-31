@@ -79,6 +79,30 @@ export class Effects {
     });
   }
 
+  explosion(pos) {
+    // destello esférico que crece y se desvanece
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffb347, transparent: true, opacity: 0.95,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 12), mat);
+    sphere.position.copy(pos);
+    this.scene.add(sphere);
+    const total = 0.35;
+    this.items.push({
+      obj: sphere, life: total,
+      tick() {
+        const p = 1 - this.life / total;
+        sphere.scale.setScalar(0.5 + p * 5.5);
+        mat.opacity = 0.95 * (1 - p);
+      },
+      dispose() { mat.dispose(); },
+    });
+    // metralla
+    this.impact(pos, 0x555049, 14);
+    this.impact(pos, 0xffb347, 8);
+  }
+
   // número de daño flotante (amarillo normal, rojo si es headshot)
   popup(pos, text, isCrit = false) {
     const canvas = document.createElement('canvas');

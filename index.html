@@ -84,6 +84,15 @@
     #score { position: absolute; left: 24px; top: 20px; font-size: 19px; }
     #score .k { color: #ffe27a; }
     #score .d { color: #ff9a8a; margin-left: 14px; }
+    #money { position: absolute; left: 24px; top: 48px; font-size: 22px; color: #8ce78c; }
+
+    /* ranuras de armas y granadas */
+    #weapon-slots .slot { margin-left: 10px; white-space: nowrap; }
+    #weapon-slots .slot:first-child { margin-left: 0; }
+    #weapon-slots .slot.current { color: #ffe27a; }
+    #weapon-slots .slot.locked { color: #999; }
+    #weapon-slots .slot.affordable { color: #8ce78c; }
+    #nades { font-size: 13px; color: #ffd7a8; margin-top: 4px; font-style: italic; font-weight: 700; }
 
     /* killfeed */
     #killfeed { position: absolute; right: 20px; top: 18px; text-align: right; }
@@ -212,6 +221,7 @@
     </div>
 
     <div id="score" class="hud-text"><span class="k">☠ 0</span><span class="d">✖ 0</span></div>
+    <div id="money" class="hud-text">$ 0</div>
     <div id="killfeed"></div>
     <div id="announce" class="hud-text"></div>
 
@@ -231,7 +241,8 @@
     <div id="ammo-wrap" class="hud-text">
       <div id="ammo">30 <span class="reserve">/ 120</span></div>
       <div id="weapon-name">RIFLE DE ASALTO</div>
-      <div id="weapon-slots">[1] Rifle &nbsp; [2] Subfusil &nbsp; [3] Francotirador &nbsp; [R] Recargar</div>
+      <div id="weapon-slots"></div>
+      <div id="nades">🧨 [G] Granadas: 2</div>
       <div id="reload-hint">RECARGANDO...</div>
     </div>
     <div id="fps">60</div>
@@ -245,8 +256,8 @@
     <button id="play-btn">JUGAR</button>
     <div class="controls">
       <b>WASD</b> moverse &nbsp;·&nbsp; <b>ESPACIO</b> saltar (mantén para bunny-hop) &nbsp;·&nbsp; <b>SHIFT</b> deslizarse<br/>
-      <b>CLIC IZQ</b> disparar &nbsp;·&nbsp; <b>CLIC DER</b> apuntar &nbsp;·&nbsp; <b>R</b> recargar &nbsp;·&nbsp; <b>1/2/3</b> cambiar arma<br/>
-      <b>TAB</b> marcador &nbsp;·&nbsp; <b>ESC</b> volver al menú
+      <b>CLIC IZQ</b> disparar &nbsp;·&nbsp; <b>CLIC DER</b> apuntar &nbsp;·&nbsp; <b>R</b> recargar &nbsp;·&nbsp; <b>1-5</b> armas &nbsp;·&nbsp; <b>G</b> granada<br/>
+      <b>TAB</b> marcador &nbsp;·&nbsp; <b>ESC</b> menú &nbsp;·&nbsp; empiezas con pistola: <b>cada baja da $100</b> para comprar armas
     </div>
     <div id="menu-stats"></div>
   </div>

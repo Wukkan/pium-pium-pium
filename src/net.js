@@ -94,4 +94,12 @@ export class Net {
   sendHit(kind, id, dmg, isHead) {
     this._send({ t: 'hit', kind, id, d: dmg, h: isHead ? 1 : 0 });
   }
+
+  sendNade(pos, vel) {
+    this._send({
+      t: 'nade',
+      p: [+pos.x.toFixed(2), +pos.y.toFixed(2), +pos.z.toFixed(2)],
+      v: [+vel.x.toFixed(2), +vel.y.toFixed(2), +vel.z.toFixed(2)],
+    });
+  }
 }

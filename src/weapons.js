@@ -6,25 +6,40 @@ import * as THREE from 'three';
 // ---------------------------------------------------------------------------
 
 export const WEAPON_DEFS = {
-  ar: {
-    name: 'RIFLE DE ASALTO', kind: 'ar',
-    damage: 24, headMult: 2, rpm: 600, mag: 30, reserve: 120,
-    reloadTime: 1.5, spread: 0.014, adsSpread: 0.005, moveSpread: 0.02,
-    recoil: 0.014, auto: true, zoom: 1.35, scope: false,
+  pistol: {
+    name: 'PISTOLA', kind: 'pistol',
+    damage: 18, headMult: 2, rpm: 320, mag: 12, reserve: 72,
+    reloadTime: 1.1, spread: 0.016, adsSpread: 0.007, moveSpread: 0.018,
+    recoil: 0.011, auto: false, zoom: 1.2, scope: false, price: 0,
+  },
+  shotgun: {
+    name: 'ESCOPETA', kind: 'shotgun',
+    damage: 9, pellets: 8, headMult: 1.5, rpm: 78, mag: 6, reserve: 30,
+    reloadTime: 2.0, spread: 0.045, adsSpread: 0.035, moveSpread: 0.02,
+    recoil: 0.05, auto: false, zoom: 1.15, scope: false, price: 300,
   },
   smg: {
     name: 'SUBFUSIL', kind: 'smg',
     damage: 15, headMult: 2, rpm: 950, mag: 36, reserve: 144,
     reloadTime: 1.25, spread: 0.02, adsSpread: 0.011, moveSpread: 0.022,
-    recoil: 0.009, auto: true, zoom: 1.2, scope: false,
+    recoil: 0.009, auto: true, zoom: 1.2, scope: false, price: 500,
+  },
+  ar: {
+    name: 'RIFLE DE ASALTO', kind: 'ar',
+    damage: 24, headMult: 2, rpm: 600, mag: 30, reserve: 120,
+    reloadTime: 1.5, spread: 0.014, adsSpread: 0.005, moveSpread: 0.02,
+    recoil: 0.014, auto: true, zoom: 1.35, scope: false, price: 800,
   },
   sniper: {
     name: 'FRANCOTIRADOR', kind: 'sniper',
     damage: 105, headMult: 1.5, rpm: 42, mag: 5, reserve: 25,
     reloadTime: 2.2, spread: 0.07, adsSpread: 0.0006, moveSpread: 0.04,
-    recoil: 0.06, auto: false, zoom: 3.6, scope: true,
+    recoil: 0.06, auto: false, zoom: 3.6, scope: true, price: 1200,
   },
 };
+
+// orden de las ranuras [1]..[5]
+export const WEAPON_ORDER = ['pistol', 'shotgun', 'smg', 'ar', 'sniper'];
 
 const BASE_FOV = 78;
 
@@ -42,7 +57,18 @@ function buildGunModel(kind) {
     return m;
   };
 
-  if (kind === 'ar') {
+  if (kind === 'pistol') {
+    part(dark, 0.075, 0.11, 0.3, 0, 0.02, -0.08);     // corredera
+    part(mid, 0.07, 0.14, 0.11, 0, -0.09, 0.05);      // empuñadura
+    part(dark, 0.045, 0.045, 0.12, 0, 0.03, -0.26);   // cañón
+    part(accent, 0.02, 0.03, 0.04, 0, 0.09, -0.2);    // mira
+  } else if (kind === 'shotgun') {
+    part(dark, 0.07, 0.09, 0.7, 0, 0.01, -0.25);      // cañón largo
+    part(wood, 0.075, 0.09, 0.22, 0, -0.06, -0.32);   // bomba (pump)
+    part(wood, 0.08, 0.12, 0.3, 0, -0.03, 0.25);      // culata
+    part(mid, 0.085, 0.12, 0.2, 0, 0, 0.02);          // recámara
+    part(accent, 0.03, 0.03, 0.06, 0, 0.07, -0.55);   // mira
+  } else if (kind === 'ar') {
     part(mid, 0.09, 0.13, 0.62, 0, 0, -0.1);          // cuerpo
     part(dark, 0.055, 0.055, 0.45, 0, 0.01, -0.55);   // cañón
     part(dark, 0.07, 0.16, 0.13, 0, -0.13, 0.02);     // cargador
@@ -71,7 +97,8 @@ function buildGunModel(kind) {
   });
   const flash = new THREE.Sprite(flashMat);
   flash.scale.set(0.3, 0.3, 1);
-  flash.position.set(0, 0.01, kind === 'sniper' ? -1.0 : kind === 'ar' ? -0.8 : -0.5);
+  flash.position.set(0, 0.01,
+    kind === 'sniper' ? -1.0 : kind === 'ar' ? -0.8 : kind === 'shotgun' ? -0.7 : kind === 'pistol' ? -0.35 : -0.5);
   flash.visible = false;
   g.add(flash);
   g.userData.flash = flash;
@@ -94,12 +121,17 @@ export class WeaponSystem {
     this.onShot = null;               // aviso de cada disparo (para la red)
 
     // estado por arma (munición persistente al cambiar)
-    this.slots = ['ar', 'smg', 'sniper'];
+    this.defs = WEAPON_DEFS;
+    this.slots = [...WEAPON_ORDER];
     this.state = {};
     for (const key of this.slots) {
       this.state[key] = { ammo: WEAPON_DEFS[key].mag, reserve: WEAPON_DEFS[key].reserve };
     }
-    this.current = 'ar';
+    this.current = 'pistol';
+
+    // economía: empiezas solo con la pistola y compras el resto con bajas
+    this.money = 0;
+    this.owned = { pistol: true };
 
     this.triggerDown = false;
     this.ads = false;
@@ -135,23 +167,48 @@ export class WeaponSystem {
     addEventListener('keydown', (e) => {
       if (!document.pointerLockElement) return;
       if (e.code === 'KeyR') this.reload();
-      if (e.code === 'Digit1') this.switchTo('ar');
-      if (e.code === 'Digit2') this.switchTo('smg');
-      if (e.code === 'Digit3') this.switchTo('sniper');
+      const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].indexOf(e.code);
+      if (idx >= 0 && idx < this.slots.length) this.switchTo(this.slots[idx]);
     });
   }
 
   get def() { return WEAPON_DEFS[this.current]; }
   get ammo() { return this.state[this.current]; }
 
+  // añade dinero (por bajas); actualiza el HUD
+  addMoney(n) {
+    this.money += n;
+    this.hud.updateMoney(this.money);
+    this.hud.updateSlots(this);
+  }
+
+  // intenta comprar un arma no poseída
+  tryBuy(key) {
+    const def = WEAPON_DEFS[key];
+    if (this.money < def.price) {
+      this.hud.announce(`🔒 Te faltan $${def.price - this.money} para la ${def.name}`);
+      this.audio.dry();
+      return;
+    }
+    this.money -= def.price;
+    this.owned[key] = true;
+    this.audio.buy();
+    this.hud.announce(`✔ ${def.name} desbloqueada`);
+    this.hud.updateMoney(this.money);
+    this.hud.updateSlots(this);
+    this.switchTo(key);
+  }
+
   switchTo(key) {
     if (key === this.current || this.player.dead) return;
+    if (!this.owned[key]) { this.tryBuy(key); return; }
     this.models[this.current].visible = false;
     this.current = key;
     this.models[key].visible = true;
     this.reloading = false;
     this.kickPos = 0.12; // pequeña animación de sacar el arma
     this.hud.updateAmmo(this);
+    this.hud.updateSlots(this);
     this.hud.setReloading(false);
   }
 
@@ -199,39 +256,53 @@ export class WeaponSystem {
     this.lastShot = now;
     st.ammo--;
 
-    // dirección con dispersión
-    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-    const spread = this.currentSpread();
-    dir.x += (Math.random() - 0.5) * 2 * spread;
-    dir.y += (Math.random() - 0.5) * 2 * spread;
-    dir.z += (Math.random() - 0.5) * 2 * spread;
-    dir.normalize();
-
     const origin = new THREE.Vector3();
     this.camera.getWorldPosition(origin);
-    this.raycaster.set(origin, dir);
-    this.raycaster.far = 300;
+    const spread = this.currentSpread();
+    const targets = this.getTargets();
+    const pellets = def.pellets || 1;
 
-    const hits = this.raycaster.intersectObjects(this.getTargets(), false);
-    let end = origin.clone().addScaledVector(dir, 300);
-    if (hits.length > 0) {
-      const hit = hits[0];
-      end = hit.point;
-      const data = hit.object.userData;
-      if (data.bot || data.net) {
-        const isHead = data.part === 'head';
-        const dmg = Math.round(def.damage * (isHead ? def.headMult : 1));
-        this.onTargetHit(data, dmg, isHead, hit.point);
-      } else {
-        this.effects.impact(hit.point);
-      }
-    }
-
-    // trazadora desde la boca del cañón
     const muzzle = new THREE.Vector3();
     this.models[this.current].userData.flash.getWorldPosition(muzzle);
-    this.effects.tracer(muzzle, end);
-    if (this.onShot) this.onShot(muzzle, end, def.kind);
+
+    // la escopeta dispara varios perdigones: el daño se agrega por objetivo
+    const acc = new Map();
+    let firstEnd = null;
+
+    for (let i = 0; i < pellets; i++) {
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      dir.x += (Math.random() - 0.5) * 2 * spread;
+      dir.y += (Math.random() - 0.5) * 2 * spread;
+      dir.z += (Math.random() - 0.5) * 2 * spread;
+      dir.normalize();
+      this.raycaster.set(origin, dir);
+      this.raycaster.far = 300;
+
+      const hits = this.raycaster.intersectObjects(targets, false);
+      let end = origin.clone().addScaledVector(dir, 300);
+      if (hits.length > 0) {
+        const hit = hits[0];
+        end = hit.point;
+        const data = hit.object.userData;
+        if (data.bot || data.net) {
+          const isHead = data.part === 'head';
+          const key = data.bot || `${data.net.kind}:${data.net.id}`;
+          const entry = acc.get(key) || { data, dmg: 0, head: false, point: hit.point };
+          entry.dmg += Math.round(def.damage * (isHead ? def.headMult : 1));
+          entry.head = entry.head || isHead;
+          acc.set(key, entry);
+        } else {
+          this.effects.impact(hit.point, 0xd8d0b8, pellets > 1 ? 2 : 5);
+        }
+      }
+      this.effects.tracer(muzzle, end);
+      if (!firstEnd) firstEnd = end;
+    }
+
+    for (const entry of acc.values()) {
+      this.onTargetHit(entry.data, entry.dmg, entry.head, entry.point);
+    }
+    if (this.onShot) this.onShot(muzzle, firstEnd, def.kind);
 
     // destello
     const flash = this.models[this.current].userData.flash;

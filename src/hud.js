@@ -4,6 +4,10 @@
 
 const $ = (id) => document.getElementById(id);
 
+const SLOT_NAMES = {
+  pistol: 'Pistola', shotgun: 'Escopeta', smg: 'Subfusil', ar: 'Rifle', sniper: 'Franco',
+};
+
 export class HUD {
   constructor() {
     this.el = {
@@ -61,6 +65,37 @@ export class HUD {
 
   updateScore(kills, deaths) {
     this.el.score.innerHTML = `<span class="k">☠ ${kills}</span><span class="d">✖ ${deaths}</span>`;
+  }
+
+  updateMoney(n) {
+    document.getElementById('money').textContent = `$ ${n}`;
+  }
+
+  updateGrenades(n) {
+    document.getElementById('nades').textContent = `🧨 [G] Granadas: ${n}`;
+  }
+
+  // ranuras [1]..[5] con precio y candado para las no compradas
+  updateSlots(weapons) {
+    const wrap = document.getElementById('weapon-slots');
+    wrap.textContent = '';
+    weapons.slots.forEach((key, i) => {
+      const def = weapons.defs[key];
+      const span = document.createElement('span');
+      span.className = 'slot';
+      if (key === weapons.current) span.classList.add('current');
+      if (!weapons.owned[key]) {
+        span.classList.add(weapons.money >= def.price ? 'affordable' : 'locked');
+        span.textContent = `[${i + 1}] ${SLOT_NAMES[key]} $${def.price}${weapons.money >= def.price ? '' : ' 🔒'}`;
+      } else {
+        span.textContent = `[${i + 1}] ${SLOT_NAMES[key]}`;
+      }
+      wrap.append(span);
+    });
+    const extra = document.createElement('span');
+    extra.className = 'slot';
+    extra.textContent = '[R] Recargar';
+    wrap.append(extra);
   }
 
   hitmarker(kill = false) {

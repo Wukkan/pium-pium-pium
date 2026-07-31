@@ -32,7 +32,13 @@ export class AudioSys {
   async _loadSamples() {
     if (this.samples) return;
     this.samples = {};
-    const files = { ar: 'sounds/ar.wav', smg: 'sounds/smg.wav', sniper: 'sounds/sniper.wav' };
+    const files = {
+      ar: 'sounds/ar.wav',
+      smg: 'sounds/smg.wav',
+      sniper: 'sounds/sniper.wav',
+      shotgun: 'sounds/shotgun.wav',
+      pistol: 'sounds/smg.wav', // misma CZ-52 real; el subfusil la acelera
+    };
     for (const [kind, url] of Object.entries(files)) {
       try {
         const res = await fetch(url);
@@ -80,9 +86,10 @@ export class AudioSys {
     if (sample) {
       const src = this.ctx.createBufferSource();
       src.buffer = sample;
-      src.playbackRate.value = 0.94 + Math.random() * 0.12;
+      const rate = kind === 'smg' ? 1.22 : 0.94; // el subfusil acelera la CZ-52
+      src.playbackRate.value = rate + Math.random() * 0.12;
       const g = this.ctx.createGain();
-      const base = kind === 'sniper' ? 0.95 : kind === 'smg' ? 0.5 : 0.65;
+      const base = kind === 'sniper' ? 0.95 : kind === 'shotgun' ? 0.85 : kind === 'smg' ? 0.5 : kind === 'pistol' ? 0.55 : 0.65;
       g.gain.value = base * volume;
       src.connect(g).connect(this.master);
       src.start();
@@ -144,6 +151,32 @@ export class AudioSys {
     this._tone(660, 660, 0.08, 0.25, 'sine');
     setTimeout(() => this.ctx && this._tone(880, 880, 0.08, 0.25, 'sine'), 90);
     setTimeout(() => this.ctx && this._tone(1100, 1100, 0.12, 0.25, 'sine'), 180);
+  }
+
+  buy() {
+    if (!this.ctx) return;
+    this._tone(520, 520, 0.05, 0.2);
+    setTimeout(() => this.ctx && this._tone(780, 780, 0.05, 0.22), 70);
+    setTimeout(() => this.ctx && this._tone(1180, 1180, 0.14, 0.24, 'sine'), 140);
+  }
+
+  streak(level) {
+    if (!this.ctx) return;
+    const base = 440 + level * 60;
+    [0, 90, 180, 270].forEach((delay, i) => {
+      setTimeout(() => this.ctx && this._tone(base * (1 + i * 0.25), base * (1 + i * 0.25), 0.12, 0.22, 'square'), delay);
+    });
+  }
+
+  boom(volume = 1) {
+    if (!this.ctx) return;
+    this._noise(0.7, 180, 0.5, 0.9 * volume, 0.55);
+    this._tone(90, 30, 0.5, 0.6 * volume, 'sine');
+  }
+
+  nadeThrow() {
+    if (!this.ctx) return;
+    this._noise(0.06, 900, 1, 0.12, 0.05);
   }
 
   // volumen según distancia para disparos de bots
