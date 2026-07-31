@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { buildMapBoxes, buildColliders, PLAYER_SPAWNS, TOTAL_SLOTS, MAX_BOTS, BOT_NAMES, BOT_COLORS } from '../src/shared/mapdata.js';
 import { ServerBot } from './botai.js';
+import * as ranking from './ranking.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — servidor: sirve el cliente por HTTP y lleva la partida por
@@ -33,6 +34,13 @@ const server = http.createServer((req, res) => {
   if (urlPath === '/salud') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
+    return;
+  }
+  if (urlPath === '/ranking') {
+    ranking.top(20).then((rows) => {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(rows));
+    });
     return;
   }
   // solo en desarrollo local: guardar capturas del canvas en _shots/
@@ -125,10 +133,18 @@ function rebalanceBots() {
   }
 }
 
+function creditKill(killer) {
+  killer.kills++;
+  killer.curStreak = (killer.curStreak || 0) + 1;
+  ranking.addKill(killer.name, killer.curStreak);
+}
+
 function killPlayer(victim, killerName, isHead) {
   victim.alive = false;
   victim.hp = 0;
   victim.deaths++;
+  victim.curStreak = 0;
+  ranking.addDeath(victim.name);
   spawnKit(victim.pos);
   broadcast({ t: 'kill', vn: victim.name, vid: victim.id, kn: killerName, h: !!isHead });
   setTimeout(() => {
@@ -147,7 +163,7 @@ function damagePlayer(victim, dmg, sourceName, isHead, killerPlayer = null) {
   victim.lastDmg = now();
   send(victim, { t: 'ouch', d: dmg, hp: Math.max(0, victim.hp), by: sourceName });
   if (victim.hp <= 0) {
-    if (killerPlayer) killerPlayer.kills++;
+    if (killerPlayer) creditKill(killerPlayer);
     killPlayer(victim, sourceName, isHead);
   }
 }
@@ -203,7 +219,7 @@ wss.on('connection', (ws) => {
         if (bot && !bot.dead) {
           const died = bot.takeDamage(dmg, me.pos);
           if (died) {
-            me.kills++;
+            creditKill(me);
             spawnKit(bot.pos);
             broadcast({ t: 'kill', vn: bot.name, vid: null, kn: me.name, h: !!m.h });
           }

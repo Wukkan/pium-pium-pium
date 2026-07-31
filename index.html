@@ -138,7 +138,9 @@
     #scores th { color: #8fa4c8; font-size: 11px; text-transform: uppercase; text-align: left; padding: 3px 8px; }
     #scores td { padding: 4px 8px; border-top: 1px solid rgba(255,255,255,.07); }
     #scores tr.me td { color: #ffd24d; font-weight: 700; }
-    #scores td:nth-child(2), #scores td:nth-child(3), #scores th:nth-child(2), #scores th:nth-child(3) { text-align: center; }
+    #scores td:nth-child(n+2), #scores th:nth-child(n+2) { text-align: center; }
+    #scores .world-title { margin-top: 16px; color: #8fd0ff; }
+    #scores .world-empty { color: #7f92b4; text-align: center; font-style: italic; }
 
     /* estado de conexión y nombre en el menú */
     #net-status {
@@ -236,6 +238,11 @@
         <thead><tr><th>Jugador</th><th>☠</th><th>✖</th></tr></thead>
         <tbody id="scores-body"></tbody>
       </table>
+      <h3 class="world-title">🌍 TOP MUNDIAL</h3>
+      <table>
+        <thead><tr><th>Jugador</th><th>☠ total</th><th>✖</th><th>🔥 racha</th></tr></thead>
+        <tbody id="world-body"><tr><td colspan="4" class="world-empty">cargando...</td></tr></tbody>
+      </table>
     </div>
 
     <div id="ammo-wrap" class="hud-text">
@@ -250,7 +257,7 @@
 
   <div id="menu">
     <h1>PIUM PIUM <span class="io">PIUM</span></h1>
-    <div class="subtitle">shooter en primera persona — hecho con Three.js</div>
+    <div class="subtitle">shooter multijugador en primera persona</div>
     <div id="net-status" class="offline">conectando...</div>
     <input id="name-input" type="text" maxlength="14" placeholder="Tu nombre" autocomplete="off" spellcheck="false" />
     <button id="play-btn">JUGAR</button>

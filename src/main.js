@@ -345,10 +345,22 @@ document.addEventListener('pointerlockchange', () => {
   }
 });
 
-// marcador con TAB
+// marcador con TAB (partida actual + top mundial)
+let worldFetchedAt = -99999;
+
+function refreshWorldRanking() {
+  if (performance.now() - worldFetchedAt < 10000) return;
+  worldFetchedAt = performance.now();
+  fetch('/ranking')
+    .then((r) => (r.ok ? r.json() : []))
+    .then((rows) => hud.renderWorld(rows, net.name))
+    .catch(() => hud.renderWorld([], null));
+}
+
 addEventListener('keydown', (e) => {
   if (e.code === 'Tab' && document.pointerLockElement) {
     e.preventDefault();
+    refreshWorldRanking();
     const rows = [];
     if (online && lastSnap) {
       for (const p of lastSnap.pl) {

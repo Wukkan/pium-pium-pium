@@ -156,6 +156,33 @@ export class HUD {
     document.getElementById('scores').style.display = show ? 'block' : 'none';
   }
 
+  // ranking mundial: rows de /ranking [{name, kills, deaths, best_streak}]
+  renderWorld(rows, myName) {
+    const tbody = document.getElementById('world-body');
+    tbody.textContent = '';
+    if (!rows || rows.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.className = 'world-empty';
+      td.textContent = 'sin datos todavía — ¡haz historia!';
+      tr.append(td);
+      tbody.append(tr);
+      return;
+    }
+    const medals = ['🥇', '🥈', '🥉'];
+    rows.slice(0, 10).forEach((r, i) => {
+      const tr = document.createElement('tr');
+      if (myName && r.name === myName) tr.className = 'me';
+      for (const v of [`${medals[i] || `${i + 1}.`} ${r.name}`, r.kills, r.deaths, r.best_streak]) {
+        const td = document.createElement('td');
+        td.textContent = v;
+        tr.append(td);
+      }
+      tbody.append(tr);
+    });
+  }
+
   // rows: [{name, kills, deaths, isMe, isBot, alive}]
   renderScores(rows) {
     const tbody = document.getElementById('scores-body');
