@@ -51,6 +51,12 @@ export class HUD {
 
   setReloading(on) {
     this.el.reloadHint.style.display = on ? 'block' : 'none';
+    document.getElementById('reload-indicator').style.display = on ? 'block' : 'none';
+    if (!on) this.setReloadProgress(0);
+  }
+
+  setReloadProgress(p) {
+    document.getElementById('reload-bar').style.width = `${Math.round(p * 100)}%`;
   }
 
   updateScore(kills, deaths) {

@@ -8,6 +8,7 @@ import { AudioSys } from './audio.js';
 import { HUD } from './hud.js';
 import { Net } from './net.js';
 import { Remotes } from './remotes.js';
+import { KitManager } from './kits.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — réplica de krunker.io, ahora multijugador.
@@ -61,6 +62,12 @@ const effects = new Effects(scene);
 const player = new Player(camera, world);
 const weapons = new WeaponSystem(camera, scene, player, effects, audio, hud);
 const net = new Net();
+const kitsMgr = new KitManager(scene);
+
+function onHealed() {
+  audio.medkit();
+  hud.announce('+25 PV ❤');
+}
 
 let remotes = null;      // modo online
 let botsLocal = null;    // modo offline
@@ -89,10 +96,12 @@ fetch('/salud').then((r) => {
 function setupOffline() {
   botsLocal = new BotManager(scene, world, player, effects, audio, 5);
   botsLocal.ctx.onKill = (killer, victim) => hud.killfeed(killer, victim, false);
+  botsLocal.ctx.onBotDeath = (bot) => kitsMgr.spawnLocal(bot.pos);
   weapons.getTargets = () => [...world.occluders, ...botsLocal.getHitMeshes()];
   weapons.onTargetHit = (data, dmg, isHead, point) => {
     if (!data.bot) return;
     const killed = data.bot.takeDamage(dmg, player.pos);
+    if (killed) kitsMgr.spawnLocal(data.bot.pos);
     effects.popup(point, String(dmg), isHead);
     effects.impact(point, 0xcc4444, 4);
     hud.hitmarker(killed);
@@ -107,6 +116,7 @@ function setupOffline() {
   };
   player.onDeath = (killerName) => {
     deaths++;
+    kitsMgr.spawnLocal({ x: player.pos.x, y: player.pos.y, z: player.pos.z });
     hud.updateScore(kills, deaths);
     hud.killfeed(killerName, 'Tú', false);
     hud.showDeath(true, killerName);
@@ -144,6 +154,7 @@ function setupOnline() {
   net.on('snap', (m) => {
     lastSnap = m;
     remotes.applySnapshot(m, net.id);
+    kitsMgr.sync(m.kits || []);
     const me = m.pl.find((p) => p.id === net.id);
     if (me) {
       kills = me.k; deaths = me.d;
@@ -191,6 +202,11 @@ function setupOnline() {
     hud.updateHealth(player.health, player.maxHealth);
     state = document.pointerLockElement ? 'playing' : 'menu';
     if (state === 'menu') hud.showMenu(true);
+  });
+
+  net.on('med', (m) => {
+    player.health = m.hp;
+    onHealed();
   });
 
   net.on('aviso', (m) => hud.info(String(m.txt).slice(0, 40)));
@@ -314,10 +330,12 @@ function tick(now) {
     player.update(dt, inputEnabled);
     weapons.update(dt, inputEnabled);
     if (botsLocal) botsLocal.update(dt);
+    if (botsLocal) kitsMgr.offlineUpdate(player, botsLocal, onHealed);
   }
   // el mundo online sigue vivo aunque estés en el menú
   if (remotes) remotes.update(dt);
   if (online && joined) net.tickState(dt, player);
+  kitsMgr.update(dt);
   effects.update(dt);
 
   hud.update(dt);

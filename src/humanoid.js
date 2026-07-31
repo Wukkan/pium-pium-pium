@@ -17,7 +17,8 @@ export function makeNameSprite(name, color = '#ffffff') {
   ctx.fillStyle = color;
   ctx.fillText(name, 128, 24);
   const tex = new THREE.CanvasTexture(canvas);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  // depthTest activado: las paredes ocultan el nombre (nada de wallhack)
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true }));
   sprite.scale.set(1.9, 0.36, 1);
   return sprite;
 }

@@ -8,6 +8,7 @@ export class AudioSys {
     this.ctx = null;
     this.master = null;
     this.noiseBuffer = null;
+    this.samples = null; // grabaciones reales (CC0); si fallan, sintetizado
   }
 
   ensure() {
@@ -24,6 +25,22 @@ export class AudioSys {
     this.noiseBuffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const data = this.noiseBuffer.getChannelData(0);
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+
+    this._loadSamples();
+  }
+
+  async _loadSamples() {
+    if (this.samples) return;
+    this.samples = {};
+    const files = { ar: 'sounds/ar.wav', smg: 'sounds/smg.wav', sniper: 'sounds/sniper.wav' };
+    for (const [kind, url] of Object.entries(files)) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const buf = await res.arrayBuffer();
+        this.samples[kind] = await this.ctx.decodeAudioData(buf);
+      } catch { /* se queda el sonido sintetizado */ }
+    }
   }
 
   _noise(duration, filterFreq, filterQ, gain, decay) {
@@ -58,6 +75,19 @@ export class AudioSys {
 
   shot(kind = 'ar', volume = 1) {
     if (!this.ctx) return;
+    // grabación real si está cargada (con variación de tono para no sonar robótico)
+    const sample = this.samples && this.samples[kind];
+    if (sample) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = sample;
+      src.playbackRate.value = 0.94 + Math.random() * 0.12;
+      const g = this.ctx.createGain();
+      const base = kind === 'sniper' ? 0.95 : kind === 'smg' ? 0.5 : 0.65;
+      g.gain.value = base * volume;
+      src.connect(g).connect(this.master);
+      src.start();
+      return;
+    }
     if (kind === 'sniper') {
       this._noise(0.4, 400, 0.7, 0.9 * volume, 0.35);
       this._tone(160, 40, 0.3, 0.5 * volume, 'triangle');
@@ -107,6 +137,13 @@ export class AudioSys {
   dry() {
     if (!this.ctx) return;
     this._tone(900, 700, 0.04, 0.15);
+  }
+
+  medkit() {
+    if (!this.ctx) return;
+    this._tone(660, 660, 0.08, 0.25, 'sine');
+    setTimeout(() => this.ctx && this._tone(880, 880, 0.08, 0.25, 'sine'), 90);
+    setTimeout(() => this.ctx && this._tone(1100, 1100, 0.12, 0.25, 'sine'), 180);
   }
 
   // volumen según distancia para disparos de bots

@@ -216,7 +216,10 @@ class Bot {
         target.damage(7 + Math.floor(Math.random() * 6), this.name);
       } else {
         const died = target.takeDamage(7 + Math.floor(Math.random() * 6), this.pos);
-        if (died && ctx.onKill) ctx.onKill(this.name, target.name);
+        if (died) {
+          if (ctx.onKill) ctx.onKill(this.name, target.name);
+          if (ctx.onBotDeath) ctx.onBotDeath(target);
+        }
       }
     } else {
       end = to.clone().add(new THREE.Vector3(
@@ -238,7 +241,8 @@ export class BotManager {
       effects,
       audio,
       bots: this.bots,
-      onKill: null, // (nombreAsesino, nombreVictima) — lo asigna main.js
+      onKill: null,     // (nombreAsesino, nombreVictima) — lo asigna main.js
+      onBotDeath: null, // (bot) — para soltar kits de vida
       colliders: world.colliders,
       occluders: world.occluders,
       waypoints: world.waypoints,

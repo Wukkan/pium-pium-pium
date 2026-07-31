@@ -86,7 +86,7 @@ export function buildMapBoxes() {
     [-12, -6, 1], [-12, -7.7, 1],
     [8, -18, 1], [9.7, -18, 1], [8.85, -18, 2],
     [-8, 18, 1], [-18, 2, 1], [-18, 3.7, 1],
-    [18, 14, 1], [30, 5, 1], [30, 6.7, 1], [30, 5.85, 2],
+    [18, 14, 1], [30, -5, 1], [30, -6.7, 1], [30, -5.85, 2],
     [-30, -8, 1], [-5, -22, 1], [-6.7, -22, 1],
     [22, -8, 1], [-15, -15, 1], [15, 22, 1], [16.7, 22, 1],
   ];
@@ -106,6 +106,15 @@ export function buildMapBoxes() {
   // postes decorativos
   box(16, 2, 16, 0.5, 4, 0.5, C.accent);
   box(-16, 2, -16, 0.5, 4, 0.5, C.accent);
+
+  // --- torre de vigilancia (muro este) ---
+  box(35, 3.25, 6, 1.6, 6.5, 1.6, C.accent);        // columna
+  box(35, 6.25, 6, 5.5, 0.5, 6, C.platform);        // plataforma (suelo a 6.5)
+  box(35, 6.9, 8.8, 5.5, 0.8, 0.4, C.barrier);      // parapeto sur
+  box(35, 6.9, 3.2, 5.5, 0.8, 0.4, C.barrier);      // parapeto norte
+  box(37.55, 6.9, 6, 0.4, 0.8, 6, C.barrier);       // parapeto este
+  box(35, 8.9, 6, 0.3, 3, 0.3, C.roof);             // mástil
+  stairs(24, 6, 1, 0, 3, 6.5, C.platform);          // escalera de subida
 
   return boxes;
 }
@@ -146,6 +155,7 @@ export const WAYPOINTS = [
   { x: -30, y: 0.1, z: -30 }, { x: 30, y: 0.1, z: -30 },
   { x: -30, y: 0.1, z: 30 }, { x: 10, y: 0.1, z: -25 },
   { x: -10, y: 0.1, z: 25 }, { x: 25, y: 2.6, z: 25 },
+  { x: 35, y: 6.6, z: 6 }, // torre de vigilancia
 ];
 
 export const BOT_NAMES = ['Sgt_Bloq', 'xX_Pixel_Xx', 'NoScopez', 'Guest_4821', 'KritzKrieg', 'ElTrikito', 'Guest_1337', 'SlideGod', 'CampeonDeLag', 'TurboAbuela'];

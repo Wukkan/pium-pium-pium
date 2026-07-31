@@ -41,6 +41,21 @@
     #hitmarker .hm4 { transform: translate(-16px, -8px) rotate(45deg); }
     #hitmarker.kill .hm { background: #ff4040; }
 
+    /* indicador de recarga bajo la mira */
+    #reload-indicator {
+      display: none;
+      position: absolute; left: 50%; top: 57%; transform: translateX(-50%);
+      text-align: center;
+    }
+    #reload-text { font-size: 16px; color: #ffd24d; letter-spacing: 1px; animation: reload-blink 0.6s infinite; }
+    @keyframes reload-blink { 50% { opacity: 0.45; } }
+    #reload-bar-bg {
+      width: 130px; height: 7px; margin: 5px auto 0;
+      background: rgba(0,0,0,.5); border-radius: 4px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,.3); transform: skewX(-12deg);
+    }
+    #reload-bar { height: 100%; width: 0%; background: linear-gradient(#ffe27a, #f0a81b); }
+
     /* damage vignette */
     #damage-vignette {
       position: absolute; inset: 0; opacity: 0;
@@ -189,6 +204,11 @@
     </div>
     <div id="hitmarker">
       <div class="hm hm1"></div><div class="hm hm2"></div><div class="hm hm3"></div><div class="hm hm4"></div>
+    </div>
+
+    <div id="reload-indicator">
+      <div id="reload-text" class="hud-text">RECARGANDO</div>
+      <div id="reload-bar-bg"><div id="reload-bar"></div></div>
     </div>
 
     <div id="score" class="hud-text"><span class="k">☠ 0</span><span class="d">✖ 0</span></div>

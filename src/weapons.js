@@ -292,6 +292,7 @@ export class WeaponSystem {
     if (this.reloading) {
       const prog = Math.min(1, Math.max(0, 1 - (this.reloadEnd - now) / def.reloadTime));
       reloadTilt = Math.sin(prog * Math.PI) * (0.85 + Math.sin(prog * Math.PI * 3) * 0.08);
+      this.hud.setReloadProgress(prog);
     }
 
     // posición ADS: centrar el arma

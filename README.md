@@ -38,6 +38,10 @@ y abre **http://localhost:5173**. Escribe tu nombre y pulsa **JUGAR**.
 | TAB | Marcador |
 | ESC | Menú |
 
+## Créditos
+
+- Sonidos de disparo: ["Gunshot Sounds" de Tabasco](https://opengameart.org/content/gunshot-sounds), grabaciones reales bajo licencia CC0 (dominio público).
+
 ## Arquitectura
 
 - `server/server.js` — HTTP estático + WebSocket. Estado autoritativo: vida, muertes, respawns, marcador y nº de bots.

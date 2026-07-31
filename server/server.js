@@ -23,6 +23,9 @@ const MIME = {
   '.json': 'application/json',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
 };
 
 const server = http.createServer((req, res) => {
@@ -66,8 +69,15 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 const colliders = buildColliders(buildMapBoxes());
 const players = new Map(); // id -> jugador
 const bots = [];
+const kits = []; // kits de vida: {id, x, y, z, expireAt}
 let nextId = 1;
 let botSerial = 0;
+let kitSerial = 0;
+
+function spawnKit(pos) {
+  kits.push({ id: 'k' + kitSerial++, x: pos.x, y: pos.y, z: pos.z, expireAt: now() + 30 });
+  while (kits.length > 12) kits.shift(); // límite de kits en el suelo
+}
 
 const now = () => Date.now() / 1000;
 
@@ -119,6 +129,7 @@ function killPlayer(victim, killerName, isHead) {
   victim.alive = false;
   victim.hp = 0;
   victim.deaths++;
+  spawnKit(victim.pos);
   broadcast({ t: 'kill', vn: victim.name, vid: victim.id, kn: killerName, h: !!isHead });
   setTimeout(() => {
     if (!players.has(victim.id)) return;
@@ -189,6 +200,7 @@ wss.on('connection', (ws) => {
           const died = bot.takeDamage(dmg, me.pos);
           if (died) {
             me.kills++;
+            spawnKit(bot.pos);
             broadcast({ t: 'kill', vn: bot.name, vid: null, kn: me.name, h: !!m.h });
           }
         }
@@ -225,7 +237,10 @@ const botCtx = {
       damagePlayer(target, dmg, bot.name, false);
     } else {
       const died = target.takeDamage(dmg, bot.pos);
-      if (died) broadcast({ t: 'kill', vn: target.name, vid: null, kn: bot.name, h: false });
+      if (died) {
+        spawnKit(target.pos);
+        broadcast({ t: 'kill', vn: target.name, vid: null, kn: bot.name, h: false });
+      }
     }
   },
 };
@@ -245,6 +260,35 @@ setInterval(() => {
     }
   }
 
+  // kits de vida: caducidad y recogida (+25, solo si falta vida)
+  for (let i = kits.length - 1; i >= 0; i--) {
+    const k = kits[i];
+    if (t > k.expireAt) { kits.splice(i, 1); continue; }
+    let taken = false;
+    for (const p of players.values()) {
+      if (!p.alive || p.hp >= 100) continue;
+      const dx = p.pos.x - k.x, dz = p.pos.z - k.z;
+      if (dx * dx + dz * dz < 1.44 && Math.abs(p.pos.y - k.y) < 1.6) {
+        p.hp = Math.min(100, p.hp + 25);
+        send(p, { t: 'med', hp: Math.round(p.hp) });
+        taken = true;
+        break;
+      }
+    }
+    if (!taken) {
+      for (const b of bots) {
+        if (b.dead || b.hp >= 100) continue;
+        const dx = b.pos.x - k.x, dz = b.pos.z - k.z;
+        if (dx * dx + dz * dz < 1.44 && Math.abs(b.pos.y - k.y) < 1.6) {
+          b.hp = Math.min(100, b.hp + 25);
+          taken = true;
+          break;
+        }
+      }
+    }
+    if (taken) kits.splice(i, 1);
+  }
+
   if (players.size === 0) return; // nadie conectado: no hace falta emitir
 
   const snap = {
@@ -261,6 +305,7 @@ setInterval(() => {
       ry: +b.yaw.toFixed(2), s: +b.speed.toFixed(1),
       hp: Math.round(b.hp), al: b.dead ? 0 : 1, en: b.engaging ? 1 : 0,
     })),
+    kits: kits.map((k) => ({ id: k.id, p: [+k.x.toFixed(2), +k.y.toFixed(2), +k.z.toFixed(2)] })),
   };
   broadcast(snap);
 }, TICK * 1000);
