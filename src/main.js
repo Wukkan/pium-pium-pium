@@ -87,7 +87,8 @@ fetch('/salud').then((r) => {
 
 // --- cableado modo OFFLINE (bots locales) ---
 function setupOffline() {
-  botsLocal = new BotManager(scene, world, player, effects, audio, 9);
+  botsLocal = new BotManager(scene, world, player, effects, audio, 5);
+  botsLocal.ctx.onKill = (killer, victim) => hud.killfeed(killer, victim, false);
   weapons.getTargets = () => [...world.occluders, ...botsLocal.getHitMeshes()];
   weapons.onTargetHit = (data, dmg, isHead, point) => {
     if (!data.bot) return;
@@ -114,6 +115,7 @@ function setupOffline() {
       if (state !== 'dead') return;
       hud.showDeath(false);
       player.spawn(world.playerSpawns[Math.floor(Math.random() * world.playerSpawns.length)]);
+      weapons.refill();
       hud.updateHealth(player.health, player.maxHealth);
       state = document.pointerLockElement ? 'playing' : 'menu';
       if (state === 'menu') hud.showMenu(true);
@@ -184,6 +186,7 @@ function setupOnline() {
 
   net.on('spawn', (m) => {
     player.spawn(new THREE.Vector3(m.p[0], m.p[1], m.p[2]));
+    weapons.refill();
     hud.showDeath(false);
     hud.updateHealth(player.health, player.maxHealth);
     state = document.pointerLockElement ? 'playing' : 'menu';

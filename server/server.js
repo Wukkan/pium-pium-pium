@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { buildMapBoxes, buildColliders, PLAYER_SPAWNS, TOTAL_SLOTS, BOT_NAMES, BOT_COLORS } from '../src/shared/mapdata.js';
+import { buildMapBoxes, buildColliders, PLAYER_SPAWNS, TOTAL_SLOTS, MAX_BOTS, BOT_NAMES, BOT_COLORS } from '../src/shared/mapdata.js';
 import { ServerBot } from './botai.js';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +30,19 @@ const server = http.createServer((req, res) => {
   if (urlPath === '/salud') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
+    return;
+  }
+  // solo en desarrollo local: guardar capturas del canvas en _shots/
+  if (req.method === 'PUT' && !process.env.RENDER && urlPath.startsWith('/_shots/')) {
+    const name = path.basename(urlPath);
+    if (!name.endsWith('.jpg') && !name.endsWith('.png')) { res.writeHead(403); res.end(); return; }
+    fs.mkdirSync(path.join(ROOT, '_shots'), { recursive: true });
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      fs.writeFileSync(path.join(ROOT, '_shots', name), Buffer.concat(chunks));
+      res.writeHead(204); res.end();
+    });
     return;
   }
   let rel = urlPath === '/' ? 'index.html' : urlPath.slice(1);
@@ -84,9 +97,9 @@ function broadcast(msg, exceptId = null) {
   }
 }
 
-// bots = TOTAL_SLOTS - humanos (nunca negativo)
+// bots = hueco libre hasta TOTAL_SLOTS, con tope de MAX_BOTS
 function rebalanceBots() {
-  const target = Math.max(0, TOTAL_SLOTS - players.size);
+  const target = Math.max(0, Math.min(MAX_BOTS, TOTAL_SLOTS - players.size));
   while (bots.length > target) {
     const b = bots.pop();
     broadcast({ t: 'botbye', id: b.id });
@@ -203,11 +216,17 @@ wss.on('connection', (ws) => {
 const botCtx = {
   colliders,
   get players() { return [...players.values()]; },
+  get bots() { return bots; },
   onShoot(bot, from, to) {
     broadcast({ t: 'fire', bid: bot.id, a: [from.x, from.y, from.z], b: [to.x, to.y, to.z], k: 'smg' });
   },
-  onHitPlayer(bot, player, dmg) {
-    damagePlayer(player, dmg, bot.name, false);
+  onHitTarget(bot, kind, target, dmg) {
+    if (kind === 'pl') {
+      damagePlayer(target, dmg, bot.name, false);
+    } else {
+      const died = target.takeDamage(dmg, bot.pos);
+      if (died) broadcast({ t: 'kill', vn: target.name, vid: null, kn: bot.name, h: false });
+    }
   },
 };
 

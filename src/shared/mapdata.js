@@ -3,7 +3,8 @@
 // Sin dependencias: solo objetos planos.
 // ---------------------------------------------------------------------------
 
-export const TOTAL_SLOTS = 10; // jugadores + bots siempre suman esto (si caben)
+export const TOTAL_SLOTS = 10; // jugadores + bots suman esto como máximo
+export const MAX_BOTS = 5;     // tope de bots aunque haya pocos jugadores
 
 export const COLORS = {
   ground: 0xcfc3a0,

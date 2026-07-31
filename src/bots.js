@@ -93,33 +93,40 @@ class Bot {
       return;
     }
 
+    // objetivo: el jugador u otro bot, el vivo visible más cercano
+    // (el humano tiene preferencia ligera)
     const player = ctx.player;
-    const toPlayer = new THREE.Vector3().subVectors(player.pos, this.pos);
-    const dist = toPlayer.length();
-
-    let seesPlayer = false;
-    if (!player.dead && dist < ENGAGE_DIST) {
+    let target = null, isPlayer = false, dist = Infinity, best = Infinity;
+    const considerar = (ent, entIsPlayer, alive, eyeY) => {
+      if (!alive || ent === this) return;
+      const d = Math.hypot(ent.pos.x - this.pos.x, ent.pos.y - this.pos.y, ent.pos.z - this.pos.z);
+      if (d > ENGAGE_DIST) return;
+      const score = entIsPlayer ? d * 0.75 : d;
+      if (score >= best) return;
       const from = this.eyePos();
-      const to = player.eyePosition(new THREE.Vector3());
+      const to = new THREE.Vector3(ent.pos.x, ent.pos.y + eyeY, ent.pos.z);
       const dir = new THREE.Vector3().subVectors(to, from);
-      const d = dir.length();
+      const len = dir.length();
       dir.normalize();
       ctx.raycaster.set(from, dir);
-      ctx.raycaster.far = d - 0.3;
-      seesPlayer = ctx.raycaster.intersectObjects(ctx.occluders, false).length === 0;
-    }
-
-    this.state = seesPlayer ? 'engage' : (this.state === 'engage' && dist < ENGAGE_DIST ? 'hunt' : 'patrol');
+      ctx.raycaster.far = len - 0.3;
+      if (ctx.raycaster.intersectObjects(ctx.occluders, false).length > 0) return;
+      target = ent; isPlayer = entIsPlayer; dist = d; best = score;
+    };
+    considerar(player, true, !player.dead, 1.6);
+    for (const b of ctx.bots) considerar(b, false, !b.dead, 1.66);
 
     let moveX = 0, moveZ = 0;
+    this._aimTarget = target;
 
-    if (this.state === 'engage') {
-      this.targetYaw = Math.atan2(toPlayer.x, toPlayer.z);
+    if (target) {
+      const toTarget = new THREE.Vector3().subVectors(target.pos, this.pos);
+      this.targetYaw = Math.atan2(toTarget.x, toTarget.z);
       if (now > this.strafeChangeAt) {
         this.strafeDir = Math.random() < 0.5 ? -1 : 1;
         this.strafeChangeAt = now + 0.8 + Math.random() * 1.4;
       }
-      const fwd = new THREE.Vector3(toPlayer.x, 0, toPlayer.z).normalize();
+      const fwd = new THREE.Vector3(toTarget.x, 0, toTarget.z).normalize();
       const side = new THREE.Vector3(-fwd.z, 0, fwd.x).multiplyScalar(this.strafeDir);
       let push = 0;
       if (dist > 26) push = 1;
@@ -130,17 +137,15 @@ class Bot {
       if (this.burstLeft > 0 && now >= this.nextShotAt) {
         this.burstLeft--;
         this.nextShotAt = now + 0.11;
-        this.shootAt(player, ctx, dist);
+        this.shootAt(target, isPlayer, ctx, dist);
       } else if (this.burstLeft <= 0 && now >= this.nextBurstAt) {
         this.burstLeft = 3 + Math.floor(Math.random() * 4);
         this.nextBurstAt = now + 0.7 + Math.random() * 1.1;
         this.nextShotAt = now + 0.15 + Math.random() * 0.25;
       }
+      this.waypoint = target.pos.clone(); // si lo pierde de vista, ir a por él
+      this.repathAt = now + 4;
     } else {
-      if (this.state === 'hunt') {
-        this.waypoint = player.pos.clone();
-        if (dist < 4) this.state = 'patrol';
-      }
       if (!this.waypoint || now > this.repathAt ||
           this.pos.distanceToSquared(this.waypoint) < 2.5) {
         this.waypoint = ctx.waypoints[Math.floor(Math.random() * ctx.waypoints.length)].clone();
@@ -180,28 +185,39 @@ class Bot {
     this.yaw += dy * Math.min(1, dt * 10);
 
     const speed = Math.hypot(this.vel.x, this.vel.z);
-    const aimPitch = this.state === 'engage'
-      ? Math.atan2(player.pos.y + 1.4 - (this.pos.y + 1.34), Math.hypot(toPlayer.x, toPlayer.z))
+    const aiming = !!this._aimTarget;
+    const aimPitch = aiming
+      ? Math.atan2(
+          this._aimTarget.pos.y + 1.4 - (this.pos.y + 1.34),
+          Math.hypot(this._aimTarget.pos.x - this.pos.x, this._aimTarget.pos.z - this.pos.z),
+        )
       : 0;
-    animateHumanoid(this.rig, dt, speed, this.walkRef, this.state === 'engage', aimPitch);
+    animateHumanoid(this.rig, dt, speed, this.walkRef, aiming, aimPitch);
 
     this.group.position.copy(this.pos);
     this.group.rotation.y = this.yaw;
   }
 
-  shootAt(player, ctx, dist) {
+  shootAt(target, isPlayer, ctx, dist) {
     const from = new THREE.Vector3(this.pos.x, this.pos.y + 1.3, this.pos.z);
-    const to = player.eyePosition(new THREE.Vector3());
-    to.y -= 0.3 + Math.random() * 0.6;
+    const to = new THREE.Vector3(
+      target.pos.x,
+      target.pos.y + 1.3 - Math.random() * 0.4,
+      target.pos.z,
+    );
 
-    const playerSpeed = player.horizontalSpeed();
-    const hitChance = Math.max(0.06, 0.55 - dist * 0.008 - playerSpeed * 0.022 - (player.sliding ? 0.1 : 0));
+    const tSpeed = isPlayer ? target.horizontalSpeed() : Math.hypot(target.vel.x, target.vel.z);
+    const hitChance = Math.max(0.06, 0.55 - dist * 0.008 - tSpeed * 0.022 - (target.sliding ? 0.1 : 0));
     const hits = Math.random() < hitChance;
 
-    let end;
+    let end = to;
     if (hits) {
-      end = to;
-      player.damage(7 + Math.floor(Math.random() * 6), this.name);
+      if (isPlayer) {
+        target.damage(7 + Math.floor(Math.random() * 6), this.name);
+      } else {
+        const died = target.takeDamage(7 + Math.floor(Math.random() * 6), this.pos);
+        if (died && ctx.onKill) ctx.onKill(this.name, target.name);
+      }
     } else {
       end = to.clone().add(new THREE.Vector3(
         (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 2.5, (Math.random() - 0.5) * 3,
@@ -221,6 +237,8 @@ export class BotManager {
       player,
       effects,
       audio,
+      bots: this.bots,
+      onKill: null, // (nombreAsesino, nombreVictima) — lo asigna main.js
       colliders: world.colliders,
       occluders: world.occluders,
       waypoints: world.waypoints,

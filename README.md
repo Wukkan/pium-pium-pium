@@ -2,7 +2,7 @@
 
 Shooter multijugador en el navegador (réplica de krunker.io) hecho con Three.js + Node.js.
 
-**Los bots rellenan la partida hasta 10**: 1 jugador → 9 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos.
+**Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.
 
 ## Jugar en local
 

@@ -165,6 +165,17 @@ export class WeaponSystem {
     this.hud.setReloading(true);
   }
 
+  // munición completa en todas las armas (al reaparecer)
+  refill() {
+    for (const key of this.slots) {
+      this.state[key].ammo = WEAPON_DEFS[key].mag;
+      this.state[key].reserve = WEAPON_DEFS[key].reserve;
+    }
+    this.reloading = false;
+    this.hud.updateAmmo(this);
+    this.hud.setReloading(false);
+  }
+
   currentSpread() {
     const def = this.def;
     let s = this.ads ? def.adsSpread : def.spread;
@@ -276,6 +287,13 @@ export class WeaponSystem {
     this.kickPos *= Math.max(0, 1 - dt * 10);
     this.kickRot *= Math.max(0, 1 - dt * 10);
 
+    // animación de recarga: el arma baja, gira y vuelve a subir
+    let reloadTilt = 0;
+    if (this.reloading) {
+      const prog = Math.min(1, Math.max(0, 1 - (this.reloadEnd - now) / def.reloadTime));
+      reloadTilt = Math.sin(prog * Math.PI) * (0.85 + Math.sin(prog * Math.PI * 3) * 0.08);
+    }
+
     // posición ADS: centrar el arma
     const adsT = this.ads && !def.scope ? 1 : 0;
     const baseX = 0.32 * (1 - adsT) + 0.0 * adsT;
@@ -283,9 +301,10 @@ export class WeaponSystem {
     const baseZ = -0.55 * (1 - adsT) + -0.42 * adsT;
 
     this.rig.position.x += (baseX + bobX - this.rig.position.x) * Math.min(1, dt * 14);
-    this.rig.position.y += (baseY + bobY - this.rig.position.y) * Math.min(1, dt * 14);
+    this.rig.position.y += (baseY + bobY - reloadTilt * 0.14 - this.rig.position.y) * Math.min(1, dt * 14);
     this.rig.position.z += (baseZ + this.kickPos - this.rig.position.z) * Math.min(1, dt * 18);
-    this.rig.rotation.x = this.kickRot * 0.5;
+    this.rig.rotation.x = this.kickRot * 0.5 - reloadTilt * 0.65;
+    this.rig.rotation.z = reloadTilt * 0.3;
 
     // separación del punto de mira según dispersión
     this.hud.setCrosshairGap(6 + this.currentSpread() * 900);

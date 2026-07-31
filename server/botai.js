@@ -73,7 +73,7 @@ export class ServerBot {
     return false;
   }
 
-  // ctx: { colliders, players: [{id,pos:{x,y,z},alive,speed,sliding}], onShoot(bot,from,to), onHitPlayer(bot,player,dmg) }
+  // ctx: { colliders, players, bots, onShoot(bot,from,to), onHitTarget(bot,kind,target,dmg) }
   update(dt, ctx) {
     const t = now();
 
@@ -82,20 +82,22 @@ export class ServerBot {
       return;
     }
 
-    // objetivo: jugador vivo visible más cercano
-    let target = null, targetDist = Infinity;
-    for (const p of ctx.players) {
-      if (!p.alive) continue;
-      const dx = p.pos.x - this.pos.x, dy = p.pos.y - this.pos.y, dz = p.pos.z - this.pos.z;
-      const d = Math.hypot(dx, dy, dz);
-      if (d < ENGAGE_DIST && d < targetDist) {
-        const from = this.eyePos();
-        const to = { x: p.pos.x, y: p.pos.y + 1.6, z: p.pos.z };
-        if (!segmentBlocked(from, to, ctx.colliders)) {
-          target = p; targetDist = d;
-        }
-      }
-    }
+    // objetivo: entidad viva visible más cercana (jugadores u otros bots;
+    // los humanos tienen preferencia ligera)
+    let target = null, targetKind = null, targetDist = Infinity, best = Infinity;
+    const considerar = (kind, ent, alive) => {
+      if (!alive || ent === this) return;
+      const d = Math.hypot(ent.pos.x - this.pos.x, ent.pos.y - this.pos.y, ent.pos.z - this.pos.z);
+      if (d > ENGAGE_DIST) return;
+      const score = kind === 'pl' ? d * 0.75 : d;
+      if (score >= best) return;
+      const from = this.eyePos();
+      const to = { x: ent.pos.x, y: ent.pos.y + 1.6, z: ent.pos.z };
+      if (segmentBlocked(from, to, ctx.colliders)) return;
+      target = ent; targetKind = kind; targetDist = d; best = score;
+    };
+    for (const p of ctx.players) considerar('pl', p, p.alive);
+    for (const b of ctx.bots) considerar('bot', b, !b.dead);
 
     let moveX = 0, moveZ = 0;
     this.engaging = !!target;
@@ -119,7 +121,7 @@ export class ServerBot {
       if (this.burstLeft > 0 && t >= this.nextShotAt) {
         this.burstLeft--;
         this.nextShotAt = t + 0.11;
-        this.shootAt(target, targetDist, ctx);
+        this.shootAt(target, targetKind, targetDist, ctx);
       } else if (this.burstLeft <= 0 && t >= this.nextBurstAt) {
         this.burstLeft = 3 + Math.floor(Math.random() * 4);
         this.nextBurstAt = t + 0.7 + Math.random() * 1.1;
@@ -167,7 +169,7 @@ export class ServerBot {
     this.speed = Math.hypot(this.vel.x, this.vel.z);
   }
 
-  shootAt(target, dist, ctx) {
+  shootAt(target, kind, dist, ctx) {
     const from = { x: this.pos.x, y: this.pos.y + 1.3, z: this.pos.z };
     const to = {
       x: target.pos.x,
@@ -185,6 +187,6 @@ export class ServerBot {
       to.z += (Math.random() - 0.5) * 3;
     }
     ctx.onShoot(this, from, to);
-    if (hits) ctx.onHitPlayer(this, target, 7 + Math.floor(Math.random() * 6));
+    if (hits) ctx.onHitTarget(this, kind, target, 7 + Math.floor(Math.random() * 6));
   }
 }
