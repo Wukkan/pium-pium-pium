@@ -15,7 +15,7 @@ export class Net {
 
   on(type, cb) { this.handlers[type] = cb; }
 
-  connect(name) {
+  connect(name, skin) {
     return new Promise((resolve, reject) => {
       let settled = false;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -30,7 +30,7 @@ export class Net {
       }, 4000);
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ t: 'hola', name }));
+        ws.send(JSON.stringify({ t: 'hola', name, skin }));
       };
       ws.onmessage = (ev) => {
         let m;
@@ -97,13 +97,18 @@ export class Net {
 
   sendTeam(team) { this._send({ t: 'team', tm: team }); }
   sendVote(mode) { this._send({ t: 'vote', m: mode }); }
+  sendMapVote(map) { this._send({ t: 'vote', map }); }
   sendSelfDmg(d) { this._send({ t: 'selfdmg', d }); }
+  sendChat(i) { this._send({ t: 'chat', i }); }
+  sendSkin(h, c) { this._send({ t: 'skin', h, c }); }
+  sendPing() { this._send({ t: 'ping', ts: Date.now() }); }
 
-  sendNade(pos, vel) {
+  sendNade(pos, vel, impact) {
     this._send({
       t: 'nade',
       p: [+pos.x.toFixed(2), +pos.y.toFixed(2), +pos.z.toFixed(2)],
       v: [+vel.x.toFixed(2), +vel.y.toFixed(2), +vel.z.toFixed(2)],
+      im: impact ? 1 : 0,
     });
   }
 }

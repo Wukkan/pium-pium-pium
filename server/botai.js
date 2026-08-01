@@ -1,5 +1,9 @@
 import { moveBody, segmentBlocked } from '../src/shared/physics.js';
-import { BOT_SPAWNS, WAYPOINTS } from '../src/shared/mapdata.js';
+import { buildMap } from '../src/shared/mapdata.js';
+
+// mapa activo (el servidor lo cambia al votar mapa)
+let MAP = buildMap('arena');
+export function setBotMap(mapData) { MAP = mapData; }
 
 // ---------------------------------------------------------------------------
 // IA de los bots en el SERVIDOR. Es el mismo comportamiento que tenía el
@@ -51,7 +55,7 @@ export class ServerBot {
   }
 
   spawn() {
-    const sp = BOT_SPAWNS[Math.floor(Math.random() * BOT_SPAWNS.length)];
+    const sp = MAP.botSpawns[Math.floor(Math.random() * MAP.botSpawns.length)];
     this.pos = { ...sp };
     this.vel = { x: 0, y: 0, z: 0 };
     this.hp = this.maxHp;
@@ -153,7 +157,7 @@ export class ServerBot {
     } else {
       if (!this.waypoint || t > this.repathAt ||
           (this.pos.x - this.waypoint.x) ** 2 + (this.pos.z - this.waypoint.z) ** 2 < 2.5) {
-        this.waypoint = { ...WAYPOINTS[Math.floor(Math.random() * WAYPOINTS.length)] };
+        this.waypoint = { ...MAP.waypoints[Math.floor(Math.random() * MAP.waypoints.length)] };
         this.repathAt = t + 6 + Math.random() * 5;
       }
       const dx = this.waypoint.x - this.pos.x, dz = this.waypoint.z - this.pos.z;

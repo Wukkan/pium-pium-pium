@@ -23,9 +23,35 @@ export function makeNameSprite(name, color = '#ffffff') {
   return sprite;
 }
 
+// sombreros comprables, construidos con cajas sobre la cabeza
+export function makeHat(type) {
+  if (!type || type === 'none') return null;
+  const g = new THREE.Group();
+  const add = (color, w, h, d, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    g.add(m);
+  };
+  if (type === 'cap') {
+    add(0x2e6fd8, 0.46, 0.14, 0.46, 0, 0.07, 0);
+    add(0x2e6fd8, 0.4, 0.05, 0.24, 0, 0.02, -0.32); // visera
+  } else if (type === 'top') {
+    add(0x1a1a1e, 0.52, 0.06, 0.52, 0, 0.03, 0);    // ala
+    add(0x1a1a1e, 0.34, 0.42, 0.34, 0, 0.26, 0);    // copa
+    add(0xd83a2e, 0.36, 0.07, 0.36, 0, 0.1, 0);     // cinta
+  } else if (type === 'crown') {
+    add(0xf2c94c, 0.44, 0.14, 0.44, 0, 0.07, 0);
+    for (const [px, pz] of [[-0.16, -0.16], [0.16, -0.16], [-0.16, 0.16], [0.16, 0.16], [0, 0]]) {
+      add(0xf2c94c, 0.08, 0.16, 0.08, px, 0.2, pz);
+    }
+  }
+  return g;
+}
+
 // Devuelve el rig completo. `userData` se asigna a cada malla golpeable
 // para que el raycast de las armas identifique a quién y dónde ha dado.
-export function makeHumanoid(color, name, userDataFor, nameColor) {
+export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   const skin = new THREE.MeshLambertMaterial({ color });
   const darker = new THREE.MeshLambertMaterial({ color: new THREE.Color(color).multiplyScalar(0.55) });
   const skinTone = new THREE.MeshLambertMaterial({ color: 0xe8c39a });
@@ -66,8 +92,14 @@ export function makeHumanoid(color, name, userDataFor, nameColor) {
   add(gunMat, 0.08, 0.1, 0.55, 0, 0.05, -0.2, null, gun);
   armR.add(gun);
 
+  const hatMesh = makeHat(hat);
+  if (hatMesh) {
+    hatMesh.position.set(0, 1.92, 0);
+    group.add(hatMesh);
+  }
+
   const nameSprite = makeNameSprite(name, nameColor);
-  nameSprite.position.set(0, 2.15, 0);
+  nameSprite.position.set(0, hatMesh ? 2.45 : 2.15, 0);
   group.add(nameSprite);
 
   return { group, parts, legL, legR, armL, armR, head, gun, nameSprite };

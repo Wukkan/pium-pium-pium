@@ -8,12 +8,14 @@ import { makeHumanoid, animateHumanoid } from './humanoid.js';
 // ---------------------------------------------------------------------------
 
 class RemoteEnt {
-  constructor(scene, kind, id, name, color) {
+  constructor(scene, kind, id, name, color, hat, badge) {
     this.scene = scene;
     this.kind = kind; // 'pl' | 'bot'
     this.id = id;
     this.name = name;
     this.color = color;
+    this.hat = hat || null;
+    this.badge = badge || '';
     this.alive = true;
     this.deathAnim = 0;
     this.speed = 0;
@@ -23,7 +25,8 @@ class RemoteEnt {
     this.target = new THREE.Vector3();
     this.targetYaw = 0;
 
-    this.rig = makeHumanoid(color, name, (part) => ({ net: { kind, id }, part }));
+    const displayName = (badge ? badge + ' ' : '') + name;
+    this.rig = makeHumanoid(color, displayName, (part) => ({ net: { kind, id }, part }), undefined, hat);
     scene.add(this.rig.group);
   }
 
@@ -96,13 +99,14 @@ export class Remotes {
       if (p.id === myId) continue;
       seenPl.add(p.id);
       let ent = this.players.get(p.id);
-      if (ent && ent.color !== p.c) { // cambio de equipo → recrear con el color nuevo
-        ent.dispose();
+      const hat = p.h || null, badge = p.b || '';
+      if (ent && (ent.color !== p.c || ent.hat !== hat || ent.badge !== badge)) {
+        ent.dispose(); // cambio de equipo/color/sombrero/insignia → recrear
         this.players.delete(p.id);
         ent = null;
       }
       if (!ent) {
-        ent = new RemoteEnt(this.scene, 'pl', p.id, p.n, p.c);
+        ent = new RemoteEnt(this.scene, 'pl', p.id, p.n, p.c, hat, badge);
         this.players.set(p.id, ent);
       }
       ent.applyState(p.p, p.ry, p.rx, p.s, !!p.al);

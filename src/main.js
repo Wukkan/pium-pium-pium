@@ -10,6 +10,8 @@ import { Net } from './net.js';
 import { Remotes } from './remotes.js';
 import { KitManager } from './kits.js';
 import { GrenadeManager, explosionDamage } from './grenades.js';
+import { Missions } from './missions.js';
+import { HATS, MAPS, QUICK_CHAT } from './shared/mapdata.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — réplica de krunker.io, ahora multijugador.
@@ -70,7 +72,30 @@ grenades.onCount = (n) => hud.updateGrenades(n);
 function onHealed() {
   audio.medkit();
   hud.announce('+25 PV ❤');
+  missions.event('kit');
 }
+
+// lanzagranadas → proyectil de impacto
+weapons.onLaunch = () => grenades.launch(camera);
+
+// cajas destruibles
+const localCrateHp = new Map();
+weapons.onCrateHit = (id, dmg, kind) => {
+  if (online) {
+    net.sendHit('crate', id, dmg, false, kind);
+    return;
+  }
+  const hp = (localCrateHp.has(id) ? localCrateHp.get(id) : 80) - dmg;
+  localCrateHp.set(id, hp);
+  if (hp <= 0) {
+    const pos = world.setCrate(id, false);
+    if (pos) {
+      effects.impact(pos, 0xc09858, 14);
+      audio.boom(0.3);
+    }
+    setTimeout(() => { localCrateHp.delete(id); world.setCrate(id, true); }, 45000);
+  }
+};
 
 // --- estado de la partida (modo, podio, equipo) ---
 const MODES = ['ffa', 'teams', 'gun', 'zombies'];
@@ -85,12 +110,105 @@ function fmtTime(s) {
 }
 
 function bannerText(mm) {
+  const mapa = MAPS[mm.map] ? `${MAPS[mm.map]} · ` : '';
   if (mm.st === 'podium') return '🏁 Fin de partida';
-  if (mm.mode === 'ffa') return `⚔ TODOS CONTRA TODOS · primero a 30 · ${fmtTime(mm.tl)}`;
-  if (mm.mode === 'teams') return `🔴 ${mm.ts.r} — ${mm.ts.b} 🔵 · primero a 30 · ${fmtTime(mm.tl)}`;
-  if (mm.mode === 'gun') return `🔫 BÚSQUEDA DEL ARMA · tu arma ${Math.min(myGunIdx + 1, 5)}/5 · ${fmtTime(mm.tl)}`;
-  if (mm.mode === 'zombies') return mm.wv === 0 ? '🧟 ZOMBIS · preparaos...' : `🧟 Oleada ${mm.wv} · quedan ${mm.zl}`;
+  if (mm.mode === 'ffa') return `${mapa}⚔ TODOS CONTRA TODOS · primero a 30 · ${fmtTime(mm.tl)}`;
+  if (mm.mode === 'teams') return `${mapa}🔴 ${mm.ts.r} — ${mm.ts.b} 🔵 · primero a 30 · ${fmtTime(mm.tl)}`;
+  if (mm.mode === 'gun') return `${mapa}🔫 BÚSQUEDA DEL ARMA · tu arma ${Math.min(myGunIdx + 1, 5)}/5 · ${fmtTime(mm.tl)}`;
+  if (mm.mode === 'zombies') return mm.wv === 0 ? `${mapa}🧟 ZOMBIS · preparaos...` : `${mapa}🧟 Oleada ${mm.wv} · quedan ${mm.zl}`;
   return '';
+}
+
+// --- personalización (sombrero + color), guardada en el navegador ---
+let skin;
+try { skin = JSON.parse(localStorage.getItem('pium_skin')); } catch { /* nada */ }
+if (!skin) skin = { hat: 'none', color: null, ownedHats: ['none'], colorsUnlocked: false };
+const saveSkin = () => localStorage.setItem('pium_skin', JSON.stringify(skin));
+const SKIN_COLORS = [0xe05252, 0x5278e0, 0x52b86a, 0xc27ad0, 0xe0a052, 0x52c2c2, 0xf2f2f2, 0x333340];
+const COLORS_PRICE = 300;
+let menuMsg = '';
+
+// --- misiones diarias ---
+const missions = new Missions((amount, txt) => {
+  weapons.addMoney(amount);
+  hud.announce(`✅ Misión cumplida: ${txt} (+$${amount})`);
+  audio.buy();
+  renderMenuPanels();
+});
+
+function renderMenuPanels() {
+  // sombreros
+  const hatList = document.getElementById('hat-list');
+  hatList.textContent = '';
+  for (const [id, def] of Object.entries(HATS)) {
+    const btn = document.createElement('button');
+    btn.className = 'hat-btn';
+    const owned = skin.ownedHats.includes(id);
+    if (skin.hat === id) btn.classList.add('equipped');
+    if (!owned) btn.classList.add('locked');
+    btn.textContent = owned ? def.name : `${def.name} $${def.price}`;
+    btn.onclick = () => {
+      if (!owned) {
+        if (weapons.money < def.price) {
+          menuMsg = `Te faltan $${def.price - weapons.money} para la ${def.name}`;
+          renderMenuPanels();
+          return;
+        }
+        weapons.money -= def.price;
+        skin.ownedHats.push(id);
+        audio.ensure(); audio.buy();
+      }
+      skin.hat = id;
+      saveSkin();
+      menuMsg = `${def.name} equipada`;
+      if (net.connected) net.sendSkin(skin.hat, skin.color);
+      hud.updateMoney(weapons.money);
+      renderMenuPanels();
+    };
+    hatList.append(btn);
+  }
+  // colores
+  document.getElementById('colors-price').textContent =
+    skin.colorsUnlocked ? '' : `($${COLORS_PRICE} desbloquea todos)`;
+  const colorList = document.getElementById('color-list');
+  colorList.textContent = '';
+  for (const c of SKIN_COLORS) {
+    const btn = document.createElement('button');
+    btn.className = 'color-btn';
+    btn.style.background = `#${c.toString(16).padStart(6, '0')}`;
+    if (skin.color === c) btn.classList.add('equipped');
+    if (!skin.colorsUnlocked) btn.classList.add('locked');
+    btn.onclick = () => {
+      if (!skin.colorsUnlocked) {
+        if (weapons.money < COLORS_PRICE) {
+          menuMsg = `Te faltan $${COLORS_PRICE - weapons.money} para desbloquear colores`;
+          renderMenuPanels();
+          return;
+        }
+        weapons.money -= COLORS_PRICE;
+        skin.colorsUnlocked = true;
+        audio.ensure(); audio.buy();
+      }
+      skin.color = c;
+      saveSkin();
+      menuMsg = 'Color equipado';
+      if (net.connected) net.sendSkin(skin.hat, skin.color);
+      hud.updateMoney(weapons.money);
+      renderMenuPanels();
+    };
+    colorList.append(btn);
+  }
+  // misiones
+  const list = document.getElementById('mission-list');
+  list.textContent = '';
+  for (const m of missions.status()) {
+    const div = document.createElement('div');
+    div.className = m.done ? 'done' : '';
+    div.textContent = `${m.done ? '✅' : '⬜'} ${m.txt} — ${m.prog}/${m.goal}`;
+    list.append(div);
+  }
+  document.getElementById('menu-money').textContent =
+    `💰 Tu dinero: $${weapons.money}` + (menuMsg ? ` · ${menuMsg}` : '');
 }
 
 function setTeamPicker(open) {
@@ -101,6 +219,8 @@ function setTeamPicker(open) {
 
 // --- economía y rachas: se activan con cada baja mía ---
 let streak = 0;
+let lastKnifeHitAt = -9999;
+let lastNadeHitAt = -9999;
 
 function onMyKill(isHead, victimName) {
   const earned = 100 + (isHead ? 50 : 0);
@@ -112,6 +232,13 @@ function onMyKill(isHead, victimName) {
     audio.streak(streak);
   }
   weapons.addMoney(earned + bonus);
+  // misiones
+  missions.event('kill');
+  if (isHead) missions.event('headshot');
+  if (streak === 5) missions.event('streak5');
+  const nowMs = performance.now();
+  if (nowMs - lastKnifeHitAt < 600) missions.event('knifekill');
+  if (nowMs - lastNadeHitAt < 600) missions.event('nadekill');
 }
 
 function resetStreak() { streak = 0; }
@@ -179,6 +306,7 @@ function doKnife() {
         effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
         hud.hitmarker(false);
         audio.hit();
+        lastKnifeHitAt = performance.now();
         net.sendHit(kind, ent.id, dmg, dmg >= 100, 'knife');
         return;
       }
@@ -191,7 +319,10 @@ function doKnife() {
       effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
       hud.hitmarker(killed);
       audio.hit();
-      if (killed && offlineBotKilled) offlineBotKilled(bot, false);
+      if (killed) {
+        missions.event('knifekill');
+        if (offlineBotKilled) offlineBotKilled(bot, false);
+      }
       return;
     }
   }
@@ -256,7 +387,10 @@ function setupOffline() {
       if (dmg <= 0) continue;
       const killed = bot.takeDamage(dmg, player.pos);
       effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.4, 0)), String(dmg), false);
-      if (killed) localBotKilled(bot, false);
+      if (killed) {
+        missions.event('nadekill');
+        localBotKilled(bot, false);
+      }
     }
     const dSelf = Math.hypot(player.pos.x - pos.x, player.pos.y + 1 - pos.y, player.pos.z - pos.z);
     const dmgSelf = Math.round(explosionDamage(dSelf) / 2);
@@ -306,6 +440,11 @@ function setupOnline() {
 
   net.on('snap', (m) => {
     lastSnap = m;
+    if (m.m && m.m.map && m.m.map !== world.mapId) world.load(m.m.map);
+    if (m.dc) {
+      const rotas = new Set(m.dc);
+      for (const id of world.crates.keys()) world.setCrate(id, !rotas.has(id));
+    }
     remotes.applySnapshot(m, net.id);
     kitsMgr.sync(m.kits || []);
     const me = m.pl.find((p) => p.id === net.id);
@@ -324,6 +463,7 @@ function setupOnline() {
 
   net.on('match', (m) => {
     matchInfo = m;
+    if (m.map && m.map !== world.mapId) world.load(m.map);
     if (m.st === 'playing') {
       podiumOpen = false;
       hud.hidePodium();
@@ -338,10 +478,12 @@ function setupOnline() {
   });
 
   net.on('podium', (m) => {
+    setChat(false);
     setTeamPicker(false);
     podiumOpen = true;
     weapons.inputBlocked = true;
     hud.showPodium(m);
+    if (m.winner === net.name) missions.event('win');
     audio.streak(4); // fanfarria de fin de partida
     let secs = m.secs || 12;
     hud.setPodiumCountdown(secs);
@@ -353,7 +495,25 @@ function setupOnline() {
     }, 1000);
   });
 
-  net.on('votes', (m) => hud.setPodiumVotes(m.tally || {}));
+  net.on('votes', (m) => hud.setPodiumVotes(m.tally || {}, m.mapTally || {}));
+
+  net.on('chat', (m) => {
+    if (QUICK_CHAT[m.i] !== undefined) {
+      hud.info(`💬 ${m.n}: ${QUICK_CHAT[m.i]}`);
+      audio.chat();
+    }
+  });
+
+  net.on('pong', (m) => hud.setPing(Date.now() - m.ts));
+  setInterval(() => { if (net.connected) net.sendPing(); }, 3000);
+
+  net.on('cbox', (m) => {
+    const pos = world.setCrate(m.id, !!m.al);
+    if (pos && !m.al) {
+      effects.impact(pos, 0xc09858, 14);
+      audio.boom(0.3);
+    }
+  });
 
   net.on('gun', (m) => {
     myGunIdx = m.gi || 0;
@@ -400,6 +560,7 @@ function setupOnline() {
       const dmg = explosionDamage(d);
       if (dmg <= 0) return;
       effects.popup(ep.clone().add(new THREE.Vector3(0, 1.4, 0)), String(dmg), false);
+      lastNadeHitAt = performance.now();
       net.sendHit(kind, ent.id, dmg, false, 'nade');
     };
     for (const ent of remotes.players.values()) aplicar(ent, 'pl');
@@ -448,7 +609,7 @@ async function joinAndPlay() {
   const name = nameInput.value.trim();
   if (name) localStorage.setItem('pium_name', name);
   try {
-    const hi = await net.connect(name);
+    const hi = await net.connect(name, { h: skin.hat, c: skin.color });
     setupOnline();
     joined = true;
     nameInput.value = net.name;
@@ -489,6 +650,8 @@ document.addEventListener('pointerlockchange', () => {
       hud.setMenuStats(kills, deaths);
       hud.setScope(false);
       hud.showScores(false);
+      setChat(false);
+      renderMenuPanels();
     }
   }
 });
@@ -532,17 +695,31 @@ addEventListener('keyup', (e) => {
   if (e.code === 'Tab') hud.showScores(false);
 });
 
-// teclas de modo: V cuchillo, M cambiar equipo, 1-4 en podio/selector
+// teclas de modo: V cuchillo, M equipo, C chat, 1-6 en overlays
+let chatOpen = false;
+function setChat(open) {
+  chatOpen = open;
+  hud.showChatMenu(open, QUICK_CHAT);
+  weapons.inputBlocked = open || podiumOpen || teamPickerOpen;
+}
+
 addEventListener('keydown', (e) => {
   if (!document.pointerLockElement) return;
   if (e.code === 'KeyV') doKnife();
   if (e.code === 'KeyM' && online && matchInfo.mode === 'teams' && !podiumOpen) {
     setTeamPicker(!teamPickerOpen);
   }
-  const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+  if (e.code === 'KeyC' && online && !podiumOpen) {
+    setChat(!chatOpen);
+  }
+  const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].indexOf(e.code);
   if (idx >= 0) {
-    if (podiumOpen && online) {
-      net.sendVote(MODES[idx]);
+    if (chatOpen) {
+      net.sendChat(idx);
+      setChat(false);
+    } else if (podiumOpen && online) {
+      if (idx < 4) net.sendVote(MODES[idx]);
+      else net.sendMapVote(idx === 4 ? 'arena' : 'ciudad');
     } else if (teamPickerOpen) {
       if (idx === 0) net.sendTeam('r');
       else if (idx === 1) net.sendTeam('b');
@@ -573,6 +750,7 @@ hud.updateScore(0, 0);
 hud.updateMoney(0);
 hud.updateSlots(weapons);
 hud.updateGrenades(grenades.count);
+renderMenuPanels();
 
 // --- bucle de juego ---
 let lastTime = performance.now();
@@ -588,6 +766,18 @@ function tick(now) {
 
   if (state !== 'menu') {
     player.update(dt, inputEnabled);
+    // saltadores
+    if (inputEnabled && player.onGround) {
+      for (const pad of world.jumpPads) {
+        const dx = player.pos.x - pad.x, dz = player.pos.z - pad.z;
+        if (dx * dx + dz * dz < 1.3 && Math.abs(player.pos.y - pad.y) < 0.8) {
+          player.vel.y = pad.power;
+          player.onGround = false;
+          audio.jump();
+          break;
+        }
+      }
+    }
     weapons.update(dt, inputEnabled);
     if (botsLocal) botsLocal.update(dt);
     if (botsLocal) kitsMgr.offlineUpdate(player, botsLocal, onHealed);

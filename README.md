@@ -41,7 +41,11 @@ y abre **http://localhost:5173**. Escribe tu nombre y pulsa **JUGAR**.
 
 Empiezas con la pistola. Cada baja da **$100** (+$50 headshot, + bonus por racha) para desbloquear el resto de armas. Las rachas de bajas se anuncian a las 3, 5, 8, 10...
 
-**Extras**: `V` cuchillo (100 de daño por la espalda), `G` granadas, daño por caída, y las piernas reciben menos daño que el cuerpo.
+**Extras**: `V` cuchillo (100 de daño por la espalda), `G` granadas, `C` chat rápido, daño por caída, y las piernas reciben menos daño que el cuerpo. Armas extra: revólver ($450) y lanzagranadas ($2000, dispara granadas de impacto).
+
+**Mapas**: Arena (clásico) y Ciudad (calles y azoteas) — se vota junto al modo al final de cada partida (teclas 5/6). Ambos con **saltadores** (plataformas amarillas que te lanzan por los aires) y **cajas destruibles** (80 pv, reaparecen a los 45 s).
+
+**Personalización y progresión**: en el menú puedes comprar **sombreros** (gorra/chistera/corona) y **colores** para tu muñeco con el dinero de las bajas — los ven todos los jugadores. Hay **3 misiones diarias** (+$300 cada una) y tu **insignia de nivel** (🥉🥈🥇👑 según tus bajas totales del ranking mundial) aparece junto a tu nombre.
 
 ## Modos de juego (online)
 

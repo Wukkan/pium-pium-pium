@@ -3,8 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { buildMapBoxes, buildColliders, PLAYER_SPAWNS, TOTAL_SLOTS, MAX_BOTS, BOT_NAMES, BOT_COLORS } from '../src/shared/mapdata.js';
-import { ServerBot } from './botai.js';
+import {
+  buildMap, buildColliders, TOTAL_SLOTS, MAX_BOTS, BOT_NAMES, BOT_COLORS,
+  MAPS, HATS, QUICK_CHAT, badgeFor,
+} from '../src/shared/mapdata.js';
+import { ServerBot, setBotMap } from './botai.js';
 import * as ranking from './ranking.js';
 
 // ---------------------------------------------------------------------------
@@ -74,13 +77,33 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 // --- estado de la partida ---
-const colliders = buildColliders(buildMapBoxes());
+const colliders = [];
+const crates = new Map(); // id -> {hp, collider, alive, respawnAt}
+let mapData = null;
 const players = new Map(); // id -> jugador
 const bots = [];
 const kits = []; // kits de vida: {id, x, y, z, expireAt}
 let nextId = 1;
 let botSerial = 0;
 let kitSerial = 0;
+
+function loadMap(mapId) {
+  mapData = buildMap(mapId);
+  setBotMap(mapData);
+  colliders.length = 0;
+  colliders.push(...buildColliders(mapData.boxes));
+  crates.clear();
+  for (const c of colliders) {
+    if (c.crate) crates.set(c.crate, { hp: 80, collider: c, alive: true, respawnAt: 0 });
+  }
+}
+loadMap('arena');
+
+function destroyedCrates() {
+  const out = [];
+  for (const [id, c] of crates) if (!c.alive) out.push(id);
+  return out;
+}
 
 function spawnKit(pos) {
   kits.push({ id: 'k' + kitSerial++, x: pos.x, y: pos.y, z: pos.z, expireAt: now() + 30 });
@@ -99,10 +122,12 @@ const PODIUM_TIME = 12;
 
 const match = {
   mode: 'ffa',
+  map: 'arena',
   state: 'playing', // playing | podium
   endAt: Date.now() / 1000 + MATCH_TIME,
   podiumEndAt: 0,
   votes: new Map(),           // playerId -> modo votado
+  mapVotes: new Map(),        // playerId -> mapa votado
   teamScores: { r: 0, b: 0 },
   wave: 0,
   waveBreakAt: 0,
@@ -110,7 +135,7 @@ const match = {
 
 function matchMsg() {
   return {
-    t: 'match', mode: match.mode, st: match.state,
+    t: 'match', mode: match.mode, map: match.map, st: match.state,
     tl: Math.max(0, Math.round((match.state === 'playing' ? match.endAt : match.podiumEndAt) - now())),
     ts: match.teamScores,
     wv: match.wave,
@@ -127,16 +152,26 @@ function assignTeam() {
   return r <= b ? 'r' : 'b';
 }
 
-function startMatch(mode) {
+function startMatch(mode, mapId = match.map) {
   match.mode = mode;
   match.state = 'playing';
   match.endAt = now() + MATCH_TIME;
   match.votes = new Map();
+  match.mapVotes = new Map();
   match.teamScores = { r: 0, b: 0 };
   match.wave = 0;
   match.waveBreakAt = mode === 'zombies' ? now() + 5 : 0;
   bots.length = 0;
   kits.length = 0;
+  if (mapId !== match.map) {
+    match.map = mapId;
+    loadMap(mapId);
+  } else {
+    // restaurar las cajas destruidas
+    for (const c of crates.values()) {
+      if (!c.alive) { c.alive = true; c.hp = 80; colliders.push(c.collider); }
+    }
+  }
   for (const p of players.values()) {
     p.kills = 0; p.deaths = 0; p.curStreak = 0; p.gunIdx = 0;
     p.team = mode === 'teams' ? assignTeam() : null;
@@ -173,6 +208,7 @@ function endMatch(reasonTxt) {
   broadcast({
     t: 'podium', winner, txt: reasonTxt || '', rows,
     ts: match.teamScores, mode: match.mode, secs: PODIUM_TIME, modes: MODES,
+    maps: Object.keys(MAPS), map: match.map,
   });
 }
 
@@ -184,6 +220,16 @@ function nextMode() {
     if ((tally[m] || 0) > bestN) { best = m; bestN = tally[m]; }
   }
   return best || MODES[(MODES.indexOf(match.mode) + 1) % MODES.length];
+}
+
+function nextMap() {
+  const tally = {};
+  for (const m of match.mapVotes.values()) tally[m] = (tally[m] || 0) + 1;
+  let best = match.map, bestN = 0;
+  for (const m of Object.keys(MAPS)) {
+    if ((tally[m] || 0) > bestN) { best = m; bestN = tally[m]; }
+  }
+  return best;
 }
 
 // puntuación de equipo (cuentan también las bajas de los bots del equipo)
@@ -208,8 +254,17 @@ function spawnWave(n) {
 
 function modeTick(t) {
   if (match.state === 'podium') {
-    if (t >= match.podiumEndAt) startMatch(nextMode());
+    if (t >= match.podiumEndAt) startMatch(nextMode(), nextMap());
     return;
+  }
+  // reaparición de cajas destruidas (45 s)
+  for (const [id, c] of crates) {
+    if (!c.alive && t >= c.respawnAt) {
+      c.alive = true;
+      c.hp = 80;
+      colliders.push(c.collider);
+      broadcast({ t: 'cbox', id, al: 1 });
+    }
   }
   if (players.size === 0) return; // sin humanos el reloj no corre
   if (match.mode === 'zombies') {
@@ -246,7 +301,19 @@ function sanitizeName(raw) {
 }
 
 function pickSpawn() {
-  return PLAYER_SPAWNS[Math.floor(Math.random() * PLAYER_SPAWNS.length)];
+  return mapData.playerSpawns[Math.floor(Math.random() * mapData.playerSpawns.length)];
+}
+
+// límite de golpes por jugador (anti-spam básico): 16 por segundo
+function hitAllowed(p) {
+  const t = now();
+  if (!p._hitWin || t - p._hitWin > 1) { p._hitWin = t; p._hitCount = 0; }
+  p._hitCount++;
+  return p._hitCount <= 16;
+}
+
+function distOk(a, b, max = 130) {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= max;
 }
 
 function send(p, msg) {
@@ -357,8 +424,15 @@ wss.on('connection', (ws) => {
         hp: 100, kills: 0, deaths: 0, alive: true, lastDmg: 0,
         team: match.mode === 'teams' ? assignTeam() : null,
         curStreak: 0, gunIdx: 0,
+        hat: (m.skin && HATS[m.skin.h]) ? m.skin.h : 'none',
+        skinColor: (m.skin && Number.isInteger(m.skin.c)) ? (m.skin.c & 0xffffff) : null,
+        badge: '',
       };
       players.set(id, me);
+      // insignia de nivel según su historial en el ranking mundial
+      ranking.getTotalKills(me.name).then((total) => {
+        if (players.has(id)) players.get(id).badge = badgeFor(total);
+      });
       rebalanceBots();
       send(me, { t: 'hi', id, name: me.name, spawn: [sp.x, sp.y, sp.z], slots: TOTAL_SLOTS });
       send(me, matchMsg());
@@ -384,15 +458,16 @@ wss.on('connection', (ws) => {
       }
     } else if (m.t === 'nade') {
       if (Array.isArray(m.p) && m.p.length === 3 && Array.isArray(m.v) && m.v.length === 3) {
-        broadcast({ t: 'nade', id, p: m.p, v: m.v }, id);
+        broadcast({ t: 'nade', id, p: m.p, v: m.v, im: m.im ? 1 : 0 }, id);
       }
     } else if (m.t === 'hit') {
-      if (!me.alive || match.state !== 'playing') return;
+      if (!me.alive || match.state !== 'playing' || !hitAllowed(me)) return;
       const dmg = Math.max(1, Math.min(120, Math.round(+m.d || 0)));
       const weapon = String(m.w || '').slice(0, 10);
       if (m.kind === 'bot') {
         const bot = bots.find((b) => b.id === m.id);
-        if (bot && !bot.dead && !(match.mode === 'teams' && bot.team === me.team)) {
+        if (bot && !bot.dead && distOk(me.pos, bot.pos) &&
+            !(match.mode === 'teams' && bot.team === me.team)) {
           const died = bot.takeDamage(dmg, me.pos);
           if (died) {
             creditKill(me, weapon);
@@ -402,11 +477,36 @@ wss.on('connection', (ws) => {
         }
       } else if (m.kind === 'pl') {
         const victim = players.get(+m.id);
-        if (victim && victim.id !== me.id) {
+        if (victim && victim.id !== me.id && distOk(me.pos, victim.pos)) {
           if (match.mode === 'teams' && victim.team === me.team) return; // fuego amigo desactivado
           damagePlayer(victim, dmg, me.name, !!m.h, me, weapon);
         }
+      } else if (m.kind === 'crate') {
+        const c = crates.get(String(m.id));
+        if (c && c.alive) {
+          c.hp -= dmg;
+          if (c.hp <= 0) {
+            c.alive = false;
+            c.respawnAt = now() + 45;
+            const idx = colliders.indexOf(c.collider);
+            if (idx >= 0) colliders.splice(idx, 1);
+            broadcast({ t: 'cbox', id: String(m.id), al: 0 });
+          }
+        }
       }
+    } else if (m.t === 'chat') {
+      // chat rápido: mensajes predefinidos, máx 1 por segundo
+      const i = Math.floor(+m.i);
+      const t = now();
+      if (i >= 0 && i < QUICK_CHAT.length && (!me._lastChat || t - me._lastChat > 1)) {
+        me._lastChat = t;
+        broadcast({ t: 'chat', n: me.name, i });
+      }
+    } else if (m.t === 'ping') {
+      send(me, { t: 'pong', ts: +m.ts || 0 });
+    } else if (m.t === 'skin') {
+      me.hat = HATS[m.h] ? m.h : 'none';
+      me.skinColor = Number.isInteger(m.c) ? (m.c & 0xffffff) : me.skinColor;
     } else if (m.t === 'selfdmg') {
       // daño por caída, lo declara el propio cliente
       const dmg = Math.max(1, Math.min(60, Math.round(+m.d || 0)));
@@ -424,11 +524,14 @@ wss.on('connection', (ws) => {
         startMatch(m.m);
       }
     } else if (m.t === 'vote') {
-      if (match.state === 'podium' && MODES.includes(m.m)) {
-        match.votes.set(me.id, m.m);
+      if (match.state === 'podium') {
+        if (MODES.includes(m.m)) match.votes.set(me.id, m.m);
+        if (MAPS[m.map]) match.mapVotes.set(me.id, m.map);
         const tally = {};
         for (const v of match.votes.values()) tally[v] = (tally[v] || 0) + 1;
-        broadcast({ t: 'votes', tally });
+        const mapTally = {};
+        for (const v of match.mapVotes.values()) mapTally[v] = (mapTally[v] || 0) + 1;
+        broadcast({ t: 'votes', tally, mapTally });
       }
     }
   });
@@ -475,7 +578,19 @@ setInterval(() => {
 
   modeTick(t);
   if (match.state === 'playing') {
-    for (const b of bots) b.update(dt, botCtx);
+    for (const b of bots) {
+      b.update(dt, botCtx);
+      // saltadores: también lanzan a los bots
+      if (!b.dead && b.onGround) {
+        for (const pad of mapData.jumpPads) {
+          const dx = b.pos.x - pad.x, dz = b.pos.z - pad.z;
+          if (dx * dx + dz * dz < 1.3 && Math.abs(b.pos.y - pad.y) < 0.8) {
+            b.vel.y = pad.power;
+            break;
+          }
+        }
+      }
+    }
   }
 
   // regeneración de vida de jugadores
@@ -519,10 +634,13 @@ setInterval(() => {
   const snap = {
     t: 'snap',
     m: matchMsg(),
+    dc: destroyedCrates(),
     pl: [...players.values()].map((p) => ({
       id: p.id, n: p.name,
-      c: p.team ? TEAM_COLORS[p.team] : p.color,
+      c: p.team ? TEAM_COLORS[p.team] : (p.skinColor ?? p.color),
       tm: p.team || undefined, gi: p.gunIdx || 0,
+      h: p.hat !== 'none' ? p.hat : undefined,
+      b: p.badge || undefined,
       p: [+p.pos.x.toFixed(2), +p.pos.y.toFixed(2), +p.pos.z.toFixed(2)],
       ry: +p.ry.toFixed(2), rx: +p.rx.toFixed(2), s: +p.speed.toFixed(1),
       hp: Math.round(p.hp), k: p.kills, d: p.deaths, al: p.alive ? 1 : 0,

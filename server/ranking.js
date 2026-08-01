@@ -74,4 +74,19 @@ export async function top(limit = 20) {
   return topCache.rows;
 }
 
+// bajas totales históricas de un jugador (para su insignia de nivel)
+export async function getTotalKills(name) {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/pium_ranking?select=kills&name=eq.${encodeURIComponent(name)}`,
+      { headers: HEADERS },
+    );
+    if (!res.ok) return 0;
+    const rows = await res.json();
+    return rows.length ? rows[0].kills : 0;
+  } catch {
+    return 0;
+  }
+}
+
 setInterval(flush, 25000);

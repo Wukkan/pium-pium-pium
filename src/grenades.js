@@ -28,11 +28,12 @@ function buildGrenadeMesh() {
 }
 
 class Grenade {
-  constructor(scene, pos, vel, mine) {
+  constructor(scene, pos, vel, mine, impact = false) {
     this.pos = pos.clone();
     this.vel = vel.clone();
-    this.mine = mine; // ¿la lancé yo? (solo la mía hace daño)
-    this.fuse = FUSE;
+    this.mine = mine;     // ¿la lancé yo? (solo la mía hace daño)
+    this.impact = impact; // del lanzagranadas: explota al tocar algo
+    this.fuse = impact ? 4 : FUSE;
     this.mesh = buildGrenadeMesh();
     this.mesh.position.copy(pos);
     scene.add(this.mesh);
@@ -69,17 +70,30 @@ export class GrenadeManager {
     const vel = dir.multiplyScalar(16);
     vel.y += 4.5;
     this.grenades.push(new Grenade(this.scene, pos, vel, true));
-    if (this.onThrow) this.onThrow(pos, vel);
+    if (this.onThrow) this.onThrow(pos, vel, false);
     return true;
   }
 
+  // proyectil del lanzagranadas: más rápido y explota al impactar
+  launch(camera) {
+    const pos = new THREE.Vector3();
+    camera.getWorldPosition(pos);
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    pos.addScaledVector(dir, 0.7);
+    const vel = dir.multiplyScalar(28);
+    vel.y += 1.5;
+    this.grenades.push(new Grenade(this.scene, pos, vel, true, true));
+    if (this.onThrow) this.onThrow(pos, vel, true);
+  }
+
   // granada de otro jugador (visual)
-  spawnRemote(p, v) {
+  spawnRemote(p, v, impact = false) {
     this.grenades.push(new Grenade(
       this.scene,
       new THREE.Vector3(p[0], p[1], p[2]),
       new THREE.Vector3(v[0], v[1], v[2]),
       false,
+      impact,
     ));
   }
 
@@ -105,10 +119,12 @@ export class GrenadeManager {
 
       g.vel.y -= GRAVITY * dt;
       // integración por ejes con rebote amortiguado
+      let tocado = false;
       for (const axis of ['x', 'y', 'z']) {
         const prev = g.pos[axis];
         g.pos[axis] += g.vel[axis] * dt;
         if (this._collides(g.pos)) {
+          tocado = true;
           g.pos[axis] = prev;
           g.vel[axis] *= -0.45;
           // fricción en los otros ejes al rebotar
@@ -116,6 +132,11 @@ export class GrenadeManager {
             if (other !== axis) g.vel[other] *= 0.75;
           }
         }
+      }
+      if (tocado && g.impact) {
+        this._explode(g, playerEye);
+        this.grenades.splice(i, 1);
+        continue;
       }
       g.mesh.position.copy(g.pos);
       g.mesh.rotation.x += dt * 6;

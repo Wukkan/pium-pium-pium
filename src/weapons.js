@@ -36,10 +36,23 @@ export const WEAPON_DEFS = {
     reloadTime: 2.2, spread: 0.07, adsSpread: 0.0006, moveSpread: 0.04,
     recoil: 0.06, auto: false, zoom: 3.6, scope: true, price: 1200,
   },
+  revolver: {
+    name: 'REVÓLVER', kind: 'revolver',
+    damage: 55, headMult: 2, rpm: 150, mag: 6, reserve: 30,
+    reloadTime: 1.8, spread: 0.01, adsSpread: 0.004, moveSpread: 0.02,
+    recoil: 0.035, auto: false, zoom: 1.4, scope: false, price: 450,
+  },
+  launcher: {
+    name: 'LANZAGRANADAS', kind: 'launcher',
+    damage: 0, headMult: 1, rpm: 55, mag: 1, reserve: 6,
+    reloadTime: 1.7, spread: 0, adsSpread: 0, moveSpread: 0,
+    recoil: 0.08, auto: false, zoom: 1.2, scope: false, price: 2000,
+    launcher: true, // dispara granadas de impacto en vez de balas
+  },
 };
 
-// orden de las ranuras [1]..[5]
-export const WEAPON_ORDER = ['pistol', 'shotgun', 'smg', 'ar', 'sniper'];
+// orden de las ranuras [1]..[7]
+export const WEAPON_ORDER = ['pistol', 'shotgun', 'smg', 'ar', 'sniper', 'revolver', 'launcher'];
 
 const BASE_FOV = 78;
 
@@ -62,6 +75,16 @@ function buildGunModel(kind) {
     part(mid, 0.07, 0.14, 0.11, 0, -0.09, 0.05);      // empuñadura
     part(dark, 0.045, 0.045, 0.12, 0, 0.03, -0.26);   // cañón
     part(accent, 0.02, 0.03, 0.04, 0, 0.09, -0.2);    // mira
+  } else if (kind === 'revolver') {
+    part(mid, 0.06, 0.09, 0.38, 0, 0.03, -0.15);      // cañón largo
+    part(dark, 0.09, 0.1, 0.12, 0, 0, 0.02);          // tambor
+    part(wood, 0.07, 0.14, 0.1, 0, -0.1, 0.09);       // empuñadura
+    part(accent, 0.02, 0.04, 0.04, 0, 0.1, -0.3);     // mira
+  } else if (kind === 'launcher') {
+    part(dark, 0.13, 0.13, 0.55, 0, 0, -0.15);        // tubo gordo
+    part(accent, 0.15, 0.15, 0.1, 0, 0, -0.45);       // boca
+    part(mid, 0.08, 0.16, 0.12, 0, -0.12, 0.1);       // empuñadura
+    part(wood, 0.08, 0.1, 0.18, 0, -0.02, 0.25);      // culata
   } else if (kind === 'shotgun') {
     part(dark, 0.07, 0.09, 0.7, 0, 0.01, -0.25);      // cañón largo
     part(wood, 0.075, 0.09, 0.22, 0, -0.06, -0.32);   // bomba (pump)
@@ -97,8 +120,8 @@ function buildGunModel(kind) {
   });
   const flash = new THREE.Sprite(flashMat);
   flash.scale.set(0.3, 0.3, 1);
-  flash.position.set(0, 0.01,
-    kind === 'sniper' ? -1.0 : kind === 'ar' ? -0.8 : kind === 'shotgun' ? -0.7 : kind === 'pistol' ? -0.35 : -0.5);
+  const flashZ = { sniper: -1.0, ar: -0.8, shotgun: -0.7, pistol: -0.35, revolver: -0.4, launcher: -0.55 };
+  flash.position.set(0, 0.01, flashZ[kind] !== undefined ? flashZ[kind] : -0.5);
   flash.visible = false;
   g.add(flash);
   g.userData.flash = flash;
@@ -168,7 +191,7 @@ export class WeaponSystem {
     addEventListener('keydown', (e) => {
       if (!document.pointerLockElement || this.inputBlocked) return;
       if (e.code === 'KeyR') this.reload();
-      const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].indexOf(e.code);
+      const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'].indexOf(e.code);
       if (idx >= 0 && idx < this.slots.length) this.switchTo(this.slots[idx]);
     });
   }
@@ -274,6 +297,19 @@ export class WeaponSystem {
     this.lastShot = now;
     st.ammo--;
 
+    // el lanzagranadas dispara un proyectil, no balas
+    if (def.launcher) {
+      this.player.recoilPitch += def.recoil;
+      this.kickPos = Math.min(0.2, this.kickPos + 0.15);
+      this.kickRot = Math.min(0.6, this.kickRot + 0.4);
+      this.audio.shot('launcher', 1);
+      this.hud.updateAmmo(this);
+      if (this.onLaunch) this.onLaunch();
+      if (st.ammo <= 0) this.reload();
+      this.triggerDown = false;
+      return;
+    }
+
     const origin = new THREE.Vector3();
     this.camera.getWorldPosition(origin);
     const spread = this.currentSpread();
@@ -310,6 +346,9 @@ export class WeaponSystem {
           entry.dmg += Math.round(def.damage * mult);
           entry.head = entry.head || isHead;
           acc.set(key, entry);
+        } else if (data.crate) {
+          this.effects.impact(hit.point, 0xc09858, 3);
+          if (this.onCrateHit) this.onCrateHit(data.crate, def.damage, def.kind);
         } else {
           this.effects.impact(hit.point, 0xd8d0b8, pellets > 1 ? 2 : 5);
         }

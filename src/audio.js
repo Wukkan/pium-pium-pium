@@ -37,7 +37,9 @@ export class AudioSys {
       smg: 'sounds/smg.wav',
       sniper: 'sounds/sniper.wav',
       shotgun: 'sounds/shotgun.wav',
-      pistol: 'sounds/smg.wav', // misma CZ-52 real; el subfusil la acelera
+      pistol: 'sounds/smg.wav',     // misma CZ-52 real; el subfusil la acelera
+      revolver: 'sounds/sniper.wav', // Mosin agudizado = revólver potente
+      launcher: 'sounds/shotgun.wav', // escopeta grave = tubo del lanzagranadas
     };
     for (const [kind, url] of Object.entries(files)) {
       try {
@@ -86,10 +88,11 @@ export class AudioSys {
     if (sample) {
       const src = this.ctx.createBufferSource();
       src.buffer = sample;
-      const rate = kind === 'smg' ? 1.22 : 0.94; // el subfusil acelera la CZ-52
-      src.playbackRate.value = rate + Math.random() * 0.12;
+      const rates = { smg: 1.22, revolver: 1.4, launcher: 0.62 };
+      src.playbackRate.value = (rates[kind] || 0.94) + Math.random() * 0.12;
       const g = this.ctx.createGain();
-      const base = kind === 'sniper' ? 0.95 : kind === 'shotgun' ? 0.85 : kind === 'smg' ? 0.5 : kind === 'pistol' ? 0.55 : 0.65;
+      const bases = { sniper: 0.95, shotgun: 0.85, smg: 0.5, pistol: 0.55, revolver: 0.8, launcher: 0.9 };
+      const base = bases[kind] || 0.65;
       g.gain.value = base * volume;
       src.connect(g).connect(this.master);
       src.start();
@@ -182,6 +185,11 @@ export class AudioSys {
   knife() {
     if (!this.ctx) return;
     this._noise(0.12, 2400, 2.5, 0.22, 0.1); // silbido del tajo
+  }
+
+  chat() {
+    if (!this.ctx) return;
+    this._tone(950, 950, 0.06, 0.15, 'sine');
   }
 
   // volumen según distancia para disparos de bots

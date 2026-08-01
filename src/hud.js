@@ -6,6 +6,7 @@ const $ = (id) => document.getElementById(id);
 
 const SLOT_NAMES = {
   pistol: 'Pistola', shotgun: 'Escopeta', smg: 'Subfusil', ar: 'Rifle', sniper: 'Franco',
+  revolver: 'Revólver', launcher: 'Lanzagr.',
 };
 
 export class HUD {
@@ -190,10 +191,36 @@ export class HUD {
     document.getElementById('podium').style.display = 'none';
   }
 
-  setPodiumVotes(tally) {
-    const names = { ffa: 'FFA', teams: 'Equipos', gun: 'Armas', zombies: 'Zombis' };
-    const parts = Object.entries(tally).map(([m, n]) => `${names[m] || m}: ${n}`);
+  setPodiumVotes(tally, mapTally = {}) {
+    const names = { ffa: 'FFA', teams: 'Equipos', gun: 'Armas', zombies: 'Zombis', arena: 'Arena', ciudad: 'Ciudad' };
+    const parts = [
+      ...Object.entries(tally).map(([m, n]) => `${names[m] || m}: ${n}`),
+      ...Object.entries(mapTally).map(([m, n]) => `🗺${names[m] || m}: ${n}`),
+    ];
     document.getElementById('podium-votes').textContent = parts.length ? `Votos → ${parts.join(' · ')}` : '';
+  }
+
+  setPing(ms) {
+    const el = document.getElementById('ping');
+    el.textContent = ms >= 0 ? `${ms} ms` : '';
+    el.style.color = ms < 80 ? 'rgba(140,231,140,.8)' : ms < 160 ? 'rgba(255,210,77,.8)' : 'rgba(255,107,90,.8)';
+  }
+
+  showChatMenu(show, options) {
+    const el = document.getElementById('chat-menu');
+    el.style.display = show ? 'block' : 'none';
+    if (show && options) {
+      const list = document.getElementById('chat-options');
+      list.textContent = '';
+      options.forEach((txt, i) => {
+        const div = document.createElement('div');
+        div.className = 'chat-opt';
+        const b = document.createElement('b');
+        b.textContent = `[${i + 1}] `;
+        div.append(b, txt);
+        list.append(div);
+      });
+    }
   }
 
   setPodiumCountdown(secs) {
