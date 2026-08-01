@@ -164,8 +164,9 @@ export class WeaponSystem {
       if (e.button === 2) this.ads = false;
     });
     addEventListener('contextmenu', (e) => e.preventDefault());
+    this.inputBlocked = false; // true mientras un overlay usa las teclas numéricas
     addEventListener('keydown', (e) => {
-      if (!document.pointerLockElement) return;
+      if (!document.pointerLockElement || this.inputBlocked) return;
       if (e.code === 'KeyR') this.reload();
       const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].indexOf(e.code);
       if (idx >= 0 && idx < this.slots.length) this.switchTo(this.slots[idx]);
@@ -200,8 +201,14 @@ export class WeaponSystem {
   }
 
   switchTo(key) {
+    if (this.forcedKey) return; // en búsqueda del arma no se cambia a mano
     if (key === this.current || this.player.dead) return;
     if (!this.owned[key]) { this.tryBuy(key); return; }
+    this._equip(key);
+  }
+
+  _equip(key) {
+    if (key === this.current) return;
     this.models[this.current].visible = false;
     this.current = key;
     this.models[key].visible = true;
@@ -210,6 +217,17 @@ export class WeaponSystem {
     this.hud.updateAmmo(this);
     this.hud.updateSlots(this);
     this.hud.setReloading(false);
+  }
+
+  // búsqueda del arma: el servidor impone qué arma llevas
+  setForced(key) {
+    this.forcedKey = key || null;
+    if (key) {
+      this.state[key].ammo = WEAPON_DEFS[key].mag;
+      this.state[key].reserve = WEAPON_DEFS[key].reserve;
+      this._equip(key);
+      this.hud.updateAmmo(this);
+    }
   }
 
   reload() {
@@ -286,9 +304,10 @@ export class WeaponSystem {
         const data = hit.object.userData;
         if (data.bot || data.net) {
           const isHead = data.part === 'head';
+          const mult = isHead ? def.headMult : data.part === 'leg' ? 0.75 : 1;
           const key = data.bot || `${data.net.kind}:${data.net.id}`;
           const entry = acc.get(key) || { data, dmg: 0, head: false, point: hit.point };
-          entry.dmg += Math.round(def.damage * (isHead ? def.headMult : 1));
+          entry.dmg += Math.round(def.damage * mult);
           entry.head = entry.head || isHead;
           acc.set(key, entry);
         } else {

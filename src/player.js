@@ -189,9 +189,13 @@ export class Player {
     // --- gravedad y colisión ---
     this.vel.y -= GRAVITY * dt;
     const wasGrounded = this._wasGrounded;
+    const fallSpeed = -this.vel.y; // velocidad de caída antes del impacto
     const res = moveBody(this.pos, this.vel, dt, HALF_X, HALF_Z, HEIGHT, this.world.colliders);
     this.onGround = res.onGround;
-    if (!wasGrounded && this.onGround && this.onLand) this.onLand();
+    if (!wasGrounded && this.onGround) {
+      if (this.onLand) this.onLand();
+      if (fallSpeed > 16 && this.onHardLand) this.onHardLand(fallSpeed);
+    }
     this._wasGrounded = this.onGround;
 
     // red de seguridad si algo sale mal

@@ -13,6 +13,7 @@ class RemoteEnt {
     this.kind = kind; // 'pl' | 'bot'
     this.id = id;
     this.name = name;
+    this.color = color;
     this.alive = true;
     this.deathAnim = 0;
     this.speed = 0;
@@ -95,6 +96,11 @@ export class Remotes {
       if (p.id === myId) continue;
       seenPl.add(p.id);
       let ent = this.players.get(p.id);
+      if (ent && ent.color !== p.c) { // cambio de equipo → recrear con el color nuevo
+        ent.dispose();
+        this.players.delete(p.id);
+        ent = null;
+      }
       if (!ent) {
         ent = new RemoteEnt(this.scene, 'pl', p.id, p.n, p.c);
         this.players.set(p.id, ent);
@@ -104,6 +110,11 @@ export class Remotes {
     for (const b of snap.bots) {
       seenBot.add(b.id);
       let ent = this.bots.get(b.id);
+      if (ent && ent.color !== b.c) {
+        ent.dispose();
+        this.bots.delete(b.id);
+        ent = null;
+      }
       if (!ent) {
         ent = new RemoteEnt(this.scene, 'bot', b.id, b.n, b.c);
         this.bots.set(b.id, ent);

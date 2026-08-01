@@ -156,6 +156,54 @@ export class HUD {
     document.getElementById('scores').style.display = show ? 'block' : 'none';
   }
 
+  setMatchBanner(text) {
+    const el = document.getElementById('match-banner');
+    el.textContent = text;
+    el.style.display = text ? 'block' : 'none';
+  }
+
+  showPodium(data) {
+    // data: {winner, txt, rows, mode, secs}
+    const el = document.getElementById('podium');
+    el.style.display = 'block';
+    document.getElementById('podium-winner').textContent = `🏆 ${data.winner}`;
+    const rowsEl = document.getElementById('podium-rows');
+    rowsEl.textContent = '';
+    const medals = ['🥇', '🥈', '🥉', '4.', '5.'];
+    data.rows.forEach((r, i) => {
+      const div = document.createElement('div');
+      const extra = data.mode === 'gun' ? ` · armas ${r.gi}/5` : '';
+      const team = r.tm ? (r.tm === 'r' ? ' 🔴' : ' 🔵') : '';
+      div.textContent = `${medals[i] || ''} ${r.n}${team} — ☠ ${r.k} ✖ ${r.d}${extra}`;
+      rowsEl.append(div);
+    });
+    if (data.txt) {
+      const div = document.createElement('div');
+      div.style.color = '#9fb4d8';
+      div.textContent = data.txt;
+      rowsEl.prepend(div);
+    }
+    document.getElementById('podium-votes').textContent = '';
+  }
+
+  hidePodium() {
+    document.getElementById('podium').style.display = 'none';
+  }
+
+  setPodiumVotes(tally) {
+    const names = { ffa: 'FFA', teams: 'Equipos', gun: 'Armas', zombies: 'Zombis' };
+    const parts = Object.entries(tally).map(([m, n]) => `${names[m] || m}: ${n}`);
+    document.getElementById('podium-votes').textContent = parts.length ? `Votos → ${parts.join(' · ')}` : '';
+  }
+
+  setPodiumCountdown(secs) {
+    document.getElementById('podium-count').textContent = `Siguiente partida en ${secs}s...`;
+  }
+
+  showTeamPicker(show) {
+    document.getElementById('team-picker').style.display = show ? 'block' : 'none';
+  }
+
   // ranking mundial: rows de /ranking [{name, kills, deaths, best_streak}]
   renderWorld(rows, myName) {
     const tbody = document.getElementById('world-body');

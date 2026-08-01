@@ -91,9 +91,13 @@ export class Net {
     });
   }
 
-  sendHit(kind, id, dmg, isHead) {
-    this._send({ t: 'hit', kind, id, d: dmg, h: isHead ? 1 : 0 });
+  sendHit(kind, id, dmg, isHead, weapon) {
+    this._send({ t: 'hit', kind, id, d: dmg, h: isHead ? 1 : 0, w: weapon || '' });
   }
+
+  sendTeam(team) { this._send({ t: 'team', tm: team }); }
+  sendVote(mode) { this._send({ t: 'vote', m: mode }); }
+  sendSelfDmg(d) { this._send({ t: 'selfdmg', d }); }
 
   sendNade(pos, vel) {
     this._send({

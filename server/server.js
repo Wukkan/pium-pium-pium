@@ -87,6 +87,151 @@ function spawnKit(pos) {
   while (kits.length > 12) kits.shift(); // límite de kits en el suelo
 }
 
+// --- modos de partida ---
+const MODES = ['ffa', 'teams', 'gun', 'zombies'];
+const MODE_NAMES = { ffa: 'TODOS CONTRA TODOS', teams: 'EQUIPOS', gun: 'BÚSQUEDA DEL ARMA', zombies: 'ZOMBIS' };
+const GUN_LADDER = ['pistol', 'shotgun', 'smg', 'ar', 'sniper'];
+const TEAM_COLORS = { r: 0xd84a3a, b: 0x3a6ad8 };
+const MATCH_TIME = 300;   // 5 minutos
+const KILL_LIMIT = 30;    // ffa y equipos
+const ZOMBIE_WAVES = 8;
+const PODIUM_TIME = 12;
+
+const match = {
+  mode: 'ffa',
+  state: 'playing', // playing | podium
+  endAt: Date.now() / 1000 + MATCH_TIME,
+  podiumEndAt: 0,
+  votes: new Map(),           // playerId -> modo votado
+  teamScores: { r: 0, b: 0 },
+  wave: 0,
+  waveBreakAt: 0,
+};
+
+function matchMsg() {
+  return {
+    t: 'match', mode: match.mode, st: match.state,
+    tl: Math.max(0, Math.round((match.state === 'playing' ? match.endAt : match.podiumEndAt) - now())),
+    ts: match.teamScores,
+    wv: match.wave,
+    zl: bots.filter((b) => b.zombie && !b.dead).length,
+  };
+}
+
+function assignTeam() {
+  let r = 0, b = 0;
+  for (const p of players.values()) {
+    if (p.team === 'r') r++;
+    else if (p.team === 'b') b++;
+  }
+  return r <= b ? 'r' : 'b';
+}
+
+function startMatch(mode) {
+  match.mode = mode;
+  match.state = 'playing';
+  match.endAt = now() + MATCH_TIME;
+  match.votes = new Map();
+  match.teamScores = { r: 0, b: 0 };
+  match.wave = 0;
+  match.waveBreakAt = mode === 'zombies' ? now() + 5 : 0;
+  bots.length = 0;
+  kits.length = 0;
+  for (const p of players.values()) {
+    p.kills = 0; p.deaths = 0; p.curStreak = 0; p.gunIdx = 0;
+    p.team = mode === 'teams' ? assignTeam() : null;
+    const sp = pickSpawn();
+    p.alive = true; p.hp = 100; p.pos = { ...sp };
+    send(p, { t: 'spawn', p: [sp.x, sp.y, sp.z] });
+  }
+  rebalanceBots();
+  broadcast(matchMsg());
+  broadcast({ t: 'aviso', txt: `▶ Nuevo modo: ${MODE_NAMES[mode]}` });
+  console.log(`modo: ${mode}`);
+}
+
+function podiumRows() {
+  const rows = [...players.values()].map((p) => ({
+    n: p.name, k: p.kills, d: p.deaths, tm: p.team, gi: p.gunIdx || 0,
+  }));
+  if (match.mode === 'gun') rows.sort((a, b) => b.gi - a.gi || b.k - a.k);
+  else rows.sort((a, b) => b.k - a.k);
+  return rows.slice(0, 5);
+}
+
+function endMatch(reasonTxt) {
+  if (match.state !== 'playing') return;
+  match.state = 'podium';
+  match.podiumEndAt = now() + PODIUM_TIME;
+  const rows = podiumRows();
+  let winner = rows.length ? rows[0].n : '—';
+  if (match.mode === 'teams') {
+    winner = match.teamScores.r === match.teamScores.b
+      ? 'EMPATE'
+      : (match.teamScores.r > match.teamScores.b ? '🔴 EQUIPO ROJO' : '🔵 EQUIPO AZUL');
+  }
+  broadcast({
+    t: 'podium', winner, txt: reasonTxt || '', rows,
+    ts: match.teamScores, mode: match.mode, secs: PODIUM_TIME, modes: MODES,
+  });
+}
+
+function nextMode() {
+  const tally = {};
+  for (const m of match.votes.values()) tally[m] = (tally[m] || 0) + 1;
+  let best = null, bestN = 0;
+  for (const m of MODES) {
+    if ((tally[m] || 0) > bestN) { best = m; bestN = tally[m]; }
+  }
+  return best || MODES[(MODES.indexOf(match.mode) + 1) % MODES.length];
+}
+
+// puntuación de equipo (cuentan también las bajas de los bots del equipo)
+function scoreTeamKill(team) {
+  if (match.mode !== 'teams' || !team || match.state !== 'playing') return;
+  match.teamScores[team]++;
+  if (match.teamScores[team] >= KILL_LIMIT) endMatch('🎯 Límite de bajas alcanzado');
+}
+
+function spawnWave(n) {
+  match.wave = n;
+  const count = 4 + 2 * n;
+  for (let i = 0; i < count; i++) {
+    const b = new ServerBot('z' + botSerial++, `Zombi_${i + 1}`, 0x69a05a, {
+      zombie: true, hp: 50 + 8 * n, speedMul: 0.75 + n * 0.07, meleeDmg: 10 + n,
+    });
+    bots.push(b);
+  }
+  broadcast({ t: 'aviso', txt: `🧟 Oleada ${n}: ${count} zombis` });
+  broadcast(matchMsg());
+}
+
+function modeTick(t) {
+  if (match.state === 'podium') {
+    if (t >= match.podiumEndAt) startMatch(nextMode());
+    return;
+  }
+  if (players.size === 0) return; // sin humanos el reloj no corre
+  if (match.mode === 'zombies') {
+    const vivos = bots.filter((b) => !b.dead).length;
+    if (match.wave > 0 && vivos === 0 && match.waveBreakAt === 0) {
+      bots.length = 0; // limpiar cadáveres
+      if (match.wave >= ZOMBIE_WAVES) {
+        endMatch(`🏆 ¡Superasteis las ${ZOMBIE_WAVES} oleadas!`);
+        return;
+      }
+      match.waveBreakAt = t + 6;
+      broadcast({ t: 'aviso', txt: `✅ Oleada ${match.wave} superada` });
+    }
+    if (match.waveBreakAt > 0 && t >= match.waveBreakAt) {
+      match.waveBreakAt = 0;
+      spawnWave(match.wave + 1);
+    }
+  } else if (t >= match.endAt) {
+    endMatch('⏱ Tiempo agotado');
+  }
+}
+
 const now = () => Date.now() / 1000;
 
 function sanitizeName(raw) {
@@ -115,8 +260,10 @@ function broadcast(msg, exceptId = null) {
   }
 }
 
-// bots = hueco libre hasta TOTAL_SLOTS, con tope de MAX_BOTS
+// bots = hueco libre hasta TOTAL_SLOTS, con tope de MAX_BOTS.
+// En zombis no aplica (las oleadas gestionan los bots).
 function rebalanceBots() {
+  if (match.mode === 'zombies') return;
   const target = Math.max(0, Math.min(MAX_BOTS, TOTAL_SLOTS - players.size));
   while (bots.length > target) {
     const b = bots.pop();
@@ -131,12 +278,34 @@ function rebalanceBots() {
     );
     bots.push(b);
   }
+  // en equipos: repartir bots equilibrando el tamaño total de cada bando
+  if (match.mode === 'teams') {
+    let r = 0, b2 = 0;
+    for (const p of players.values()) (p.team === 'b' ? b2++ : r++);
+    for (const bt of bots) {
+      if (r <= b2) { bt.team = 'r'; r++; } else { bt.team = 'b'; b2++; }
+    }
+  } else {
+    for (const bt of bots) bt.team = null;
+  }
 }
 
-function creditKill(killer) {
+function creditKill(killer, weaponKind) {
   killer.kills++;
   killer.curStreak = (killer.curStreak || 0) + 1;
   ranking.addKill(killer.name, killer.curStreak);
+  scoreTeamKill(killer.team);
+  if (match.state !== 'playing') return;
+  if (match.mode === 'ffa' && killer.kills >= KILL_LIMIT) {
+    endMatch('🎯 Límite de bajas alcanzado');
+  } else if (match.mode === 'gun' && weaponKind === GUN_LADDER[killer.gunIdx]) {
+    killer.gunIdx++;
+    if (killer.gunIdx >= GUN_LADDER.length) {
+      endMatch(`🏆 ${killer.name} completó todas las armas`);
+    } else {
+      send(killer, { t: 'gun', gi: killer.gunIdx });
+    }
+  }
 }
 
 function killPlayer(victim, killerName, isHead) {
@@ -157,15 +326,17 @@ function killPlayer(victim, killerName, isHead) {
   }, 2600);
 }
 
-function damagePlayer(victim, dmg, sourceName, isHead, killerPlayer = null) {
-  if (!victim.alive) return;
+function damagePlayer(victim, dmg, sourceName, isHead, killerPlayer = null, weaponKind = null) {
+  if (!victim.alive || match.state !== 'playing') return;
   victim.hp -= dmg;
   victim.lastDmg = now();
   send(victim, { t: 'ouch', d: dmg, hp: Math.max(0, victim.hp), by: sourceName });
   if (victim.hp <= 0) {
-    if (killerPlayer) creditKill(killerPlayer);
+    if (killerPlayer) creditKill(killerPlayer, weaponKind);
     killPlayer(victim, sourceName, isHead);
+    return true;
   }
+  return false;
 }
 
 wss.on('connection', (ws) => {
@@ -184,10 +355,14 @@ wss.on('connection', (ws) => {
         color: BOT_COLORS[(id * 3) % BOT_COLORS.length],
         pos: { ...sp }, ry: 0, rx: 0, speed: 0, sliding: false,
         hp: 100, kills: 0, deaths: 0, alive: true, lastDmg: 0,
+        team: match.mode === 'teams' ? assignTeam() : null,
+        curStreak: 0, gunIdx: 0,
       };
       players.set(id, me);
       rebalanceBots();
       send(me, { t: 'hi', id, name: me.name, spawn: [sp.x, sp.y, sp.z], slots: TOTAL_SLOTS });
+      send(me, matchMsg());
+      if (match.mode === 'gun') send(me, { t: 'gun', gi: 0 });
       broadcast({ t: 'aviso', txt: `${me.name} entró a la partida` }, id);
       console.log(`+ ${me.name} (${players.size} jugadores, ${bots.length} bots)`);
       return;
@@ -212,14 +387,15 @@ wss.on('connection', (ws) => {
         broadcast({ t: 'nade', id, p: m.p, v: m.v }, id);
       }
     } else if (m.t === 'hit') {
-      if (!me.alive) return;
+      if (!me.alive || match.state !== 'playing') return;
       const dmg = Math.max(1, Math.min(120, Math.round(+m.d || 0)));
+      const weapon = String(m.w || '').slice(0, 10);
       if (m.kind === 'bot') {
         const bot = bots.find((b) => b.id === m.id);
-        if (bot && !bot.dead) {
+        if (bot && !bot.dead && !(match.mode === 'teams' && bot.team === me.team)) {
           const died = bot.takeDamage(dmg, me.pos);
           if (died) {
-            creditKill(me);
+            creditKill(me, weapon);
             spawnKit(bot.pos);
             broadcast({ t: 'kill', vn: bot.name, vid: null, kn: me.name, h: !!m.h });
           }
@@ -227,8 +403,32 @@ wss.on('connection', (ws) => {
       } else if (m.kind === 'pl') {
         const victim = players.get(+m.id);
         if (victim && victim.id !== me.id) {
-          damagePlayer(victim, dmg, me.name, !!m.h, me);
+          if (match.mode === 'teams' && victim.team === me.team) return; // fuego amigo desactivado
+          damagePlayer(victim, dmg, me.name, !!m.h, me, weapon);
         }
+      }
+    } else if (m.t === 'selfdmg') {
+      // daño por caída, lo declara el propio cliente
+      const dmg = Math.max(1, Math.min(60, Math.round(+m.d || 0)));
+      damagePlayer(me, dmg, 'la caída', false);
+    } else if (m.t === 'team') {
+      if (match.mode === 'teams') {
+        me.team = m.tm === 'r' || m.tm === 'b' ? m.tm : assignTeam();
+        rebalanceBots();
+        broadcast({ t: 'aviso', txt: `${me.name} → equipo ${me.team === 'r' ? 'ROJO' : 'AZUL'}` });
+      }
+    } else if (m.t === 'modo') {
+      // cambio de modo a mano (cualquier jugador; partidas entre amigos)
+      if (MODES.includes(m.m) && m.m !== match.mode) {
+        broadcast({ t: 'aviso', txt: `${me.name} cambió el modo` });
+        startMatch(m.m);
+      }
+    } else if (m.t === 'vote') {
+      if (match.state === 'podium' && MODES.includes(m.m)) {
+        match.votes.set(me.id, m.m);
+        const tally = {};
+        for (const v of match.votes.values()) tally[v] = (tally[v] || 0) + 1;
+        broadcast({ t: 'votes', tally });
       }
     }
   });
@@ -254,10 +454,12 @@ const botCtx = {
   },
   onHitTarget(bot, kind, target, dmg) {
     if (kind === 'pl') {
-      damagePlayer(target, dmg, bot.name, false);
+      const died = damagePlayer(target, dmg, bot.name, false);
+      if (died) scoreTeamKill(bot.team);
     } else {
       const died = target.takeDamage(dmg, bot.pos);
       if (died) {
+        scoreTeamKill(bot.team);
         spawnKit(target.pos);
         broadcast({ t: 'kill', vn: target.name, vid: null, kn: bot.name, h: false });
       }
@@ -271,7 +473,10 @@ setInterval(() => {
   const dt = Math.min(0.1, t - last);
   last = t;
 
-  for (const b of bots) b.update(dt, botCtx);
+  modeTick(t);
+  if (match.state === 'playing') {
+    for (const b of bots) b.update(dt, botCtx);
+  }
 
   // regeneración de vida de jugadores
   for (const p of players.values()) {
@@ -313,17 +518,22 @@ setInterval(() => {
 
   const snap = {
     t: 'snap',
+    m: matchMsg(),
     pl: [...players.values()].map((p) => ({
-      id: p.id, n: p.name, c: p.color,
+      id: p.id, n: p.name,
+      c: p.team ? TEAM_COLORS[p.team] : p.color,
+      tm: p.team || undefined, gi: p.gunIdx || 0,
       p: [+p.pos.x.toFixed(2), +p.pos.y.toFixed(2), +p.pos.z.toFixed(2)],
       ry: +p.ry.toFixed(2), rx: +p.rx.toFixed(2), s: +p.speed.toFixed(1),
       hp: Math.round(p.hp), k: p.kills, d: p.deaths, al: p.alive ? 1 : 0,
     })),
     bots: bots.map((b) => ({
-      id: b.id, n: b.name, c: b.color,
+      id: b.id, n: b.name,
+      c: b.team ? TEAM_COLORS[b.team] : b.color,
+      tm: b.team || undefined, z: b.zombie ? 1 : 0,
       p: [+b.pos.x.toFixed(2), +b.pos.y.toFixed(2), +b.pos.z.toFixed(2)],
       ry: +b.yaw.toFixed(2), s: +b.speed.toFixed(1),
-      hp: Math.round(b.hp), al: b.dead ? 0 : 1, en: b.engaging ? 1 : 0,
+      hp: Math.round(b.hp), al: b.dead ? 0 : 1, en: b.engaging || b.zombie ? 1 : 0,
     })),
     kits: kits.map((k) => ({ id: k.id, p: [+k.x.toFixed(2), +k.y.toFixed(2), +k.z.toFixed(2)] })),
   };

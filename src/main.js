@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { buildWorld } from './world.js';
 import { Player } from './player.js';
-import { WeaponSystem } from './weapons.js';
+import { WeaponSystem, WEAPON_ORDER } from './weapons.js';
 import { BotManager } from './bots.js';
 import { Effects } from './effects.js';
 import { AudioSys } from './audio.js';
@@ -72,6 +72,33 @@ function onHealed() {
   hud.announce('+25 PV ❤');
 }
 
+// --- estado de la partida (modo, podio, equipo) ---
+const MODES = ['ffa', 'teams', 'gun', 'zombies'];
+let matchInfo = { mode: 'ffa', st: 'playing', tl: 0, ts: { r: 0, b: 0 }, wv: 0, zl: 0 };
+let myGunIdx = 0;
+let podiumOpen = false;
+let teamPickerOpen = false;
+let podiumTimer = null;
+
+function fmtTime(s) {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function bannerText(mm) {
+  if (mm.st === 'podium') return '🏁 Fin de partida';
+  if (mm.mode === 'ffa') return `⚔ TODOS CONTRA TODOS · primero a 30 · ${fmtTime(mm.tl)}`;
+  if (mm.mode === 'teams') return `🔴 ${mm.ts.r} — ${mm.ts.b} 🔵 · primero a 30 · ${fmtTime(mm.tl)}`;
+  if (mm.mode === 'gun') return `🔫 BÚSQUEDA DEL ARMA · tu arma ${Math.min(myGunIdx + 1, 5)}/5 · ${fmtTime(mm.tl)}`;
+  if (mm.mode === 'zombies') return mm.wv === 0 ? '🧟 ZOMBIS · preparaos...' : `🧟 Oleada ${mm.wv} · quedan ${mm.zl}`;
+  return '';
+}
+
+function setTeamPicker(open) {
+  teamPickerOpen = open;
+  hud.showTeamPicker(open);
+  weapons.inputBlocked = open || podiumOpen;
+}
+
 // --- economía y rachas: se activan con cada baja mía ---
 let streak = 0;
 
@@ -95,6 +122,80 @@ addEventListener('keydown', (e) => {
   if (state !== 'playing' || player.dead) return;
   if (grenades.throwFrom(camera)) audio.nadeThrow();
 });
+
+// --- cuchillo (V): tajo rápido, 100 de daño por la espalda ---
+function buildKnifeMesh() {
+  const g = new THREE.Group();
+  const blade = new THREE.Mesh(
+    new THREE.BoxGeometry(0.025, 0.09, 0.36),
+    new THREE.MeshLambertMaterial({ color: 0xd8dde2 }),
+  );
+  blade.position.set(0, 0.02, -0.28);
+  const handle = new THREE.Mesh(
+    new THREE.BoxGeometry(0.045, 0.06, 0.16),
+    new THREE.MeshLambertMaterial({ color: 0x3a2c20 }),
+  );
+  g.add(blade, handle);
+  g.position.set(0.3, -0.24, -0.5);
+  g.visible = false;
+  return g;
+}
+const knifeMesh = buildKnifeMesh();
+camera.add(knifeMesh);
+let knifeCooldownUntil = 0;
+let knifeAnim = 0;
+let offlineBotKilled = null; // lo asigna setupOffline
+
+function doKnife() {
+  const nowS = performance.now() / 1000;
+  if (nowS < knifeCooldownUntil || player.dead || state !== 'playing') return;
+  knifeCooldownUntil = nowS + 0.9;
+  knifeAnim = 0.001;
+  audio.knife();
+
+  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  fwd.y = 0;
+  fwd.normalize();
+
+  // ¿hay alguien a tiro de cuchillo delante de mí?
+  const enRango = (pos) => {
+    const dx = pos.x - player.pos.x, dz = pos.z - player.pos.z;
+    if (Math.hypot(dx, dz) > 2.4 || Math.abs(pos.y - player.pos.y) > 2) return false;
+    return new THREE.Vector3(dx, 0, dz).normalize().dot(fwd) > 0.5;
+  };
+  const calcDmg = (yaw) => {
+    const facing = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    return facing.dot(fwd) > 0.35 ? 100 : 40; // por la espalda = letal
+  };
+
+  if (online && remotes) {
+    const grupos = [['pl', remotes.players], ['bot', remotes.bots]];
+    for (const [kind, map] of grupos) {
+      for (const ent of map.values()) {
+        if (!ent.alive) continue;
+        const pos = ent.rig.group.position;
+        if (!enRango(pos)) continue;
+        const dmg = calcDmg(ent.rig.group.rotation.y);
+        effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
+        hud.hitmarker(false);
+        audio.hit();
+        net.sendHit(kind, ent.id, dmg, dmg >= 100, 'knife');
+        return;
+      }
+    }
+  } else if (botsLocal) {
+    for (const bot of botsLocal.bots) {
+      if (bot.dead || !enRango(bot.pos)) continue;
+      const dmg = calcDmg(bot.yaw);
+      const killed = bot.takeDamage(dmg, player.pos);
+      effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
+      hud.hitmarker(killed);
+      audio.hit();
+      if (killed && offlineBotKilled) offlineBotKilled(bot, false);
+      return;
+    }
+  }
+}
 
 let remotes = null;      // modo online
 let botsLocal = null;    // modo offline
@@ -161,6 +262,9 @@ function setupOffline() {
     const dmgSelf = Math.round(explosionDamage(dSelf) / 2);
     if (dmgSelf > 0) player.damage(dmgSelf, 'tu propia granada');
   };
+  offlineBotKilled = localBotKilled;
+  hud.setMatchBanner('🔴 MODO LOCAL · partida libre');
+
   player.onDeath = (killerName) => {
     deaths++;
     resetStreak();
@@ -196,7 +300,7 @@ function setupOnline() {
     effects.impact(point, 0xcc4444, 4);
     hud.hitmarker(false);
     audio.hit();
-    net.sendHit(data.net.kind, data.net.id, dmg, isHead);
+    net.sendHit(data.net.kind, data.net.id, dmg, isHead, weapons.def.kind);
   };
   weapons.onShot = (a, b, kind) => net.sendFire(a, b, kind);
 
@@ -207,10 +311,54 @@ function setupOnline() {
     const me = m.pl.find((p) => p.id === net.id);
     if (me) {
       kills = me.k; deaths = me.d;
+      myGunIdx = me.gi || 0;
       hud.updateScore(kills, deaths);
       if (!player.dead) player.health = me.hp;
     }
+    if (m.m) {
+      matchInfo = m.m;
+      hud.setMatchBanner(bannerText(matchInfo));
+    }
     hud.setNetStatus(`🟢 ONLINE — ${m.pl.length}/${net.slots} jugadores · ${m.bots.length} bots`, true);
+  });
+
+  net.on('match', (m) => {
+    matchInfo = m;
+    if (m.st === 'playing') {
+      podiumOpen = false;
+      hud.hidePodium();
+      clearInterval(podiumTimer);
+      resetStreak();
+      myGunIdx = 0;
+      weapons.setForced(m.mode === 'gun' ? WEAPON_ORDER[0] : null);
+      if (m.mode === 'teams') setTeamPicker(true);
+      else setTeamPicker(false);
+    }
+    hud.setMatchBanner(bannerText(matchInfo));
+  });
+
+  net.on('podium', (m) => {
+    setTeamPicker(false);
+    podiumOpen = true;
+    weapons.inputBlocked = true;
+    hud.showPodium(m);
+    audio.streak(4); // fanfarria de fin de partida
+    let secs = m.secs || 12;
+    hud.setPodiumCountdown(secs);
+    clearInterval(podiumTimer);
+    podiumTimer = setInterval(() => {
+      secs--;
+      hud.setPodiumCountdown(Math.max(0, secs));
+      if (secs <= 0) clearInterval(podiumTimer);
+    }, 1000);
+  });
+
+  net.on('votes', (m) => hud.setPodiumVotes(m.tally || {}));
+
+  net.on('gun', (m) => {
+    myGunIdx = m.gi || 0;
+    weapons.setForced(WEAPON_ORDER[myGunIdx]);
+    hud.announce(`🔫 Arma ${myGunIdx + 1}/5 — ¡sigue así!`);
   });
 
   net.on('fire', (m) => {
@@ -252,7 +400,7 @@ function setupOnline() {
       const dmg = explosionDamage(d);
       if (dmg <= 0) return;
       effects.popup(ep.clone().add(new THREE.Vector3(0, 1.4, 0)), String(dmg), false);
-      net.sendHit(kind, ent.id, dmg, false);
+      net.sendHit(kind, ent.id, dmg, false, 'nade');
     };
     for (const ent of remotes.players.values()) aplicar(ent, 'pl');
     for (const ent of remotes.bots.values()) aplicar(ent, 'bot');
@@ -384,6 +532,32 @@ addEventListener('keyup', (e) => {
   if (e.code === 'Tab') hud.showScores(false);
 });
 
+// teclas de modo: V cuchillo, M cambiar equipo, 1-4 en podio/selector
+addEventListener('keydown', (e) => {
+  if (!document.pointerLockElement) return;
+  if (e.code === 'KeyV') doKnife();
+  if (e.code === 'KeyM' && online && matchInfo.mode === 'teams' && !podiumOpen) {
+    setTeamPicker(!teamPickerOpen);
+  }
+  const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+  if (idx >= 0) {
+    if (podiumOpen && online) {
+      net.sendVote(MODES[idx]);
+    } else if (teamPickerOpen) {
+      if (idx === 0) net.sendTeam('r');
+      else if (idx === 1) net.sendTeam('b');
+      if (idx < 3) setTeamPicker(false);
+    }
+  }
+});
+
+player.onHardLand = (speed) => {
+  const dmg = Math.round((speed - 16) * 4);
+  if (dmg <= 0) return;
+  if (online) net.sendSelfDmg(dmg);
+  else if (!player.dead) player.damage(dmg, 'la caída');
+};
+
 player.onJump = () => audio.jump();
 player.onLand = () => audio.land();
 player.onDamaged = (amount) => {
@@ -425,6 +599,22 @@ function tick(now) {
   grenades.update(dt, player.eyePosition(playerEye));
   effects.update(dt);
 
+  // animación del tajo de cuchillo
+  if (knifeAnim > 0) {
+    knifeAnim += dt * 4.5;
+    if (knifeAnim >= 1) {
+      knifeAnim = 0;
+      knifeMesh.visible = false;
+    } else {
+      knifeMesh.visible = true;
+      const t = knifeAnim;
+      knifeMesh.position.x = 0.3 - t * 0.42;
+      knifeMesh.position.z = -0.5 - Math.sin(t * Math.PI) * 0.25;
+      knifeMesh.rotation.z = t * 1.1;
+      knifeMesh.rotation.y = -0.3 + t * 0.6;
+    }
+  }
+
   hud.update(dt);
   if (playing || state === 'dead') {
     hud.updateHealth(player.health, player.maxHealth);
@@ -447,7 +637,7 @@ requestAnimationFrame(loop);
 
 // gancho de depuración/pruebas (no afecta al juego)
 window.__game = {
-  scene, camera, renderer, player, weapons, world, effects, net, tick, grenades,
+  scene, camera, renderer, player, weapons, world, effects, net, tick, grenades, doKnife,
   getRemotes: () => remotes,
   getBots: () => botsLocal,
   getState: () => state,

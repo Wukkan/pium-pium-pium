@@ -126,6 +126,45 @@
     /* fps */
     #fps { position: absolute; right: 22px; top: 50%; font-size: 11px; color: rgba(255,255,255,.6); font-family: monospace; font-style: normal; display:none; }
 
+    /* banner de modo (arriba centro) */
+    #match-banner {
+      position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
+      font-size: 17px; color: #fff; background: rgba(0,0,0,.35);
+      padding: 5px 20px; border-radius: 5px; white-space: nowrap;
+    }
+
+    /* podio de fin de partida */
+    #podium {
+      display: none;
+      position: absolute; left: 50%; top: 16%; transform: translateX(-50%);
+      min-width: 420px; text-align: center;
+      background: rgba(10,14,22,.92); border: 1px solid rgba(255,210,77,.35);
+      border-radius: 10px; padding: 22px 30px;
+    }
+    #podium h2 { color: #fff; font-style: italic; font-size: 26px; }
+    #podium-winner { color: #ffd24d; font-size: 22px; font-weight: 900; font-style: italic; margin-top: 8px; }
+    #podium-rows { margin-top: 12px; font-family: Arial; font-size: 15px; color: #e8eefb; line-height: 1.8; }
+    #podium .vote-hint { margin-top: 16px; color: #9fb4d8; font-family: Arial; font-size: 13px; line-height: 1.9; }
+    #podium .vote-hint b { color: #ffd24d; }
+    #podium-votes { margin-top: 6px; color: #8ce78c; font-family: Arial; font-size: 13px; min-height: 17px; }
+    #podium-count { margin-top: 8px; color: #7f92b4; font-family: Arial; font-size: 12px; }
+
+    /* selector de equipo */
+    #team-picker {
+      display: none;
+      position: absolute; left: 50%; top: 30%; transform: translateX(-50%);
+      text-align: center; background: rgba(10,14,22,.92);
+      border: 1px solid rgba(255,255,255,.2); border-radius: 10px; padding: 20px 34px;
+    }
+    #team-picker h2 { color: #fff; font-style: italic; font-size: 22px; }
+    #team-picker .tp-options { margin-top: 14px; font-size: 17px; font-weight: 900; font-style: italic; }
+    #team-picker .tp-options span { margin: 0 12px; }
+    #team-picker .tp-r { color: #ff6b5a; }
+    #team-picker .tp-b { color: #6b9aff; }
+    #team-picker .tp-a { color: #cfcfcf; }
+    #team-picker .tp-options b { color: #ffd24d; }
+    #team-picker .tp-hint { margin-top: 12px; color: #7f92b4; font-family: Arial; font-size: 12px; }
+
     /* marcador (TAB) */
     #scores {
       display: none;
@@ -224,6 +263,27 @@
 
     <div id="score" class="hud-text"><span class="k">☠ 0</span><span class="d">✖ 0</span></div>
     <div id="money" class="hud-text">$ 0</div>
+    <div id="match-banner" class="hud-text"></div>
+
+    <div id="podium">
+      <h2>FIN DE LA PARTIDA</h2>
+      <div id="podium-winner"></div>
+      <div id="podium-rows"></div>
+      <div class="vote-hint">Vota el siguiente modo:<br/>
+        <b>[1]</b> Todos contra todos &nbsp; <b>[2]</b> Equipos &nbsp; <b>[3]</b> Búsqueda del arma &nbsp; <b>[4]</b> Zombis</div>
+      <div id="podium-votes"></div>
+      <div id="podium-count"></div>
+    </div>
+
+    <div id="team-picker">
+      <h2>ELIGE EQUIPO</h2>
+      <div class="tp-options">
+        <span class="tp-r"><b>[1]</b> ROJO</span>
+        <span class="tp-b"><b>[2]</b> AZUL</span>
+        <span class="tp-a"><b>[3]</b> Automático</span>
+      </div>
+      <div class="tp-hint">(en partida: tecla M para cambiar de equipo)</div>
+    </div>
     <div id="killfeed"></div>
     <div id="announce" class="hud-text"></div>
 
@@ -263,8 +323,9 @@
     <button id="play-btn">JUGAR</button>
     <div class="controls">
       <b>WASD</b> moverse &nbsp;·&nbsp; <b>ESPACIO</b> saltar (mantén para bunny-hop) &nbsp;·&nbsp; <b>SHIFT</b> deslizarse<br/>
-      <b>CLIC IZQ</b> disparar &nbsp;·&nbsp; <b>CLIC DER</b> apuntar &nbsp;·&nbsp; <b>R</b> recargar &nbsp;·&nbsp; <b>1-5</b> armas &nbsp;·&nbsp; <b>G</b> granada<br/>
-      <b>TAB</b> marcador &nbsp;·&nbsp; <b>ESC</b> menú &nbsp;·&nbsp; empiezas con pistola: <b>cada baja da $100</b> para comprar armas
+      <b>CLIC IZQ</b> disparar &nbsp;·&nbsp; <b>CLIC DER</b> apuntar &nbsp;·&nbsp; <b>R</b> recargar &nbsp;·&nbsp; <b>1-5</b> armas &nbsp;·&nbsp; <b>G</b> granada &nbsp;·&nbsp; <b>V</b> cuchillo<br/>
+      <b>TAB</b> marcador &nbsp;·&nbsp; <b>M</b> cambiar equipo &nbsp;·&nbsp; <b>ESC</b> menú &nbsp;·&nbsp; cada baja da <b>$100</b> para comprar armas<br/>
+      Modos: todos contra todos · equipos · búsqueda del arma · zombis — se vota al final de cada partida
     </div>
     <div id="menu-stats"></div>
   </div>

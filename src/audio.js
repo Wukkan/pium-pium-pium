@@ -179,6 +179,11 @@ export class AudioSys {
     this._noise(0.06, 900, 1, 0.12, 0.05);
   }
 
+  knife() {
+    if (!this.ctx) return;
+    this._noise(0.12, 2400, 2.5, 0.22, 0.1); // silbido del tajo
+  }
+
   // volumen según distancia para disparos de bots
   distVol(d) {
     return Math.max(0.05, Math.min(1, 1 - d / 70));

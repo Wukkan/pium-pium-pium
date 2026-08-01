@@ -41,6 +41,17 @@ y abre **http://localhost:5173**. Escribe tu nombre y pulsa **JUGAR**.
 
 Empiezas con la pistola. Cada baja da **$100** (+$50 headshot, + bonus por racha) para desbloquear el resto de armas. Las rachas de bajas se anuncian a las 3, 5, 8, 10...
 
+**Extras**: `V` cuchillo (100 de daño por la espalda), `G` granadas, daño por caída, y las piernas reciben menos daño que el cuerpo.
+
+## Modos de juego (online)
+
+Al final de cada partida hay **podio y votación** del siguiente modo (teclas 1-4). Los bots rellenan siempre que falten jugadores.
+
+- **Todos contra todos** — primero a 30 bajas o 5 minutos.
+- **Equipos** 🔴🔵 — eliges bando al empezar (y cambias con `M`); los bots equilibran los equipos; sin fuego amigo.
+- **Búsqueda del arma** — todos con la misma escalera: pistola → escopeta → subfusil → rifle → francotirador. Solo avanzas matando con el arma que te toca. Gana quien complete las 5.
+- **Zombis** 🧟 — cooperativo: 8 oleadas de zombis cada vez más numerosos, rápidos y duros. Solo van al cuerpo a cuerpo. Sobrevivid todos juntos.
+
 ## Créditos
 
 - Sonidos de disparo: ["Gunshot Sounds" de Tabasco](https://opengameart.org/content/gunshot-sounds), grabaciones reales bajo licencia CC0 (dominio público).

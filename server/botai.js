@@ -15,10 +15,17 @@ const ENGAGE_DIST = 42;
 const now = () => Date.now() / 1000;
 
 export class ServerBot {
-  constructor(id, name, color) {
+  // opts: { team: 'r'|'b'|null, zombie: bool, hp, speedMul, meleeDmg }
+  constructor(id, name, color, opts = {}) {
     this.id = id;
     this.name = name;
     this.color = color;
+    this.team = opts.team || null;
+    this.zombie = !!opts.zombie;
+    this.maxHp = opts.hp || 100;
+    this.speedMul = opts.speedMul || 1;
+    this.meleeDmg = opts.meleeDmg || 12;
+    this.nextMeleeAt = 0;
     this.pos = { x: 0, y: 0, z: 0 };
     this.vel = { x: 0, y: 0, z: 0 };
     this.yaw = 0;
@@ -47,7 +54,7 @@ export class ServerBot {
     const sp = BOT_SPAWNS[Math.floor(Math.random() * BOT_SPAWNS.length)];
     this.pos = { ...sp };
     this.vel = { x: 0, y: 0, z: 0 };
-    this.hp = 100;
+    this.hp = this.maxHp;
     this.dead = false;
     this.waypoint = null;
   }
@@ -78,31 +85,47 @@ export class ServerBot {
     const t = now();
 
     if (this.dead) {
+      if (this.zombie) return; // los zombis no reaparecen: los repone la oleada
       if (t >= this.respawnAt) this.spawn();
       return;
     }
 
     // objetivo: entidad viva visible más cercana (jugadores u otros bots;
-    // los humanos tienen preferencia ligera)
+    // los humanos tienen preferencia ligera). Nunca compañeros de equipo.
+    // Los zombis solo cazan jugadores y los ven desde toda la arena.
+    const engageDist = this.zombie ? 200 : ENGAGE_DIST;
     let target = null, targetKind = null, targetDist = Infinity, best = Infinity;
     const considerar = (kind, ent, alive) => {
       if (!alive || ent === this) return;
+      if (this.team && ent.team === this.team) return;
       const d = Math.hypot(ent.pos.x - this.pos.x, ent.pos.y - this.pos.y, ent.pos.z - this.pos.z);
-      if (d > ENGAGE_DIST) return;
+      if (d > engageDist) return;
       const score = kind === 'pl' ? d * 0.75 : d;
       if (score >= best) return;
-      const from = this.eyePos();
-      const to = { x: ent.pos.x, y: ent.pos.y + 1.6, z: ent.pos.z };
-      if (segmentBlocked(from, to, ctx.colliders)) return;
+      if (!this.zombie) {
+        const from = this.eyePos();
+        const to = { x: ent.pos.x, y: ent.pos.y + 1.6, z: ent.pos.z };
+        if (segmentBlocked(from, to, ctx.colliders)) return;
+      }
       target = ent; targetKind = kind; targetDist = d; best = score;
     };
     for (const p of ctx.players) considerar('pl', p, p.alive);
-    for (const b of ctx.bots) considerar('bot', b, !b.dead);
+    if (!this.zombie) for (const b of ctx.bots) considerar('bot', b, !b.dead);
 
     let moveX = 0, moveZ = 0;
     this.engaging = !!target;
 
-    if (target) {
+    if (target && this.zombie) {
+      // zombi: correr directo al jugador y arañar de cerca
+      const dx = target.pos.x - this.pos.x, dz = target.pos.z - this.pos.z;
+      this.targetYaw = Math.atan2(dx, dz);
+      const fl = Math.hypot(dx, dz) || 1;
+      moveX = dx / fl; moveZ = dz / fl;
+      if (targetDist < 1.9 && t >= this.nextMeleeAt) {
+        this.nextMeleeAt = t + 0.8;
+        ctx.onHitTarget(this, targetKind, target, this.meleeDmg);
+      }
+    } else if (target) {
       const dx = target.pos.x - this.pos.x, dz = target.pos.z - this.pos.z;
       this.targetYaw = Math.atan2(dx, dz);
 
@@ -153,9 +176,10 @@ export class ServerBot {
     }
 
     // movimiento
+    const speed = BOT_SPEED * this.speedMul;
     const k = Math.min(1, dt * 8);
-    this.vel.x += (moveX * BOT_SPEED - this.vel.x) * k;
-    this.vel.z += (moveZ * BOT_SPEED - this.vel.z) * k;
+    this.vel.x += (moveX * speed - this.vel.x) * k;
+    this.vel.z += (moveZ * speed - this.vel.z) * k;
     this.vel.y -= GRAVITY * dt;
     const res = moveBody(this.pos, this.vel, dt, HALF, HALF, HEIGHT, ctx.colliders);
     this.onGround = res.onGround;
