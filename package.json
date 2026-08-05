@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Shooter multijugador en el navegador (réplica de krunker.io) con bots de relleno",
   "scripts": {
-    "start": "node server/server.js"
+    "start": "node server/server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"
