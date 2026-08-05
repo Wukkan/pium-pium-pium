@@ -13,6 +13,7 @@ import { KitManager } from './kits.js';
 import { GrenadeManager, explosionDamage } from './grenades.js';
 import { Missions } from './missions.js';
 import { HATS, MAPS, QUICK_CHAT } from './shared/mapdata.js';
+import { loadoutMetadata } from './ui-models.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — réplica de krunker.io, ahora multijugador.
@@ -136,6 +137,18 @@ const SKIN_COLORS = [0xe05252, 0x5278e0, 0x52b86a, 0xc27ad0, 0xe0a052, 0x52c2c2,
 const COLORS_PRICE = 300;
 let menuMsg = '';
 
+function renderLoadoutPanel() {
+  const meta = loadoutMetadata(weapons, skin, grenades.count);
+  const weapon = WEAPON_DEFS[meta.weapon];
+  const hat = HATS[meta.hat];
+  document.getElementById('loadout-weapon').textContent = weapon.name;
+  document.getElementById('loadout-weapon-detail').textContent = `${weapon.name} · ${weapon.mag}/${weapon.reserve}`;
+  document.getElementById('loadout-grenades').textContent = `${meta.grenades} disponibles`;
+  document.getElementById('loadout-hat').textContent = hat ? hat.name : 'Sin sombrero';
+  document.getElementById('loadout-color').textContent = meta.color ? `#${meta.color.toString(16).padStart(6, '0')}` : 'Predeterminado';
+  document.getElementById('loadout-owned').textContent = `Armas desbloqueadas: ${meta.ownedWeapons.map((key) => WEAPON_DEFS[key].name).join(' · ')}`;
+}
+
 // --- misiones diarias ---
 const missions = new Missions((amount, txt) => {
   weapons.addMoney(amount);
@@ -145,6 +158,7 @@ const missions = new Missions((amount, txt) => {
 });
 
 function renderMenuPanels() {
+  renderLoadoutPanel();
   // sombreros
   const hatList = document.getElementById('hat-list');
   hatList.textContent = '';
@@ -550,7 +564,6 @@ function setupOnline() {
     const a = new THREE.Vector3(m.a[0], m.a[1], m.a[2]);
     const b = new THREE.Vector3(m.b[0], m.b[1], m.b[2]);
     effects.muzzle(a, m.k);
-    effects.tracer(a, b, m.bid !== undefined ? 0xff8866 : 0x9bd4ff);
     if (m.k === 'launcher') effects.trail(a, b, 0xff8c42);
     player.eyePosition(playerEye);
     audio.shot(m.k, audio.distVol(a.distanceTo(playerEye)) * 0.7);

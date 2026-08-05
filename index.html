@@ -253,12 +253,13 @@
     /* ---------- MENÚ ---------- */
     #menu {
       position: fixed; inset: 0; z-index: 10;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      background: linear-gradient(160deg, rgba(20,26,40,.88), rgba(10,12,20,.94));
+      display: block; overflow: auto; padding: 34px 20px 50px;
+      background: radial-gradient(circle at 18% 8%, rgba(76,109,170,.32), transparent 38%), linear-gradient(160deg, rgba(20,26,40,.94), rgba(10,12,20,.98));
       backdrop-filter: blur(3px);
     }
+    #menu-content { width: min(1160px, 100%); margin: 0 auto; text-align: center; }
     #menu h1 {
-      font-size: 60px; font-style: italic; color: #fff; letter-spacing: 2px;
+      font-size: clamp(42px, 6vw, 70px); font-style: italic; color: #fff; letter-spacing: 2px;
       text-shadow: 0 5px 0 rgba(0,0,0,.6), 0 0 30px rgba(120,180,255,.35);
       transform: skewX(-6deg);
     }
@@ -275,12 +276,32 @@
     }
     #play-btn:hover { transform: skewX(-8deg) translateY(2px); box-shadow: 0 4px 0 #a85e0d, 0 8px 18px rgba(0,0,0,.5); }
     #menu .controls {
-      margin-top: 40px; color: #c8d4ea; font-family: Arial; font-size: 13.5px; line-height: 1.9;
+      width: min(760px, 100%); margin: 24px auto 0; color: #c8d4ea; font-family: Arial; font-size: 13.5px; line-height: 1.9;
       background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
       border-radius: 8px; padding: 16px 34px; text-align: center;
     }
     #menu .controls b { color: #ffd24d; font-family: 'Arial Black'; }
     #menu-stats { margin-top: 18px; color: #7f92b4; font-family: Arial; font-size: 13px; }
+    #menu-loadout {
+      display: grid; grid-template-columns: 270px 1fr; gap: 18px; width: min(920px, 100%);
+      margin: 28px auto 0; text-align: left; background: rgba(9,13,22,.78);
+      border: 1px solid rgba(143,208,255,.22); border-radius: 14px; padding: 18px;
+      box-shadow: 0 16px 45px rgba(0,0,0,.28);
+    }
+    .operator-card { position: relative; min-height: 220px; overflow: hidden; border-radius: 10px; background: linear-gradient(145deg, #263d59, #121a2b); text-align: center; }
+    .operator-card::after { content: 'OPERADOR'; position: absolute; left: 14px; bottom: 12px; color: rgba(255,255,255,.5); font: 900 12px Arial, sans-serif; letter-spacing: 2px; }
+    .operator-avatar { position: absolute; left: 50%; top: 42px; width: 92px; height: 132px; transform: translateX(-50%); }
+    .operator-avatar .avatar-head { display: block; width: 48px; height: 48px; margin: 0 auto; border-radius: 50%; background: #d19768; border: 5px solid #1a2638; }
+    .operator-avatar .avatar-body { display: block; width: 80px; height: 80px; margin: 4px auto 0; border-radius: 25px 25px 8px 8px; background: linear-gradient(90deg, #425f7c, #1c2e47); border: 5px solid #1a2638; }
+    .operator-avatar .avatar-gun { position: absolute; width: 82px; height: 12px; right: -28px; bottom: 18px; border-radius: 5px; background: #15171c; transform: rotate(-25deg); box-shadow: 0 0 0 3px rgba(255,210,77,.55); }
+    .loadout-title { color: #ffd24d; font: 900 14px Arial, sans-serif; letter-spacing: 1.5px; text-transform: uppercase; }
+    .loadout-main { margin-top: 12px; color: #fff; font: 900 30px 'Arial Black', Arial, sans-serif; font-style: italic; }
+    .loadout-sub { margin-top: 4px; color: #9fb4d8; font: 13px Arial, sans-serif; }
+    .loadout-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; margin-top: 18px; }
+    .loadout-chip { min-height: 62px; padding: 10px 12px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); border-radius: 7px; }
+    .loadout-chip b { display: block; color: #8fd0ff; font: 11px Arial, sans-serif; text-transform: uppercase; letter-spacing: 1px; }
+    .loadout-chip span { display: block; margin-top: 6px; color: #e8eefb; font: 900 14px Arial, sans-serif; }
+    #loadout-owned { margin-top: 12px; color: #7f92b4; font: 12px Arial, sans-serif; line-height: 1.5; }
 
     /* ---------- compra en partida, estilo buy-menu ---------- */
     #buy-menu {
@@ -319,6 +340,8 @@
     .buy-footer { margin-top: 16px; color: #7f92b4; font: 12px Arial, sans-serif; text-align: center; }
     @media (max-width: 760px) {
       #buy-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+      #menu-loadout { grid-template-columns: 1fr; }
+      .operator-card { min-height: 180px; }
     }
 
     /* ---------- MUERTE ---------- */
@@ -418,6 +441,7 @@
   </div>
 
   <div id="menu">
+    <div id="menu-content">
     <h1>PIUM PIUM <span class="io">PIUM</span></h1>
     <div class="subtitle">shooter multijugador en primera persona</div>
     <div id="net-status" class="offline">conectando...</div>
@@ -431,6 +455,24 @@
     </div>
     <div id="menu-stats"></div>
 
+    <div id="menu-loadout">
+      <div class="operator-card">
+        <div class="operator-avatar"><span class="avatar-head"></span><span class="avatar-body"></span><span class="avatar-gun"></span></div>
+      </div>
+      <div>
+        <div class="loadout-title">Tu equipamiento</div>
+        <div id="loadout-weapon" class="loadout-main">PISTOLA</div>
+        <div class="loadout-sub">Configuración lista para entrar al combate</div>
+        <div class="loadout-grid">
+          <div class="loadout-chip"><b>Arma equipada</b><span id="loadout-weapon-detail">PISTOLA</span></div>
+          <div class="loadout-chip"><b>Granadas</b><span id="loadout-grenades">2 disponibles</span></div>
+          <div class="loadout-chip"><b>Sombrero</b><span id="loadout-hat">Sin sombrero</span></div>
+          <div class="loadout-chip"><b>Color</b><span id="loadout-color">Predeterminado</span></div>
+        </div>
+        <div id="loadout-owned"></div>
+      </div>
+    </div>
+
     <div id="custom-panel">
       <div class="cp-col">
         <h4>🎩 Sombrero</h4>
@@ -443,6 +485,7 @@
         <div id="mission-list"></div>
         <div id="menu-money"></div>
       </div>
+    </div>
     </div>
   </div>
 

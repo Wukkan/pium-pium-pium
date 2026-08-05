@@ -126,7 +126,7 @@ export class QuarksEffects {
     const color = kind === 'launcher' ? 0xff7b35 : kind === 'sniper' ? 0x9bd4ff : 0xffd66b;
     this.burst(position, 'muzzle', {
       color,
-      texture: 'impact',
+      texture: 'default',
       count: kind === 'shotgun' ? 2 : 1,
       maxCount: 3,
       duration: 0.025,

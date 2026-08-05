@@ -366,7 +366,6 @@ export class WeaponSystem {
           this.effects.impact(hit.point, 0xd8d0b8, pellets > 1 ? 2 : 5);
         }
       }
-      this.effects.tracer(muzzle, end);
       if (!firstEnd) firstEnd = end;
     }
 

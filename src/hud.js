@@ -2,6 +2,8 @@
 // HUD: vida, munición, mira, hitmarker, killfeed, viñeta de daño, pantallas.
 // ---------------------------------------------------------------------------
 
+import { weaponHudLabel } from './ui-models.js';
+
 const $ = (id) => document.getElementById(id);
 
 const SLOT_NAMES = {
@@ -77,7 +79,7 @@ export class HUD {
     document.getElementById('nades').textContent = `🧨 [G] Granadas: ${n}`;
   }
 
-  // ranuras [1]..[5] con precio y candado para las no compradas
+  // ranuras compactas: las compras viven exclusivamente en el arsenal B
   updateSlots(weapons) {
     const wrap = document.getElementById('weapon-slots');
     wrap.textContent = '';
@@ -86,6 +88,11 @@ export class HUD {
       const span = document.createElement('span');
       span.className = 'slot';
       if (key === weapons.current) span.classList.add('current');
+      if (!weapons.owned[key]) span.classList.add('locked');
+      span.textContent = weaponHudLabel(def, i, SLOT_NAMES[key]);
+      wrap.append(span);
+      return;
+      /*
       if (!weapons.owned[key]) {
         span.classList.add(weapons.money >= def.price ? 'affordable' : 'locked');
         span.textContent = `[${i + 1}] ${SLOT_NAMES[key]} $${def.price}${weapons.money >= def.price ? '' : ' 🔒'}`;
@@ -93,6 +100,7 @@ export class HUD {
         span.textContent = `[${i + 1}] ${SLOT_NAMES[key]}`;
       }
       wrap.append(span);
+      */
     });
     const extra = document.createElement('span');
     extra.className = 'slot';
