@@ -12,6 +12,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "three.quarks": "0.16.0",
     "ws": "^8.18.0"
   }
 }
