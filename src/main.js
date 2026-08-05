@@ -509,6 +509,16 @@ function setupOnline() {
     }, 1000);
   });
 
+  document.getElementById('podium').onclick = (event) => {
+    const button = event.target.closest('.vote-option');
+    if (!button || !podiumOpen) return;
+    const group = button.parentElement;
+    group.querySelectorAll('.vote-option').forEach((option) => option.classList.remove('selected'));
+    button.classList.add('selected');
+    if (button.dataset.voteType === 'mode') net.sendVote(button.dataset.vote);
+    if (button.dataset.voteType === 'map') net.sendMapVote(button.dataset.vote);
+  };
+
   net.on('votes', (m) => hud.setPodiumVotes(m.tally || {}, m.mapTally || {}));
 
   net.on('chat', (m) => {

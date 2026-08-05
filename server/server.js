@@ -119,7 +119,7 @@ const TEAM_COLORS = { r: 0xd84a3a, b: 0x3a6ad8 };
 const MATCH_TIME = 300;   // 5 minutos
 const KILL_LIMIT = 30;    // ffa y equipos
 const ZOMBIE_WAVES = 8;
-const PODIUM_TIME = 12;
+const PODIUM_TIME = 30;
 
 const match = {
   mode: 'ffa',

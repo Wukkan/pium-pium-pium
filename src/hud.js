@@ -185,6 +185,29 @@ export class HUD {
       div.textContent = data.txt;
       rowsEl.prepend(div);
     }
+    const renderOptions = (id, options) => {
+      const wrap = document.getElementById(id);
+      wrap.textContent = '';
+      for (const option of options) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'vote-option';
+        button.dataset.vote = option.kind;
+        button.dataset.voteType = option.type;
+        button.textContent = `[${option.key}] ${option.label}`;
+        wrap.append(button);
+      }
+    };
+    renderOptions('mode-vote-options', [
+      { key: 1, kind: 'ffa', type: 'mode', label: 'TODOS CONTRA TODOS' },
+      { key: 2, kind: 'teams', type: 'mode', label: 'EQUIPOS' },
+      { key: 3, kind: 'gun', type: 'mode', label: 'BÚSQUEDA DEL ARMA' },
+      { key: 4, kind: 'zombies', type: 'mode', label: 'ZOMBIS' },
+    ]);
+    renderOptions('map-vote-options', [
+      { key: 5, kind: 'arena', type: 'map', label: 'ARENA' },
+      { key: 6, kind: 'ciudad', type: 'map', label: 'CIUDAD' },
+    ]);
     document.getElementById('podium-votes').textContent = '';
   }
 

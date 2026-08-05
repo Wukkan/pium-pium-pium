@@ -171,18 +171,34 @@
     /* podio de fin de partida */
     #podium {
       display: none;
-      position: absolute; left: 50%; top: 16%; transform: translateX(-50%);
-      min-width: 420px; text-align: center;
-      background: rgba(10,14,22,.92); border: 1px solid rgba(255,210,77,.35);
-      border-radius: 10px; padding: 22px 30px;
+      position: absolute; left: 50%; top: 7%; transform: translateX(-50%);
+      width: min(820px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; text-align: center;
+      background: linear-gradient(145deg, rgba(15,20,30,.98), rgba(7,10,17,.98)); border: 1px solid rgba(255,210,77,.45);
+      border-radius: 16px; padding: 34px 42px 28px; box-shadow: 0 22px 70px rgba(0,0,0,.65);
     }
-    #podium h2 { color: #fff; font-style: italic; font-size: 26px; }
-    #podium-winner { color: #ffd24d; font-size: 22px; font-weight: 900; font-style: italic; margin-top: 8px; }
-    #podium-rows { margin-top: 12px; font-family: Arial; font-size: 15px; color: #e8eefb; line-height: 1.8; }
-    #podium .vote-hint { margin-top: 16px; color: #9fb4d8; font-family: Arial; font-size: 13px; line-height: 1.9; }
+    #podium h2 { color: #fff; font-style: italic; font-size: clamp(30px, 4vw, 44px); letter-spacing: 1px; }
+    #podium-winner { color: #ffd24d; font-size: clamp(24px, 3vw, 32px); font-weight: 900; font-style: italic; margin-top: 10px; }
+    #podium-rows { margin-top: 14px; font-family: Arial; font-size: 16px; color: #e8eefb; line-height: 1.8; }
+    #podium .vote-hint { margin-top: 24px; color: #9fb4d8; font-family: Arial; font-size: 16px; line-height: 1.5; }
+    #podium .legacy-vote-hint { display: none; }
     #podium .vote-hint b { color: #ffd24d; }
-    #podium-votes { margin-top: 6px; color: #8ce78c; font-family: Arial; font-size: 13px; min-height: 17px; }
-    #podium-count { margin-top: 8px; color: #7f92b4; font-family: Arial; font-size: 12px; }
+    .vote-heading { margin: 22px 0 9px; color: #fff; font: 900 15px Arial, sans-serif; letter-spacing: 1px; text-transform: uppercase; text-align: left; }
+    .vote-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .vote-grid.maps { grid-template-columns: repeat(2, 1fr); }
+    .vote-option {
+      min-height: 64px; cursor: pointer; color: #e8eefb; background: rgba(255,255,255,.07);
+      border: 2px solid rgba(255,255,255,.14); border-radius: 8px; padding: 9px 8px;
+      font: 900 15px Arial, sans-serif; transition: transform .1s, border-color .1s, background .1s;
+    }
+    .vote-option:hover { transform: translateY(-2px); border-color: #ffd24d; background: rgba(255,210,77,.13); }
+    .vote-option.selected { color: #16120a; border-color: #ffd24d; background: linear-gradient(#ffe98a, #f0b72f); }
+    #podium-votes { margin-top: 16px; color: #8ce78c; font-family: Arial; font-size: 14px; min-height: 18px; }
+    #podium-count { margin-top: 18px; color: #ffd24d; font: 900 20px Arial, sans-serif; }
+    @media (max-width: 640px) {
+      #podium { padding: 25px 18px 20px; }
+      .vote-grid { grid-template-columns: repeat(2, 1fr); }
+      .vote-option { min-height: 58px; font-size: 13px; }
+    }
 
     /* selector de equipo */
     #team-picker {
@@ -343,9 +359,14 @@
       <h2>FIN DE LA PARTIDA</h2>
       <div id="podium-winner"></div>
       <div id="podium-rows"></div>
-      <div class="vote-hint">Vota el siguiente modo:<br/>
+      <div class="vote-hint legacy-vote-hint">Vota el siguiente modo:<br/>
         <b>[1]</b> Todos contra todos &nbsp; <b>[2]</b> Equipos &nbsp; <b>[3]</b> Búsqueda del arma &nbsp; <b>[4]</b> Zombis<br/>
         Y el mapa: <b>[5]</b> Arena &nbsp; <b>[6]</b> Ciudad</div>
+      <div class="vote-hint">Elige con los botones o con las teclas indicadas. Tienes 30 segundos.</div>
+      <div class="vote-heading">Modo de juego</div>
+      <div id="mode-vote-options" class="vote-grid"></div>
+      <div class="vote-heading">Mapa</div>
+      <div id="map-vote-options" class="vote-grid maps"></div>
       <div id="podium-votes"></div>
       <div id="podium-count"></div>
     </div>

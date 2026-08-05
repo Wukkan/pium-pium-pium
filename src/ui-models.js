@@ -35,3 +35,25 @@ export function readOwnedWeapons(raw, validKeys) {
 export function ammoAfterPickup(current, amount = 20, maxReserve = Infinity) {
   return Math.min(maxReserve, Math.max(0, current) + Math.max(0, amount));
 }
+
+export function weaponHudLabel(def, index, shortName = def.name) {
+  return `[${index + 1}] ${shortName}`;
+}
+
+export function voteOptionsState(kinds, selected) {
+  return kinds.map((kind) => ({
+    kind,
+    selected: kind === selected,
+    ...voteButtonState(kind, kind === selected),
+  }));
+}
+
+export function loadoutMetadata(weapons, skin, grenades) {
+  return {
+    weapon: weapons.current,
+    ownedWeapons: Object.keys(weapons.owned).filter((key) => weapons.owned[key]),
+    grenades,
+    hat: skin.hat,
+    color: skin.color,
+  };
+}
