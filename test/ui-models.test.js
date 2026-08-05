@@ -11,6 +11,7 @@ import {
   weaponSelectionAction,
   humanoidPoseState,
   weaponAnimationState,
+  humanoidModelProfile,
 } from '../src/ui-models.js';
 
 test('weapon cards distinguish equipped, owned, affordable, and locked weapons', () => {
@@ -105,4 +106,12 @@ test('weapon animation state adds bob, recoil and a visible reload motion', () =
   assert.ok(reload.position.y < -0.3);
   assert.ok(reload.rotation.x < -0.4);
   assert.ok(Math.abs(reload.position.x - idle.position.x) > 0.001);
+});
+
+test('humanoid model profile stays blocky and compact', () => {
+  assert.deepEqual(humanoidModelProfile(), {
+    body: [0.62, 0.62, 0.34],
+    limb: [0.18, 0.6, 0.22],
+    leg: [0.24, 0.8, 0.26],
+  });
 });

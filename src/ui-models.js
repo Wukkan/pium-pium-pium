@@ -62,6 +62,14 @@ export function weaponSelectionAction(owned) {
   return owned ? 'equip' : 'open-buy';
 }
 
+export function humanoidModelProfile() {
+  return {
+    body: [0.62, 0.62, 0.34],
+    limb: [0.18, 0.6, 0.22],
+    leg: [0.24, 0.8, 0.26],
+  };
+}
+
 export function humanoidPoseState(time, speed, aiming, aimPitch = 0) {
   const walkAmount = Math.min(1, Math.max(0, speed) / 5.2);
   const swing = Math.sin(time) * walkAmount * 0.55;
