@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ammoAfterPickup, weaponSelectionAction } from './ui-models.js';
+import { ammoAfterPickup, weaponSelectionAction, weaponAnimationState } from './ui-models.js';
 
 // ---------------------------------------------------------------------------
 // Armas: definición, modelo en primera persona (cajas), disparo por raycast,
@@ -426,31 +426,30 @@ export class WeaponSystem {
     // animación del modelo: bob al andar + retroceso con muelle
     const speed = this.player.horizontalSpeed();
     if (this.player.onGround && speed > 1) this.bobTime += dt * Math.min(speed, 10);
-    const bobX = Math.sin(this.bobTime * 1.6) * 0.012 * (this.ads ? 0.2 : 1);
-    const bobY = Math.abs(Math.cos(this.bobTime * 1.6)) * 0.014 * (this.ads ? 0.2 : 1);
-
     this.kickPos *= Math.max(0, 1 - dt * 10);
     this.kickRot *= Math.max(0, 1 - dt * 10);
 
     // animación de recarga: el arma baja, gira y vuelve a subir
-    let reloadTilt = 0;
+    let reloadProgress = 0;
     if (this.reloading) {
-      const prog = Math.min(1, Math.max(0, 1 - (this.reloadEnd - now) / def.reloadTime));
-      reloadTilt = Math.sin(prog * Math.PI) * (0.85 + Math.sin(prog * Math.PI * 3) * 0.08);
-      this.hud.setReloadProgress(prog);
+      reloadProgress = Math.min(1, Math.max(0, 1 - (this.reloadEnd - now) / def.reloadTime));
+      this.hud.setReloadProgress(reloadProgress);
     }
 
-    // posición ADS: centrar el arma
-    const adsT = this.ads && !def.scope ? 1 : 0;
-    const baseX = 0.32 * (1 - adsT) + 0.0 * adsT;
-    const baseY = -0.3 * (1 - adsT) + -0.245 * adsT;
-    const baseZ = -0.55 * (1 - adsT) + -0.42 * adsT;
-
-    this.rig.position.x += (baseX + bobX - this.rig.position.x) * Math.min(1, dt * 14);
-    this.rig.position.y += (baseY + bobY - reloadTilt * 0.14 - this.rig.position.y) * Math.min(1, dt * 14);
-    this.rig.position.z += (baseZ + this.kickPos - this.rig.position.z) * Math.min(1, dt * 18);
-    this.rig.rotation.x = this.kickRot * 0.5 - reloadTilt * 0.65;
-    this.rig.rotation.z = reloadTilt * 0.3;
+    const visual = weaponAnimationState({
+      speed,
+      ads: this.ads && !def.scope,
+      reloading: this.reloading,
+      reloadProgress,
+      bobTime: this.bobTime,
+      kickPos: this.kickPos,
+      kickRot: this.kickRot,
+    });
+    this.rig.position.x += (visual.position.x - this.rig.position.x) * Math.min(1, dt * 14);
+    this.rig.position.y += (visual.position.y - this.rig.position.y) * Math.min(1, dt * 14);
+    this.rig.position.z += (visual.position.z - this.rig.position.z) * Math.min(1, dt * 18);
+    this.rig.rotation.x = visual.rotation.x;
+    this.rig.rotation.z = visual.rotation.z;
 
     // separación del punto de mira según dispersión
     this.hud.setCrosshairGap(6 + this.currentSpread() * 900);

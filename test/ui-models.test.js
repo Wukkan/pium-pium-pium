@@ -9,6 +9,8 @@ import {
   voteOptionsState,
   loadoutMetadata,
   weaponSelectionAction,
+  humanoidPoseState,
+  weaponAnimationState,
 } from '../src/ui-models.js';
 
 test('weapon cards distinguish equipped, owned, affordable, and locked weapons', () => {
@@ -73,4 +75,31 @@ test('loadout metadata exposes the equipped player presentation', () => {
 test('locked weapon selection opens the arsenal instead of buying immediately', () => {
   assert.equal(weaponSelectionAction(true), 'equip');
   assert.equal(weaponSelectionAction(false), 'open-buy');
+});
+
+test('humanoid pose keeps limbs mirrored while walking and aims both arms', () => {
+  const walking = humanoidPoseState(Math.PI / 2, 5.2, false);
+  assert.equal(walking.legL, -walking.legR);
+  assert.equal(walking.armL, -walking.legL * 0.7);
+  assert.equal(walking.armR, walking.legL * 0.7);
+
+  const aiming = humanoidPoseState(0, 0, true, 0.25);
+  assert.equal(aiming.armL, aiming.armR);
+  assert.ok(aiming.armL < -Math.PI / 2);
+});
+
+test('weapon animation state adds bob, recoil and a visible reload motion', () => {
+  const idle = weaponAnimationState({
+    speed: 0, ads: false, reloading: false, reloadProgress: 0,
+    bobTime: 0, kickPos: 0, kickRot: 0,
+  });
+  assert.deepEqual(idle.position, { x: 0.32, y: -0.3, z: -0.55 });
+
+  const reload = weaponAnimationState({
+    speed: 7, ads: false, reloading: true, reloadProgress: 0.5,
+    bobTime: 1.2, kickPos: 0.08, kickRot: 0.2,
+  });
+  assert.ok(reload.position.y < -0.3);
+  assert.ok(reload.rotation.x < -0.4);
+  assert.ok(Math.abs(reload.position.x - idle.position.x) > 0.001);
 });

@@ -52,16 +52,21 @@ export function makeHat(type) {
 // Devuelve el rig completo. `userData` se asigna a cada malla golpeable
 // para que el raycast de las armas identifique a quién y dónde ha dado.
 export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
-  const skin = new THREE.MeshLambertMaterial({ color });
-  const darker = new THREE.MeshLambertMaterial({ color: new THREE.Color(color).multiplyScalar(0.55) });
+  const shirt = new THREE.MeshLambertMaterial({ color });
+  const shirtDark = new THREE.MeshLambertMaterial({ color: new THREE.Color(color).multiplyScalar(0.5) });
   const skinTone = new THREE.MeshLambertMaterial({ color: 0xe8c39a });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x293344 });
+  const shoe = new THREE.MeshLambertMaterial({ color: 0x15171d });
   const gunMat = new THREE.MeshLambertMaterial({ color: 0x33333a });
 
   const group = new THREE.Group();
+  const torso = new THREE.Group();
+  torso.position.y = 0.78;
+  group.add(torso);
   const parts = [];
 
-  const add = (mat, w, h, d, x, y, z, partName, parent = group) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const add = (geometry, mat, x, y, z, partName, parent = group) => {
+    const m = new THREE.Mesh(geometry, mat);
     m.position.set(x, y, z);
     m.castShadow = true;
     if (partName) {
@@ -72,50 +77,82 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
     return m;
   };
 
-  const legL = new THREE.Group(); legL.position.set(-0.15, 0.8, 0);
-  const legR = new THREE.Group(); legR.position.set(0.15, 0.8, 0);
+  const capsule = (radius, length, mat, x, y, z, partName, parent) => add(
+    new THREE.CapsuleGeometry(radius, length, 4, 8), mat, x, y, z, partName, parent,
+  );
+  const box = (w, h, d, mat, x, y, z, partName, parent) => add(
+    new THREE.BoxGeometry(w, h, d), mat, x, y, z, partName, parent,
+  );
+  const sphere = (radius, mat, x, y, z, partName, parent) => add(
+    new THREE.SphereGeometry(radius, 12, 8), mat, x, y, z, partName, parent,
+  );
+
+  const legL = new THREE.Group(); legL.position.set(-0.16, 0.93, 0);
+  const legR = new THREE.Group(); legR.position.set(0.16, 0.93, 0);
   group.add(legL, legR);
-  add(darker, 0.24, 0.8, 0.26, 0, -0.4, 0, 'leg', legL);
-  add(darker, 0.24, 0.8, 0.26, 0, -0.4, 0, 'leg', legR);
+  capsule(0.13, 0.32, pants, 0, -0.22, 0, 'leg', legL);
+  capsule(0.13, 0.32, pants, 0, -0.22, 0, 'leg', legR);
+  const calfL = new THREE.Group(); calfL.position.set(0, -0.46, 0);
+  const calfR = new THREE.Group(); calfR.position.set(0, -0.46, 0);
+  legL.add(calfL); legR.add(calfR);
+  capsule(0.11, 0.34, pants, 0, -0.2, 0, 'leg', calfL);
+  capsule(0.11, 0.34, pants, 0, -0.2, 0, 'leg', calfR);
+  box(0.22, 0.12, 0.38, shoe, 0, -0.41, -0.07, 'leg', calfL);
+  box(0.22, 0.12, 0.38, shoe, 0, -0.41, -0.07, 'leg', calfR);
 
-  add(skin, 0.62, 0.62, 0.34, 0, 1.11, 0, 'body');
-  const head = add(skinTone, 0.42, 0.42, 0.42, 0, 1.66, 0, 'head');
+  const body = new THREE.Group();
+  torso.add(body);
+  capsule(0.3, 0.42, shirt, 0, 0.32, 0, 'body', body);
+  box(0.5, 0.12, 0.36, shirtDark, 0, 0.12, 0, null, body);
+  box(0.56, 0.06, 0.38, shirtDark, 0, 0.55, 0, null, body);
 
-  const armL = new THREE.Group(); armL.position.set(-0.4, 1.34, 0);
-  const armR = new THREE.Group(); armR.position.set(0.4, 1.34, 0);
-  group.add(armL, armR);
-  add(skin, 0.18, 0.6, 0.22, 0, -0.26, 0, 'arm', armL);
-  add(skin, 0.18, 0.6, 0.22, 0, -0.26, 0, 'arm', armR);
+  const head = sphere(0.24, skinTone, 0, 0.86, 0, 'head', torso);
+  sphere(0.11, skinTone, -0.21, 0.86, -0.01, null, torso);
+  sphere(0.11, skinTone, 0.21, 0.86, -0.01, null, torso);
+  const visor = box(0.16, 0.06, 0.035, new THREE.MeshLambertMaterial({ color: 0x18212b }), 0, 0.9, -0.22, null, torso);
+  visor.castShadow = false;
+
+  const armL = new THREE.Group(); armL.position.set(-0.39, 0.5, 0);
+  const armR = new THREE.Group(); armR.position.set(0.39, 0.5, 0);
+  torso.add(armL, armR);
+  sphere(0.13, shirt, 0, 0.02, 0, 'arm', armL);
+  sphere(0.13, shirt, 0, 0.02, 0, 'arm', armR);
+  capsule(0.09, 0.3, shirt, 0, -0.2, 0, 'arm', armL);
+  capsule(0.09, 0.3, shirt, 0, -0.2, 0, 'arm', armR);
+  const handL = new THREE.Group(); handL.position.set(0, -0.43, 0);
+  const handR = new THREE.Group(); handR.position.set(0, -0.43, 0);
+  armL.add(handL); armR.add(handR);
+  capsule(0.08, 0.12, skinTone, 0, -0.11, 0, 'arm', handL);
+  capsule(0.08, 0.12, skinTone, 0, -0.11, 0, 'arm', handR);
 
   const gun = new THREE.Group();
-  gun.position.set(0, -0.5, -0.1);
-  add(gunMat, 0.08, 0.1, 0.55, 0, 0.05, -0.2, null, gun);
-  armR.add(gun);
+  gun.position.set(0, -0.53, -0.12);
+  box(0.08, 0.1, 0.55, gunMat, 0, 0.05, -0.2, null, gun);
+  handR.add(gun);
 
   const hatMesh = makeHat(hat);
   if (hatMesh) {
-    hatMesh.position.set(0, 1.92, 0);
-    group.add(hatMesh);
+    hatMesh.position.set(0, 0.98, 0);
+    torso.add(hatMesh);
   }
 
   const nameSprite = makeNameSprite(name, nameColor);
-  nameSprite.position.set(0, hatMesh ? 2.45 : 2.15, 0);
-  group.add(nameSprite);
+  nameSprite.position.set(0, hatMesh ? 1.55 : 1.35, 0);
+  torso.add(nameSprite);
 
-  return { group, parts, legL, legR, armL, armR, head, gun, nameSprite };
+  return { group, parts, torso, body, legL, legR, armL, armR, head, gun, nameSprite };
 }
 
 // pose de andar/apuntar, compartida
 export function animateHumanoid(rig, dt, speed, walkTimeRef, aiming, aimPitch = 0) {
   walkTimeRef.t += dt * speed * 1.7;
-  const swing = Math.sin(walkTimeRef.t) * Math.min(1, speed / 5.2) * 0.55;
+  const walkAmount = Math.min(1, speed / 5.2);
+  const swing = Math.sin(walkTimeRef.t) * walkAmount * 0.55;
+  const armAngle = aiming ? -Math.PI / 2 - aimPitch * 0.8 : null;
   rig.legL.rotation.x = swing;
   rig.legR.rotation.x = -swing;
-  if (aiming) {
-    rig.armR.rotation.x = -Math.PI / 2 - aimPitch * 0.8;
-    rig.armL.rotation.x = -Math.PI / 2 - aimPitch * 0.8;
-  } else {
-    rig.armL.rotation.x = -swing * 0.7;
-    rig.armR.rotation.x = swing * 0.7;
-  }
+  rig.armR.rotation.x = armAngle ?? swing * 0.7;
+  rig.armL.rotation.x = armAngle ?? -swing * 0.7;
+  rig.torso.position.y = 0.78 + Math.abs(Math.cos(walkTimeRef.t)) * walkAmount * 0.025;
+  rig.torso.rotation.z = Math.sin(walkTimeRef.t * 0.5) * walkAmount * 0.025;
 }
