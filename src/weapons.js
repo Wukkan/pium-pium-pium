@@ -297,8 +297,12 @@ export class WeaponSystem {
     this.lastShot = now;
     st.ammo--;
 
+    const muzzle = new THREE.Vector3();
+    this.models[this.current].userData.flash.getWorldPosition(muzzle);
+
     // el lanzagranadas dispara un proyectil, no balas
     if (def.launcher) {
+      this.effects.muzzle(muzzle, def.kind);
       this.player.recoilPitch += def.recoil;
       this.kickPos = Math.min(0.2, this.kickPos + 0.15);
       this.kickRot = Math.min(0.6, this.kickRot + 0.4);
@@ -316,8 +320,7 @@ export class WeaponSystem {
     const targets = this.getTargets();
     const pellets = def.pellets || 1;
 
-    const muzzle = new THREE.Vector3();
-    this.models[this.current].userData.flash.getWorldPosition(muzzle);
+    this.effects.muzzle(muzzle, def.kind);
 
     // la escopeta dispara varios perdigones: el daño se agrega por objetivo
     const acc = new Map();

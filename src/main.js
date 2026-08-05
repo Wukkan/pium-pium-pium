@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import * as QUARKS from 'three.quarks';
 import { buildWorld } from './world.js';
 import { Player } from './player.js';
 import { WeaponSystem, WEAPON_ORDER } from './weapons.js';
@@ -61,7 +62,7 @@ scene.add(sun.target);
 const world = buildWorld(scene);
 const hud = new HUD();
 const audio = new AudioSys();
-const effects = new Effects(scene);
+const effects = new Effects(scene, { THREE, quarks: QUARKS });
 const player = new Player(camera, world);
 const weapons = new WeaponSystem(camera, scene, player, effects, audio, hud);
 const net = new Net();
@@ -524,7 +525,9 @@ function setupOnline() {
   net.on('fire', (m) => {
     const a = new THREE.Vector3(m.a[0], m.a[1], m.a[2]);
     const b = new THREE.Vector3(m.b[0], m.b[1], m.b[2]);
+    effects.muzzle(a, m.k);
     effects.tracer(a, b, m.bid !== undefined ? 0xff8866 : 0x9bd4ff);
+    if (m.k === 'launcher') effects.trail(a, b, 0xff8c42);
     player.eyePosition(playerEye);
     audio.shot(m.k, audio.distVol(a.distanceTo(playerEye)) * 0.7);
   });

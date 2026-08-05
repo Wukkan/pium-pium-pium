@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { QuarksEffects } from './quarks-effects.js';
 
 // ---------------------------------------------------------------------------
 // Efectos visuales: trazadoras de balas, partículas de impacto y números
@@ -8,14 +9,23 @@ import * as THREE from 'three';
 const _tmp = new THREE.Vector3();
 
 export class Effects {
-  constructor(scene) {
+  constructor(scene, backend = {}) {
     this.scene = scene;
     this.items = [];
     this.tracerGeo = new THREE.BoxGeometry(1, 1, 1);
     this.particleGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
+    this.quarks = null;
+    if (backend.quarks && backend.THREE) {
+      try {
+        this.quarks = new QuarksEffects(scene, backend.THREE, backend.quarks);
+      } catch (error) {
+        console.warn('three.quarks no pudo inicializarse; se usan efectos clÃ¡sicos.', error);
+      }
+    }
   }
 
   update(dt) {
+    if (this.quarks) this.quarks.update(dt);
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
       it.life -= dt;
@@ -27,6 +37,10 @@ export class Effects {
         it.tick(dt);
       }
     }
+  }
+
+  muzzle(pos, kind = 'pistol') {
+    if (this.quarks) this.quarks.muzzle(pos, kind);
   }
 
   tracer(from, to, color = 0xffd66b) {
@@ -50,6 +64,10 @@ export class Effects {
   }
 
   impact(pos, color = 0xd8d0b8, count = 5) {
+    if (this.quarks) {
+      this.quarks.impact(pos, color, count);
+      return;
+    }
     const material = new THREE.MeshBasicMaterial({ color });
     const group = new THREE.Group();
     const parts = [];
@@ -80,6 +98,10 @@ export class Effects {
   }
 
   explosion(pos) {
+    if (this.quarks) {
+      this.quarks.explosion(pos);
+      return;
+    }
     // destello esférico que crece y se desvanece
     const mat = new THREE.MeshBasicMaterial({
       color: 0xffb347, transparent: true, opacity: 0.95,
@@ -104,6 +126,10 @@ export class Effects {
   }
 
   // número de daño flotante (amarillo normal, rojo si es headshot)
+  trail(from, to, color = 0xffd66b) {
+    if (this.quarks) this.quarks.trail(from, to, color);
+  }
+
   popup(pos, text, isCrit = false) {
     const canvas = document.createElement('canvas');
     canvas.width = 192; canvas.height = 96;
