@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import * as QUARKS from 'three.quarks';
 import { buildWorld } from './world.js';
 import { Player } from './player.js';
-import { WeaponSystem, WEAPON_ORDER } from './weapons.js';
+import { WeaponSystem, WEAPON_DEFS, WEAPON_ORDER } from './weapons.js';
 import { BotManager } from './bots.js';
 import { Effects } from './effects.js';
 import { AudioSys } from './audio.js';
@@ -74,6 +74,13 @@ function onHealed() {
   audio.medkit();
   hud.announce('+25 PV ❤');
   missions.event('kit');
+}
+
+function onAmmoPicked(amount = 20) {
+  const added = weapons.addAmmo(amount);
+  if (added > 0) hud.announce(`📦 Munición +${added}`);
+  else hud.announce('📦 Ya llevas la munición al máximo');
+  audio.buy();
 }
 
 // lanzagranadas → proyectil de impacto
@@ -356,12 +363,18 @@ fetch('/salud').then((r) => {
 function setupOffline() {
   botsLocal = new BotManager(scene, world, player, effects, audio, 5);
   botsLocal.ctx.onKill = (killer, victim) => hud.killfeed(killer, victim, false);
-  botsLocal.ctx.onBotDeath = (bot) => kitsMgr.spawnLocal(bot.pos);
+  botsLocal.ctx.onBotDeath = (bot) => {
+    kitsMgr.spawnLocal(bot.pos);
+    kitsMgr.spawnAmmoLocal(bot.pos.clone ? bot.pos.clone().add(new THREE.Vector3(.55, 0, 0)) : {
+      x: bot.pos.x + .55, y: bot.pos.y, z: bot.pos.z,
+    });
+  };
   weapons.getTargets = () => [...world.occluders, ...botsLocal.getHitMeshes()];
 
   const localBotKilled = (bot, isHead) => {
     kills++;
     kitsMgr.spawnLocal(bot.pos);
+    kitsMgr.spawnAmmoLocal(bot.pos.clone().add(new THREE.Vector3(.55, 0, 0)));
     hud.updateScore(kills, deaths);
     hud.killfeed('Tú', bot.name, true);
     hud.announce(isHead ? `☠ HEADSHOT — ${bot.name}` : `☠ Eliminaste a ${bot.name}`);
@@ -506,6 +519,7 @@ function setupOnline() {
   });
 
   net.on('pong', (m) => hud.setPing(Date.now() - m.ts));
+  net.on('ammo', (m) => onAmmoPicked(m.a || 20));
   setInterval(() => { if (net.connected) net.sendPing(); }, 3000);
 
   net.on('cbox', (m) => {
@@ -654,6 +668,7 @@ document.addEventListener('pointerlockchange', () => {
       hud.setScope(false);
       hud.showScores(false);
       setChat(false);
+      setBuyMenu(false);
       renderMenuPanels();
     }
   }
@@ -698,22 +713,74 @@ addEventListener('keyup', (e) => {
   if (e.code === 'Tab') hud.showScores(false);
 });
 
-// teclas de modo: V cuchillo, M equipo, C chat, 1-6 en overlays
+// teclas de modo: V cuchillo, M equipo, C chat, B compra, 1-6 en overlays
 let chatOpen = false;
+let buyOpen = false;
+function refreshWeaponInputBlock() {
+  weapons.inputBlocked = chatOpen || buyOpen || podiumOpen || teamPickerOpen;
+}
+
 function setChat(open) {
   chatOpen = open;
   hud.showChatMenu(open, QUICK_CHAT);
-  weapons.inputBlocked = open || podiumOpen || teamPickerOpen;
+  refreshWeaponInputBlock();
+}
+
+function renderBuyMenu() {
+  const grid = document.getElementById('buy-grid');
+  document.getElementById('buy-money').textContent = `$ ${weapons.money}`;
+  grid.textContent = '';
+  weapons.slots.forEach((key, i) => {
+    const def = WEAPON_DEFS[key];
+    const card = document.createElement('button');
+    const owned = !!weapons.owned[key];
+    const equipped = key === weapons.current;
+    const affordable = weapons.money >= def.price;
+    card.type = 'button';
+    card.className = `buy-card${equipped ? ' equipped' : ''}${!owned && !affordable ? ' locked' : ''}`;
+    const action = equipped ? 'EQUIPADA' : owned ? 'EQUIPAR' : affordable ? `COMPRAR $${def.price}` : `FALTAN $${def.price - weapons.money}`;
+    card.innerHTML = `<span class="buy-key">[${i + 1}] ${def.kind.toUpperCase()}</span>` +
+      `<span class="buy-name">${def.name}</span>` +
+      `<span class="buy-info">Cargador ${def.mag} · Reserva ${def.reserve}</span>` +
+      `<span class="buy-action">${action}</span>`;
+    card.disabled = !owned && !affordable;
+    card.addEventListener('click', () => {
+      if (owned) weapons.switchTo(key);
+      else if (affordable) weapons.tryBuy(key);
+      renderBuyMenu();
+    });
+    grid.append(card);
+  });
+}
+
+function setBuyMenu(open) {
+  buyOpen = open && state === 'playing' && !player.dead;
+  if (buyOpen) renderBuyMenu();
+  hud.showBuyMenu(buyOpen);
+  refreshWeaponInputBlock();
 }
 
 addEventListener('keydown', (e) => {
   if (!document.pointerLockElement) return;
+  if (e.code === 'KeyB' && !podiumOpen && !teamPickerOpen) {
+    setChat(false);
+    setBuyMenu(!buyOpen);
+    return;
+  }
   if (e.code === 'KeyV') doKnife();
   if (e.code === 'KeyM' && online && matchInfo.mode === 'teams' && !podiumOpen) {
     setTeamPicker(!teamPickerOpen);
   }
   if (e.code === 'KeyC' && online && !podiumOpen) {
     setChat(!chatOpen);
+  }
+  const idx7 = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'].indexOf(e.code);
+  if (buyOpen && idx7 >= 0) {
+    const key = WEAPON_ORDER[idx7];
+    if (weapons.owned[key]) weapons.switchTo(key);
+    else weapons.tryBuy(key);
+    renderBuyMenu();
+    return;
   }
   const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].indexOf(e.code);
   if (idx >= 0) {
@@ -783,7 +850,7 @@ function tick(now) {
     }
     weapons.update(dt, inputEnabled);
     if (botsLocal) botsLocal.update(dt);
-    if (botsLocal) kitsMgr.offlineUpdate(player, botsLocal, onHealed);
+    if (botsLocal) kitsMgr.offlineUpdate(player, botsLocal, onHealed, onAmmoPicked);
   }
   // el mundo online sigue vivo aunque estés en el menú
   if (remotes) remotes.update(dt);

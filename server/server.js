@@ -82,7 +82,7 @@ const crates = new Map(); // id -> {hp, collider, alive, respawnAt}
 let mapData = null;
 const players = new Map(); // id -> jugador
 const bots = [];
-const kits = []; // kits de vida: {id, x, y, z, expireAt}
+const kits = []; // loot del suelo: {id, x, y, z, k, a, expireAt}
 let nextId = 1;
 let botSerial = 0;
 let kitSerial = 0;
@@ -106,7 +106,8 @@ function destroyedCrates() {
 }
 
 function spawnKit(pos) {
-  kits.push({ id: 'k' + kitSerial++, x: pos.x, y: pos.y, z: pos.z, expireAt: now() + 30 });
+  kits.push({ id: 'k' + kitSerial++, x: pos.x, y: pos.y, z: pos.z, k: 'health', a: 25, expireAt: now() + 30 });
+  kits.push({ id: 'k' + kitSerial++, x: pos.x + 0.55, y: pos.y, z: pos.z, k: 'ammo', a: 20, expireAt: now() + 30 });
   while (kits.length > 12) kits.shift(); // límite de kits en el suelo
 }
 
@@ -605,6 +606,19 @@ setInterval(() => {
     const k = kits[i];
     if (t > k.expireAt) { kits.splice(i, 1); continue; }
     let taken = false;
+    if (k.k === 'ammo') {
+      for (const p of players.values()) {
+        if (!p.alive) continue;
+        const dx = p.pos.x - k.x, dz = p.pos.z - k.z;
+        if (dx * dx + dz * dz < 1.44 && Math.abs(p.pos.y - k.y) < 1.6) {
+          send(p, { t: 'ammo', a: k.a || 20 });
+          taken = true;
+          break;
+        }
+      }
+      if (taken) kits.splice(i, 1);
+      continue;
+    }
     for (const p of players.values()) {
       if (!p.alive || p.hp >= 100) continue;
       const dx = p.pos.x - k.x, dz = p.pos.z - k.z;
@@ -653,7 +667,7 @@ setInterval(() => {
       ry: +b.yaw.toFixed(2), s: +b.speed.toFixed(1),
       hp: Math.round(b.hp), al: b.dead ? 0 : 1, en: b.engaging || b.zombie ? 1 : 0,
     })),
-    kits: kits.map((k) => ({ id: k.id, p: [+k.x.toFixed(2), +k.y.toFixed(2), +k.z.toFixed(2)] })),
+    kits: kits.map((k) => ({ id: k.id, k: k.k, a: k.a, p: [+k.x.toFixed(2), +k.y.toFixed(2), +k.z.toFixed(2)] })),
   };
   broadcast(snap);
 }, TICK * 1000);

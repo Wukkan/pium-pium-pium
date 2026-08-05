@@ -266,6 +266,45 @@
     #menu .controls b { color: #ffd24d; font-family: 'Arial Black'; }
     #menu-stats { margin-top: 18px; color: #7f92b4; font-family: Arial; font-size: 13px; }
 
+    /* ---------- compra en partida, estilo buy-menu ---------- */
+    #buy-menu {
+      display: none; position: fixed; inset: 0; z-index: 12;
+      align-items: center; justify-content: center;
+      background: rgba(5,8,14,.78); backdrop-filter: blur(5px);
+      pointer-events: auto;
+    }
+    .buy-window {
+      width: min(960px, calc(100vw - 40px)); max-height: calc(100vh - 48px);
+      overflow: auto; padding: 24px 28px 20px;
+      background: linear-gradient(145deg, rgba(24,31,45,.98), rgba(10,14,22,.98));
+      border: 1px solid rgba(255,210,77,.35); border-radius: 10px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.6);
+    }
+    .buy-header { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+    .buy-header h2 { color: #fff; font-size: 28px; font-style: italic; }
+    .buy-header p { color: #8ce78c; font: 700 17px Arial, sans-serif; }
+    .buy-subtitle { color: #9fb4d8; font: 13px Arial, sans-serif; margin-top: 4px; }
+    #buy-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 12px; margin-top: 18px; }
+    .buy-card {
+      min-height: 148px; cursor: pointer; text-align: left; color: #e8eefb;
+      background: rgba(255,255,255,.055); border: 2px solid rgba(255,255,255,.12);
+      border-radius: 8px; padding: 14px; font-family: Arial, sans-serif;
+      transition: transform .12s, border-color .12s, background .12s;
+    }
+    .buy-card:hover { transform: translateY(-3px); border-color: #ffd24d; background: rgba(255,210,77,.1); }
+    .buy-card.equipped { border-color: #ffd24d; background: rgba(255,210,77,.13); }
+    .buy-card.locked { opacity: .55; cursor: not-allowed; }
+    .buy-key { color: #9fb4d8; font-size: 12px; font-weight: 900; }
+    .buy-name { display: block; margin-top: 18px; color: #fff; font: 900 17px 'Arial Black', Arial, sans-serif; }
+    .buy-info { display: block; margin-top: 6px; color: #aebbd0; font-size: 12px; }
+    .buy-action { display: block; margin-top: 14px; color: #8ce78c; font-size: 13px; font-weight: 900; }
+    .buy-card.equipped .buy-action { color: #ffd24d; }
+    .buy-card.locked .buy-action { color: #ff9a8a; }
+    .buy-footer { margin-top: 16px; color: #7f92b4; font: 12px Arial, sans-serif; text-align: center; }
+    @media (max-width: 760px) {
+      #buy-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+    }
+
     /* ---------- MUERTE ---------- */
     #death {
       position: fixed; inset: 0; z-index: 9; display: none;
@@ -384,6 +423,20 @@
         <div id="menu-money"></div>
       </div>
     </div>
+  </div>
+
+  <div id="buy-menu">
+    <section class="buy-window">
+      <div class="buy-header">
+        <div>
+          <h2>ARSENAL</h2>
+          <div class="buy-subtitle">Compra y equipa tu arma durante la partida</div>
+        </div>
+        <p id="buy-money">$ 0</p>
+      </div>
+      <div id="buy-grid"></div>
+      <div class="buy-footer">Pulsa B para cerrar · también puedes usar las teclas 1–7</div>
+    </section>
   </div>
 
   <div id="death">

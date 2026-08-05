@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { weaponCardState, voteButtonState, readOwnedWeapons } from '../src/ui-models.js';
+import { weaponCardState, voteButtonState, readOwnedWeapons, ammoAfterPickup } from '../src/ui-models.js';
 
 test('weapon cards distinguish equipped, owned, affordable, and locked weapons', () => {
   const def = { name: 'ESCOPETA', price: 300 };
@@ -32,4 +32,9 @@ test('owned weapons are sanitized and pistol is always available', () => {
     pistol: true, shotgun: true,
   });
   assert.deepEqual(readOwnedWeapons('bad data', ['pistol', 'shotgun']), { pistol: true });
+});
+
+test('ammo pickups add twenty rounds without exceeding the reserve cap', () => {
+  assert.equal(ammoAfterPickup(12, 20, 144), 32);
+  assert.equal(ammoAfterPickup(140, 20, 144), 144);
 });

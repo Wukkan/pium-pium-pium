@@ -1,3 +1,11 @@
+import {
+  ConstantColor,
+  ConstantValue,
+  IntervalValue,
+  PointEmitter,
+  Vector4,
+} from 'quarks.core';
+
 const LIFETIMES = {
   muzzle: 0.12,
   impact: 0.3,
@@ -5,17 +13,18 @@ const LIFETIMES = {
   trail: 0.2,
 };
 
+export function effectProfile(kind) {
+  if (kind === 'explosion') return { layers: ['fire', 'smoke', 'embers'] };
+  if (kind === 'muzzle') return { layers: ['flash', 'sparks'] };
+  return { layers: ['particles'] };
+}
+
 export function clampParticleCount(value, min = 1, max = 24) {
   return Math.min(max, Math.max(min, Math.round(Number(value) || 0)));
 }
 
 export function effectLifetime(kind) {
   return LIFETIMES[kind] || 0.35;
-}
-
-function colorVector(THREE, color) {
-  const c = new THREE.Color(color);
-  return new THREE.Vector4(c.r, c.g, c.b, 1);
 }
 
 export class QuarksEffects {
@@ -26,7 +35,20 @@ export class QuarksEffects {
     this.batch = new quarks.BatchedRenderer();
     this.active = new Set();
     this.texture = this.createTexture();
+    this.textures = {
+      default: this.loadTexture('/assets/effects/particle_default.png'),
+      smoke: this.loadTexture('/assets/effects/smoke_cloud.png'),
+      impact: this.loadTexture('/assets/effects/spikes_impact.png'),
+      trail: this.loadTexture('/assets/effects/stretch_trail.png'),
+    };
     scene.add(this.batch);
+  }
+
+  loadTexture(url) {
+    if (typeof document === 'undefined') return null;
+    const texture = new this.THREE.TextureLoader().load(url);
+    texture.needsUpdate = true;
+    return texture;
   }
 
   createTexture() {
@@ -56,24 +78,29 @@ export class QuarksEffects {
     const duration = options.duration || 0.06;
     const material = new THREE.MeshBasicMaterial({
       color: options.color,
-      map: this.texture,
+      map: this.textures[options.texture] || this.texture,
       transparent: true,
       opacity: options.opacity ?? 0.9,
       depthWrite: false,
       blending: options.additive === false ? THREE.NormalBlending : THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
     });
+    const tint = new THREE.Color(options.color);
     const system = new quarks.ParticleSystem({
       autoDestroy: true,
       looping: false,
       duration,
-      shape: new quarks.PointEmitter(),
-      startLife: new quarks.IntervalValue(options.life[0], options.life[1]),
-      startSpeed: new quarks.IntervalValue(options.speed[0], options.speed[1]),
-      startSize: new quarks.IntervalValue(options.size[0], options.size[1]),
-      startColor: new quarks.ConstantColor(colorVector(THREE, options.color)),
+      maxParticle: count,
+      emissionOverTime: new ConstantValue(0),
+      shape: new PointEmitter(),
+      startLife: new IntervalValue(options.life[0], options.life[1]),
+      startSpeed: new IntervalValue(options.speed[0], options.speed[1]),
+      startSize: new IntervalValue(options.size[0], options.size[1]),
+      startRotation: new IntervalValue(-Math.PI, Math.PI),
+      startColor: new ConstantColor(new Vector4(tint.r, tint.g, tint.b, 1)),
       emissionBursts: [{
         time: 0,
-        count: new quarks.ConstantValue(count),
+        count: new ConstantValue(count),
         cycle: 1,
         interval: 0,
         probability: 1,
@@ -81,6 +108,7 @@ export class QuarksEffects {
       material,
       renderMode: quarks.RenderMode.BillBoard,
       worldSpace: true,
+      renderOrder: options.renderOrder || 0,
     });
     system.emitter.position.copy(position);
     system.addEventListener('destroy', () => {
@@ -98,19 +126,32 @@ export class QuarksEffects {
     const color = kind === 'launcher' ? 0xff7b35 : kind === 'sniper' ? 0x9bd4ff : 0xffd66b;
     this.burst(position, 'muzzle', {
       color,
-      count: kind === 'shotgun' ? 9 : 5,
-      maxCount: 12,
-      duration: 0.045,
-      life: [0.06, 0.16],
-      speed: [0.25, kind === 'launcher' ? 1.2 : 0.8],
-      size: [0.12, kind === 'shotgun' ? 0.3 : 0.22],
+      texture: 'impact',
+      count: kind === 'shotgun' ? 2 : 1,
+      maxCount: 3,
+      duration: 0.025,
+      life: [0.06, 0.11],
+      speed: [0, 0.2],
+      size: [0.38, kind === 'shotgun' ? 0.7 : 0.55],
       opacity: 0.95,
+    });
+    this.burst(position, 'muzzle', {
+      color: kind === 'launcher' ? 0xffa347 : 0xffc95a,
+      texture: 'default',
+      count: kind === 'shotgun' ? 8 : 5,
+      maxCount: 12,
+      duration: 0.04,
+      life: [0.08, 0.18],
+      speed: [0.6, kind === 'launcher' ? 2.4 : 1.4],
+      size: [0.04, kind === 'shotgun' ? 0.13 : 0.09],
+      opacity: 0.9,
     });
   }
 
   impact(position, color = 0xd8d0b8, count = 5) {
     this.burst(position, 'impact', {
       color,
+      texture: 'impact',
       count,
       maxCount: 24,
       duration: 0.04,
@@ -125,24 +166,37 @@ export class QuarksEffects {
   explosion(position) {
     this.burst(position, 'explosion', {
       color: 0xffb347,
-      count: 22,
-      maxCount: 24,
-      duration: 0.05,
-      life: [0.2, 0.55],
-      speed: [1.5, 5.5],
-      size: [0.12, 0.42],
+      texture: 'impact',
+      count: 14,
+      maxCount: 20,
+      duration: 0.04,
+      life: [0.16, 0.42],
+      speed: [1.5, 4.5],
+      size: [0.22, 0.55],
       opacity: 0.9,
     });
     this.burst(position, 'explosion', {
-      color: 0x5b5149,
+      color: 0x8c7c70,
+      texture: 'smoke',
+      count: 16,
+      maxCount: 20,
+      duration: 0.06,
+      life: [0.45, 0.9],
+      speed: [0.3, 1.8],
+      size: [0.38, 0.8],
+      opacity: 0.42,
+      additive: false,
+    });
+    this.burst(position, 'explosion', {
+      color: 0xff8f3f,
+      texture: 'default',
       count: 12,
       maxCount: 16,
-      duration: 0.08,
-      life: [0.35, 0.7],
-      speed: [0.6, 2.5],
-      size: [0.18, 0.5],
-      opacity: 0.35,
-      additive: false,
+      duration: 0.05,
+      life: [0.25, 0.65],
+      speed: [2.5, 6],
+      size: [0.04, 0.12],
+      opacity: 0.95,
     });
   }
 
@@ -151,6 +205,7 @@ export class QuarksEffects {
     const distance = from.distanceTo(to);
     this.burst(midpoint, 'trail', {
       color,
+      texture: 'trail',
       count: Math.min(6, Math.max(1, Math.round(distance / 30))),
       maxCount: 6,
       duration: 0.03,

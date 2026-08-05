@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 // ---------------------------------------------------------------------------
-// Kits de vida: caen donde muere alguien y curan +25 al recogerlos.
+// Loot: kits de vida y cajas de municiÃ³n caen donde muere alguien.
 // Online: el servidor decide (lista en cada snapshot). Offline: lógica local.
 // ---------------------------------------------------------------------------
 
@@ -22,11 +22,33 @@ function buildKitMesh() {
   return group;
 }
 
+function buildAmmoMesh() {
+  const group = new THREE.Group();
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.3, 0.42),
+    new THREE.MeshLambertMaterial({ color: 0x3b4d2f }),
+  );
+  const lid = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, 0.07, 0.34),
+    new THREE.MeshLambertMaterial({ color: 0xb58b38 }),
+  );
+  lid.position.y = 0.18;
+  const stripe = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 0.08, 0.36),
+    new THREE.MeshLambertMaterial({ color: 0xe5c15a }),
+  );
+  stripe.position.y = 0.22;
+  group.add(base, lid, stripe);
+  return group;
+}
+
 class Kit {
-  constructor(scene, id, pos) {
+  constructor(scene, id, pos, kind = 'health', amount = 25) {
     this.id = id;
+    this.kind = kind;
+    this.amount = amount;
     this.baseY = pos.y + 0.35;
-    this.mesh = buildKitMesh();
+    this.mesh = kind === 'ammo' ? buildAmmoMesh() : buildKitMesh();
     this.mesh.position.set(pos.x, this.baseY, pos.z);
     this.expireAt = performance.now() / 1000 + LIFETIME; // solo se usa offline
     scene.add(this.mesh);
@@ -47,7 +69,13 @@ export class KitManager {
     for (const k of list) {
       seen.add(k.id);
       if (!this.kits.has(k.id)) {
-        this.kits.set(k.id, new Kit(this.scene, k.id, { x: k.p[0], y: k.p[1], z: k.p[2] }));
+        this.kits.set(k.id, new Kit(
+          this.scene,
+          k.id,
+          { x: k.p[0], y: k.p[1], z: k.p[2] },
+          k.k || 'health',
+          k.a || (k.k === 'ammo' ? 20 : 25),
+        ));
       }
     }
     for (const [id, kit] of this.kits) {
@@ -56,33 +84,44 @@ export class KitManager {
   }
 
   // --- offline ---
-  spawnLocal(pos) {
+  spawnLocal(pos, kind = 'health', amount = kind === 'ammo' ? 20 : 25) {
     const id = 'lk' + this.serial++;
-    this.kits.set(id, new Kit(this.scene, id, pos));
+    this.kits.set(id, new Kit(this.scene, id, pos, kind, amount));
   }
 
+  spawnAmmoLocal(pos) { this.spawnLocal(pos, 'ammo', 20); }
+
   // recogida y caducidad en modo local. onHealPlayer se llama si cura al jugador.
-  offlineUpdate(player, bots, onHealPlayer) {
+  offlineUpdate(player, bots, onHealPlayer, onAmmoPlayer) {
     const now = performance.now() / 1000;
     for (const [id, kit] of this.kits) {
       if (now > kit.expireAt) { this.remove(id); continue; }
       const kp = kit.mesh.position;
 
-      if (!player.dead && player.health < player.maxHealth) {
+      if (!player.dead && kit.kind === 'health' && player.health < player.maxHealth) {
         const dx = player.pos.x - kp.x, dy = player.pos.y - (kp.y - 0.35), dz = player.pos.z - kp.z;
         if (dx * dx + dz * dz < PICKUP_DIST_SQ && Math.abs(dy) < 1.6) {
-          player.health = Math.min(player.maxHealth, player.health + 25);
+          player.health = Math.min(player.maxHealth, player.health + kit.amount);
           onHealPlayer();
           this.remove(id);
           continue;
         }
       }
+      if (!player.dead && kit.kind === 'ammo') {
+        const dx = player.pos.x - kp.x, dy = player.pos.y - (kp.y - 0.35), dz = player.pos.z - kp.z;
+        if (dx * dx + dz * dz < PICKUP_DIST_SQ && Math.abs(dy) < 1.6) {
+          if (onAmmoPlayer) onAmmoPlayer(kit.amount);
+          this.remove(id);
+          continue;
+        }
+      }
+      if (kit.kind !== 'health') continue;
       if (bots) {
         for (const b of bots.bots) {
           if (b.dead || b.health >= 100) continue;
           const dx = b.pos.x - kp.x, dz = b.pos.z - kp.z;
           if (dx * dx + dz * dz < PICKUP_DIST_SQ && Math.abs(b.pos.y - (kp.y - 0.35)) < 1.6) {
-            b.health = Math.min(100, b.health + 25);
+            b.health = Math.min(100, b.health + kit.amount);
             this.remove(id);
             break;
           }

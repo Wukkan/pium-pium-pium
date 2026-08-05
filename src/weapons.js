@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ammoAfterPickup } from './ui-models.js';
 
 // ---------------------------------------------------------------------------
 // Armas: definición, modelo en primera persona (cajas), disparo por raycast,
@@ -204,6 +205,15 @@ export class WeaponSystem {
     this.money += n;
     this.hud.updateMoney(this.money);
     this.hud.updateSlots(this);
+  }
+
+  addAmmo(amount = 20) {
+    const st = this.ammo;
+    const before = st.reserve;
+    st.reserve = ammoAfterPickup(st.reserve, amount, this.def.reserve * 2);
+    const added = st.reserve - before;
+    if (added > 0) this.hud.updateAmmo(this);
+    return added;
   }
 
   // intenta comprar un arma no poseída

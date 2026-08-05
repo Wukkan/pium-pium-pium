@@ -31,3 +31,7 @@ export function readOwnedWeapons(raw, validKeys) {
   }
   return owned;
 }
+
+export function ammoAfterPickup(current, amount = 20, maxReserve = Infinity) {
+  return Math.min(maxReserve, Math.max(0, current) + Math.max(0, amount));
+}

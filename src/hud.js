@@ -12,7 +12,7 @@ const SLOT_NAMES = {
 export class HUD {
   constructor() {
     this.el = {
-      hud: $('hud'), menu: $('menu'), death: $('death'),
+      hud: $('hud'), menu: $('menu'), death: $('death'), buyMenu: $('buy-menu'),
       crosshair: $('crosshair'), hitmarker: $('hitmarker'),
       vignette: $('damage-vignette'), scope: $('scope'),
       healthBar: $('health-bar'), healthLabel: $('health-label'),
@@ -26,6 +26,7 @@ export class HUD {
   }
 
   showMenu(show) { this.el.menu.style.display = show ? 'flex' : 'none'; }
+  showBuyMenu(show) { this.el.buyMenu.style.display = show ? 'flex' : 'none'; }
   showHud(show) { this.el.hud.style.display = show ? 'block' : 'none'; }
   showDeath(show, killerName) {
     this.el.death.style.display = show ? 'flex' : 'none';
