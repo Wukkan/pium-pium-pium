@@ -57,3 +57,7 @@ export function loadoutMetadata(weapons, skin, grenades) {
     color: skin.color,
   };
 }
+
+export function weaponSelectionAction(owned) {
+  return owned ? 'equip' : 'open-buy';
+}

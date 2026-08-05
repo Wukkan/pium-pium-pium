@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ammoAfterPickup } from './ui-models.js';
+import { ammoAfterPickup, weaponSelectionAction } from './ui-models.js';
 
 // ---------------------------------------------------------------------------
 // Armas: definición, modelo en primera persona (cajas), disparo por raycast,
@@ -236,7 +236,11 @@ export class WeaponSystem {
   switchTo(key) {
     if (this.forcedKey) return; // en búsqueda del arma no se cambia a mano
     if (key === this.current || this.player.dead) return;
-    if (!this.owned[key]) { this.tryBuy(key); return; }
+    if (weaponSelectionAction(!!this.owned[key]) === 'open-buy') {
+      this.hud.announce('Pulsa B para abrir el arsenal y comprar armas');
+      this.audio.dry();
+      return;
+    }
     this._equip(key);
   }
 

@@ -8,6 +8,7 @@ import {
   weaponHudLabel,
   voteOptionsState,
   loadoutMetadata,
+  weaponSelectionAction,
 } from '../src/ui-models.js';
 
 test('weapon cards distinguish equipped, owned, affordable, and locked weapons', () => {
@@ -67,4 +68,9 @@ test('loadout metadata exposes the equipped player presentation', () => {
   ), {
     weapon: 'smg', ownedWeapons: ['pistol', 'smg'], grenades: 2, hat: 'cap', color: 0xe05252,
   });
+});
+
+test('locked weapon selection opens the arsenal instead of buying immediately', () => {
+  assert.equal(weaponSelectionAction(true), 'equip');
+  assert.equal(weaponSelectionAction(false), 'open-buy');
 });
