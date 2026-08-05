@@ -86,6 +86,9 @@ test('humanoid pose keeps limbs mirrored while walking and aims both arms', () =
   const aiming = humanoidPoseState(0, 0, true, 0.25);
   assert.equal(aiming.armL, aiming.armR);
   assert.ok(aiming.armL < -Math.PI / 2);
+  assert.ok(Math.abs(aiming.armLx) < 0.3);
+  assert.ok(Math.abs(aiming.armRx) < 0.3);
+  assert.equal(aiming.gunRotationX, Math.PI / 2);
 });
 
 test('weapon animation state adds bob, recoil and a visible reload motion', () => {

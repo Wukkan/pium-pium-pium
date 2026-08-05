@@ -66,11 +66,18 @@ export function humanoidPoseState(time, speed, aiming, aimPitch = 0) {
   const walkAmount = Math.min(1, Math.max(0, speed) / 5.2);
   const swing = Math.sin(time) * walkAmount * 0.55;
   const armAngle = aiming ? -Math.PI / 2 - aimPitch * 0.8 : null;
+  const armLx = aiming ? -0.24 : -0.39;
+  const armRx = aiming ? 0.24 : 0.39;
   return {
     legL: swing,
     legR: -swing,
     armL: armAngle ?? -swing * 0.7,
     armR: armAngle ?? swing * 0.7,
+    armLx,
+    armRx,
+    armLz: aiming ? 0.2 : 0,
+    armRz: aiming ? -0.2 : 0,
+    gunRotationX: aiming ? Math.PI / 2 : 0,
     bodyY: Math.abs(Math.cos(time)) * walkAmount * 0.025,
   };
 }

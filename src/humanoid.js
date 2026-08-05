@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { humanoidPoseState } from './ui-models.js';
 
 // ---------------------------------------------------------------------------
 // Modelo humanoide "blocky" compartido por bots locales y jugadores remotos.
@@ -77,8 +78,8 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
     return m;
   };
 
-  const capsule = (radius, length, mat, x, y, z, partName, parent) => add(
-    new THREE.CapsuleGeometry(radius, length, 4, 8), mat, x, y, z, partName, parent,
+  const limb = (radius, height, mat, x, y, z, partName, parent) => add(
+    new THREE.CylinderGeometry(radius * 0.96, radius * 1.08, height, 8), mat, x, y, z, partName, parent,
   );
   const box = (w, h, d, mat, x, y, z, partName, parent) => add(
     new THREE.BoxGeometry(w, h, d), mat, x, y, z, partName, parent,
@@ -90,19 +91,19 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   const legL = new THREE.Group(); legL.position.set(-0.16, 0.93, 0);
   const legR = new THREE.Group(); legR.position.set(0.16, 0.93, 0);
   group.add(legL, legR);
-  capsule(0.13, 0.32, pants, 0, -0.22, 0, 'leg', legL);
-  capsule(0.13, 0.32, pants, 0, -0.22, 0, 'leg', legR);
+  limb(0.13, 0.42, pants, 0, -0.22, 0, 'leg', legL);
+  limb(0.13, 0.42, pants, 0, -0.22, 0, 'leg', legR);
   const calfL = new THREE.Group(); calfL.position.set(0, -0.46, 0);
   const calfR = new THREE.Group(); calfR.position.set(0, -0.46, 0);
   legL.add(calfL); legR.add(calfR);
-  capsule(0.11, 0.34, pants, 0, -0.2, 0, 'leg', calfL);
-  capsule(0.11, 0.34, pants, 0, -0.2, 0, 'leg', calfR);
+  limb(0.11, 0.4, pants, 0, -0.2, 0, 'leg', calfL);
+  limb(0.11, 0.4, pants, 0, -0.2, 0, 'leg', calfR);
   box(0.22, 0.12, 0.38, shoe, 0, -0.41, -0.07, 'leg', calfL);
   box(0.22, 0.12, 0.38, shoe, 0, -0.41, -0.07, 'leg', calfR);
 
   const body = new THREE.Group();
   torso.add(body);
-  capsule(0.3, 0.42, shirt, 0, 0.32, 0, 'body', body);
+  add(new THREE.CylinderGeometry(0.28, 0.34, 0.58, 8), shirt, 0, 0.32, 0, 'body', body);
   box(0.5, 0.12, 0.36, shirtDark, 0, 0.12, 0, null, body);
   box(0.56, 0.06, 0.38, shirtDark, 0, 0.55, 0, null, body);
 
@@ -117,17 +118,18 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   torso.add(armL, armR);
   sphere(0.13, shirt, 0, 0.02, 0, 'arm', armL);
   sphere(0.13, shirt, 0, 0.02, 0, 'arm', armR);
-  capsule(0.09, 0.3, shirt, 0, -0.2, 0, 'arm', armL);
-  capsule(0.09, 0.3, shirt, 0, -0.2, 0, 'arm', armR);
+  limb(0.09, 0.32, shirt, 0, -0.2, 0, 'arm', armL);
+  limb(0.09, 0.32, shirt, 0, -0.2, 0, 'arm', armR);
   const handL = new THREE.Group(); handL.position.set(0, -0.43, 0);
   const handR = new THREE.Group(); handR.position.set(0, -0.43, 0);
   armL.add(handL); armR.add(handR);
-  capsule(0.08, 0.12, skinTone, 0, -0.11, 0, 'arm', handL);
-  capsule(0.08, 0.12, skinTone, 0, -0.11, 0, 'arm', handR);
+  sphere(0.08, skinTone, 0, -0.11, 0, 'arm', handL);
+  sphere(0.08, skinTone, 0, -0.11, 0, 'arm', handR);
 
   const gun = new THREE.Group();
-  gun.position.set(0, -0.53, -0.12);
-  box(0.08, 0.1, 0.55, gunMat, 0, 0.05, -0.2, null, gun);
+  gun.position.set(0, -0.08, -0.16);
+  gun.rotation.x = Math.PI / 2;
+  box(0.065, 0.075, 0.36, gunMat, 0, 0.02, -0.12, null, gun);
   handR.add(gun);
 
   const hatMesh = makeHat(hat);
@@ -146,13 +148,16 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
 // pose de andar/apuntar, compartida
 export function animateHumanoid(rig, dt, speed, walkTimeRef, aiming, aimPitch = 0) {
   walkTimeRef.t += dt * speed * 1.7;
-  const walkAmount = Math.min(1, speed / 5.2);
-  const swing = Math.sin(walkTimeRef.t) * walkAmount * 0.55;
-  const armAngle = aiming ? -Math.PI / 2 - aimPitch * 0.8 : null;
-  rig.legL.rotation.x = swing;
-  rig.legR.rotation.x = -swing;
-  rig.armR.rotation.x = armAngle ?? swing * 0.7;
-  rig.armL.rotation.x = armAngle ?? -swing * 0.7;
-  rig.torso.position.y = 0.78 + Math.abs(Math.cos(walkTimeRef.t)) * walkAmount * 0.025;
-  rig.torso.rotation.z = Math.sin(walkTimeRef.t * 0.5) * walkAmount * 0.025;
+  const pose = humanoidPoseState(walkTimeRef.t, speed, aiming, aimPitch);
+  rig.legL.rotation.x = pose.legL;
+  rig.legR.rotation.x = pose.legR;
+  rig.armR.rotation.x = pose.armR;
+  rig.armL.rotation.x = pose.armL;
+  rig.armL.position.x = pose.armLx;
+  rig.armR.position.x = pose.armRx;
+  rig.armL.rotation.z = pose.armLz;
+  rig.armR.rotation.z = pose.armRz;
+  rig.gun.rotation.x = pose.gunRotationX;
+  rig.torso.position.y = 0.78 + pose.bodyY;
+  rig.torso.rotation.z = Math.sin(walkTimeRef.t * 0.5) * Math.min(1, Math.max(0, speed) / 5.2) * 0.025;
 }
