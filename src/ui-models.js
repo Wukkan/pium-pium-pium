@@ -70,6 +70,40 @@ export function humanoidModelProfile() {
   };
 }
 
+const DEFAULT_SETTINGS = {
+  fov: 78,
+  sensitivity: 0.0023,
+  masterVolume: 0.45,
+  invertY: false,
+  showFps: false,
+  reducedMotion: false,
+};
+
+const clamp = (value, min, max, fallback) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+};
+
+export function readSettings(raw) {
+  let value = {};
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (parsed && typeof parsed === 'object') value = parsed;
+  } catch { /* preferencias corruptas: usar valores por defecto */ }
+  return {
+    fov: Math.round(clamp(value.fov, 70, 110, DEFAULT_SETTINGS.fov)),
+    sensitivity: clamp(value.sensitivity, 0.001, 0.006, DEFAULT_SETTINGS.sensitivity),
+    masterVolume: clamp(value.masterVolume, 0, 1, DEFAULT_SETTINGS.masterVolume),
+    invertY: value.invertY === true || value.invertY === 1,
+    showFps: value.showFps === true || value.showFps === 1,
+    reducedMotion: value.reducedMotion === true || value.reducedMotion === 1,
+  };
+}
+
+export function menuNavState(active, ids = ['play', 'arsenal', 'operator', 'options']) {
+  return ids.map((id) => ({ id, active: id === active }));
+}
+
 export function humanoidPoseState(time, speed, aiming, aimPitch = 0) {
   const walkAmount = Math.min(1, Math.max(0, speed) / 5.2);
   const swing = Math.sin(time) * walkAmount * 0.55;

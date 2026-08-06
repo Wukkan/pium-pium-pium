@@ -75,6 +75,10 @@ export class HUD {
     document.getElementById('money').textContent = `$ ${n}`;
   }
 
+  setFpsVisible(show) {
+    this.el.fps.style.display = show ? 'block' : 'none';
+  }
+
   updateGrenades(n) {
     document.getElementById('nades').textContent = `🧨 [G] Granadas: ${n}`;
   }

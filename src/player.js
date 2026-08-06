@@ -46,6 +46,7 @@ export class Player {
 
     this.keys = {};
     this.sensitivity = 0.0023;
+    this.invertY = false;
     this.fovOffset = 0;
 
     this.onJump = null;
@@ -60,7 +61,7 @@ export class Player {
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement) {
         this.yaw -= e.movementX * this.sensitivity;
-        this.pitch -= e.movementY * this.sensitivity;
+        this.pitch += (this.invertY ? 1 : -1) * e.movementY * this.sensitivity;
         this.pitch = Math.max(-1.55, Math.min(1.55, this.pitch));
       }
     });

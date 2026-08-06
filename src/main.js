@@ -13,7 +13,7 @@ import { KitManager } from './kits.js';
 import { GrenadeManager, explosionDamage } from './grenades.js';
 import { Missions } from './missions.js';
 import { HATS, MAPS, QUICK_CHAT } from './shared/mapdata.js';
-import { loadoutMetadata } from './ui-models.js';
+import { loadoutMetadata, menuNavState, readSettings } from './ui-models.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — réplica de krunker.io, ahora multijugador.
@@ -137,6 +137,58 @@ const SKIN_COLORS = [0xe05252, 0x5278e0, 0x52b86a, 0xc27ad0, 0xe0a052, 0x52c2c2,
 const COLORS_PRICE = 300;
 let menuMsg = '';
 
+let settings = readSettings(localStorage.getItem('pium_settings'));
+function saveSettings() {
+  localStorage.setItem('pium_settings', JSON.stringify(settings));
+}
+
+function applySettings() {
+  player.sensitivity = settings.sensitivity;
+  player.invertY = settings.invertY;
+  weapons.setFov(settings.fov);
+  audio.setMasterVolume(settings.masterVolume);
+  document.body.classList.toggle('reduced-motion', settings.reducedMotion);
+  hud.setFpsVisible(settings.showFps);
+}
+
+function renderSettings() {
+  const fov = document.getElementById('option-fov');
+  const sensitivity = document.getElementById('option-sensitivity');
+  const volume = document.getElementById('option-volume');
+  if (!fov || !sensitivity || !volume) return;
+  fov.value = settings.fov;
+  sensitivity.value = settings.sensitivity;
+  volume.value = settings.masterVolume;
+  document.getElementById('option-fov-value').textContent = `${settings.fov}°`;
+  document.getElementById('option-sensitivity-value').textContent = `${Math.round((settings.sensitivity / 0.0023) * 100)}%`;
+  document.getElementById('option-volume-value').textContent = `${Math.round(settings.masterVolume * 100)}%`;
+  document.getElementById('option-invert').checked = settings.invertY;
+  document.getElementById('option-show-fps').checked = settings.showFps;
+  document.getElementById('option-reduced-motion').checked = settings.reducedMotion;
+}
+
+function bindSettings() {
+  const fov = document.getElementById('option-fov');
+  const sensitivity = document.getElementById('option-sensitivity');
+  const volume = document.getElementById('option-volume');
+  const invert = document.getElementById('option-invert');
+  const showFps = document.getElementById('option-show-fps');
+  const reducedMotion = document.getElementById('option-reduced-motion');
+  if (!fov || !sensitivity || !volume || !invert || !showFps || !reducedMotion) return;
+  const update = () => { applySettings(); saveSettings(); renderSettings(); };
+  fov.addEventListener('input', () => { settings.fov = Number(fov.value); update(); });
+  sensitivity.addEventListener('input', () => { settings.sensitivity = Number(sensitivity.value); update(); });
+  volume.addEventListener('input', () => { settings.masterVolume = Number(volume.value); update(); });
+  invert.addEventListener('change', () => { settings.invertY = invert.checked; update(); });
+  showFps.addEventListener('change', () => { settings.showFps = showFps.checked; update(); });
+  reducedMotion.addEventListener('change', () => { settings.reducedMotion = reducedMotion.checked; update(); });
+  document.getElementById('reset-settings').addEventListener('click', () => {
+    settings = readSettings(null);
+    applySettings(); saveSettings(); renderSettings();
+  });
+  renderSettings();
+}
+
 function renderLoadoutPanel() {
   const meta = loadoutMetadata(weapons, skin, grenades.count);
   const weapon = WEAPON_DEFS[meta.weapon];
@@ -146,6 +198,14 @@ function renderLoadoutPanel() {
   document.getElementById('loadout-grenades').textContent = `${meta.grenades} disponibles`;
   document.getElementById('loadout-hat').textContent = hat ? hat.name : 'Sin sombrero';
   document.getElementById('loadout-color').textContent = meta.color ? `#${meta.color.toString(16).padStart(6, '0')}` : 'Predeterminado';
+  const quickWeapon = document.getElementById('menu-quick-weapon');
+  const quickDetail = document.getElementById('menu-quick-detail');
+  const quickMoney = document.getElementById('menu-quick-money');
+  const playerLabel = document.getElementById('menu-player-label');
+  if (quickWeapon) quickWeapon.textContent = weapon.name;
+  if (quickDetail) quickDetail.textContent = `${weapon.mag} / ${weapon.reserve} Â· ${meta.grenades} granadas`;
+  if (quickMoney) quickMoney.textContent = `$ ${weapons.money}`;
+  if (playerLabel) playerLabel.textContent = nameInput ? (nameInput.value || 'INVITADO').toUpperCase() : 'INVITADO';
   document.getElementById('loadout-owned').textContent = `Armas desbloqueadas: ${meta.ownedWeapons.map((key) => WEAPON_DEFS[key].name).join(' · ')}`;
 }
 
@@ -156,6 +216,50 @@ const missions = new Missions((amount, txt) => {
   audio.buy();
   renderMenuPanels();
 });
+
+function renderMenuArsenal() {
+  const grid = document.getElementById('menu-arsenal-grid');
+  const money = document.getElementById('menu-arsenal-money');
+  if (!grid || !money) return;
+  money.textContent = `$ ${weapons.money}`;
+  grid.textContent = '';
+  weapons.slots.forEach((key, i) => {
+    const def = WEAPON_DEFS[key];
+    const owned = !!weapons.owned[key];
+    const equipped = key === weapons.current;
+    const affordable = weapons.money >= def.price;
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = `menu-weapon-card${equipped ? ' equipped' : ''}${!owned && !affordable ? ' locked' : ''}`;
+    card.disabled = !owned && !affordable;
+    const action = equipped ? 'EQUIPADA' : owned ? 'EQUIPAR' : affordable ? `COMPRAR $${def.price}` : `FALTAN $${def.price - weapons.money}`;
+    card.innerHTML = `<span class="weapon-index">[${i + 1}] ${def.kind.toUpperCase()}</span><span class="weapon-icon"></span><span class="weapon-name">${def.name}</span><span class="weapon-info">Cargador ${def.mag} · Reserva ${def.reserve}</span><span class="weapon-action">${action}</span>`;
+    card.addEventListener('click', () => {
+      if (owned) weapons.switchTo(key);
+      else if (affordable) weapons.tryBuy(key);
+      renderMenuArsenal();
+      renderLoadoutPanel();
+    });
+    grid.append(card);
+  });
+}
+
+function showMenuScreen(screen) {
+  const valid = ['play', 'arsenal', 'operator', 'options'];
+  const active = valid.includes(screen) ? screen : 'play';
+  for (const id of valid) {
+    const panel = document.getElementById(`menu-screen-${id}`);
+    if (panel) panel.classList.toggle('active', id === active);
+  }
+  const states = menuNavState(active);
+  document.querySelectorAll('.menu-nav-btn').forEach((button) => {
+    const stateForButton = states.find((item) => item.id === button.dataset.menuScreen);
+    button.classList.toggle('active', !!stateForButton?.active);
+  });
+  if (active === 'arsenal') renderMenuArsenal();
+  if (active === 'operator') renderMenuPanels();
+  if (active === 'options') renderSettings();
+}
 
 function renderMenuPanels() {
   renderLoadoutPanel();
@@ -364,6 +468,15 @@ const playerEye = new THREE.Vector3();
 const playBtn = document.getElementById('play-btn');
 const nameInput = document.getElementById('name-input');
 nameInput.value = localStorage.getItem('pium_name') || '';
+document.querySelectorAll('[data-menu-screen]').forEach((button) => {
+  button.addEventListener('click', () => showMenuScreen(button.dataset.menuScreen));
+});
+nameInput.addEventListener('input', () => {
+  const label = document.getElementById('menu-player-label');
+  if (label) label.textContent = (nameInput.value || 'INVITADO').toUpperCase();
+});
+bindSettings();
+applySettings();
 
 // sondeo rápido: ¿hay servidor?
 fetch('/salud').then((r) => {
@@ -687,6 +800,7 @@ document.addEventListener('pointerlockchange', () => {
     if (state === 'playing') {
       state = 'menu';
       hud.showMenu(true);
+      showMenuScreen('play');
       hud.setMenuStats(kills, deaths);
       hud.setScope(false);
       hud.showScores(false);
@@ -844,6 +958,8 @@ hud.updateMoney(0);
 hud.updateSlots(weapons);
 hud.updateGrenades(grenades.count);
 renderMenuPanels();
+renderMenuArsenal();
+showMenuScreen('play');
 
 // --- bucle de juego ---
 let lastTime = performance.now();

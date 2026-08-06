@@ -7,6 +7,7 @@ export class AudioSys {
   constructor() {
     this.ctx = null;
     this.master = null;
+    this.masterVolume = 0.45;
     this.noiseBuffer = null;
     this.samples = null; // grabaciones reales (CC0); si fallan, sintetizado
   }
@@ -18,7 +19,7 @@ export class AudioSys {
     }
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.45;
+    this.master.gain.value = this.masterVolume;
     this.master.connect(this.ctx.destination);
 
     const len = this.ctx.sampleRate * 0.5;
@@ -27,6 +28,11 @@ export class AudioSys {
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
 
     this._loadSamples();
+  }
+
+  setMasterVolume(value) {
+    this.masterVolume = Math.min(1, Math.max(0, Number(value) || 0));
+    if (this.master) this.master.gain.value = this.masterVolume;
   }
 
   async _loadSamples() {

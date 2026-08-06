@@ -12,6 +12,8 @@ import {
   humanoidPoseState,
   weaponAnimationState,
   humanoidModelProfile,
+  readSettings,
+  menuNavState,
 } from '../src/ui-models.js';
 
 test('weapon cards distinguish equipped, owned, affordable, and locked weapons', () => {
@@ -114,4 +116,26 @@ test('humanoid model profile stays blocky and compact', () => {
     limb: [0.18, 0.6, 0.22],
     leg: [0.24, 0.8, 0.26],
   });
+});
+
+test('settings are sanitized for a stable AAA menu profile', () => {
+  assert.deepEqual(readSettings(JSON.stringify({
+    fov: 120, sensitivity: -2, masterVolume: 2, invertY: 1, showFps: true,
+  })), {
+    fov: 110, sensitivity: 0.001, masterVolume: 1,
+    invertY: true, showFps: true, reducedMotion: false,
+  });
+  assert.deepEqual(readSettings('broken'), {
+    fov: 78, sensitivity: 0.0023, masterVolume: 0.45,
+    invertY: false, showFps: false, reducedMotion: false,
+  });
+});
+
+test('menu navigation marks one active destination', () => {
+  assert.deepEqual(menuNavState('options'), [
+    { id: 'play', active: false },
+    { id: 'arsenal', active: false },
+    { id: 'operator', active: false },
+    { id: 'options', active: true },
+  ]);
 });

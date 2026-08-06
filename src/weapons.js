@@ -152,6 +152,7 @@ export class WeaponSystem {
       this.state[key] = { ammo: WEAPON_DEFS[key].mag, reserve: WEAPON_DEFS[key].reserve };
     }
     this.current = 'pistol';
+    this.baseFov = BASE_FOV;
 
     // economía: empiezas solo con la pistola y compras el resto con bajas
     this.money = 0;
@@ -199,6 +200,12 @@ export class WeaponSystem {
 
   get def() { return WEAPON_DEFS[this.current]; }
   get ammo() { return this.state[this.current]; }
+
+  setFov(value) {
+    this.baseFov = Math.min(110, Math.max(70, Number(value) || BASE_FOV));
+    this.camera.fov = this.baseFov;
+    this.camera.updateProjectionMatrix();
+  }
 
   // añade dinero (por bajas); actualiza el HUD
   addMoney(n) {
@@ -414,7 +421,7 @@ export class WeaponSystem {
     if (inputEnabled && this.triggerDown && !this.player.dead) this.fire();
 
     // FOV según ADS
-    const targetFov = (this.ads && !this.player.dead) ? BASE_FOV / def.zoom : BASE_FOV;
+    const targetFov = (this.ads && !this.player.dead) ? this.baseFov / def.zoom : this.baseFov;
     this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 12);
     this.camera.updateProjectionMatrix();
 
