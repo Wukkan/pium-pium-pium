@@ -110,6 +110,15 @@ export function menuNavState(active, ids = ['play', 'arsenal', 'operator', 'opti
   return ids.map((id) => ({ id, active: id === active }));
 }
 
+export function buyMenuCategoryState(active, categories = [
+  ['all', 'TODO'],
+  ['pistols', 'PISTOLAS'],
+  ['smgs', 'SMG'],
+  ['rifles', 'RIFLES'],
+]) {
+  return categories.map(([id, label]) => ({ id, label, active: id === active }));
+}
+
 export function humanoidPoseState(time, speed, aiming, aimPitch = 0) {
   const walkAmount = Math.min(1, Math.max(0, speed) / 5.2);
   const swing = Math.sin(time) * walkAmount * 0.55;

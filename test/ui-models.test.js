@@ -14,7 +14,9 @@ import {
   humanoidModelProfile,
   readSettings,
   menuNavState,
+  buyMenuCategoryState,
 } from '../src/ui-models.js';
+import { buildGunModel } from '../src/weapons.js';
 
 test('weapon cards distinguish equipped, owned, affordable, and locked weapons', () => {
   const def = { name: 'ESCOPETA', price: 300 };
@@ -153,4 +155,21 @@ test('menu navigation marks one active destination', () => {
     { id: 'operator', active: false },
     { id: 'options', active: true },
   ]);
+});
+
+test('buy menu categories expose one selected filter for mouse navigation', () => {
+  assert.deepEqual(buyMenuCategoryState('rifles'), [
+    { id: 'all', label: 'TODO', active: false },
+    { id: 'pistols', label: 'PISTOLAS', active: false },
+    { id: 'smgs', label: 'SMG', active: false },
+    { id: 'rifles', label: 'RIFLES', active: true },
+  ]);
+});
+
+test('weapon models expose layered AAA silhouettes for each combat class', () => {
+  for (const kind of ['pistol', 'shotgun', 'smg', 'ar', 'sniper', 'revolver', 'launcher']) {
+    const model = buildGunModel(kind);
+    assert.ok(model.children.length >= 8, `${kind} should have layered geometry`);
+    assert.equal(model.userData.flash.visible, false);
+  }
 });

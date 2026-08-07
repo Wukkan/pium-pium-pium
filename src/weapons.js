@@ -57,12 +57,15 @@ export const WEAPON_ORDER = ['pistol', 'shotgun', 'smg', 'ar', 'sniper', 'revolv
 
 const BASE_FOV = 78;
 
-function buildGunModel(kind) {
+export function buildGunModel(kind) {
   const g = new THREE.Group();
-  const dark = new THREE.MeshLambertMaterial({ color: 0x2e2e34 });
-  const mid = new THREE.MeshLambertMaterial({ color: 0x4a4a52 });
-  const wood = new THREE.MeshLambertMaterial({ color: 0x7a5a38 });
-  const accent = new THREE.MeshLambertMaterial({ color: 0xd8a03a });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x171c24 });
+  const mid = new THREE.MeshLambertMaterial({ color: 0x465463 });
+  const polymer = new THREE.MeshLambertMaterial({ color: 0x252d37 });
+  const steel = new THREE.MeshLambertMaterial({ color: 0x788795 });
+  const wood = new THREE.MeshLambertMaterial({ color: 0x5c4738 });
+  const rubber = new THREE.MeshLambertMaterial({ color: 0x11161d });
+  const accent = new THREE.MeshLambertMaterial({ color: 0xc69b48 });
 
   const part = (mat, w, h, d, x, y, z) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -71,28 +74,62 @@ function buildGunModel(kind) {
     return m;
   };
 
+  const tube = (mat, radius, length, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 10), mat);
+    m.position.set(x, y, z);
+    m.rotation.x = Math.PI / 2;
+    m.castShadow = true;
+    g.add(m);
+    return m;
+  };
+
+  const sight = (x, z, width = 0.05) => {
+    part(dark, width, 0.06, 0.12, x, 0.1, z);
+    part(accent, width * 0.42, 0.025, 0.04, x, 0.14, z - 0.03);
+  };
+
   if (kind === 'pistol') {
+    part(polymer, 0.1, 0.06, 0.25, 0, -0.02, 0.02);
+    part(rubber, 0.065, 0.18, 0.12, 0, -0.16, 0.06);
+    tube(steel, 0.018, 0.14, 0, 0.03, -0.31);
+    sight(0, -0.1, 0.045);
     part(dark, 0.075, 0.11, 0.3, 0, 0.02, -0.08);     // corredera
     part(mid, 0.07, 0.14, 0.11, 0, -0.09, 0.05);      // empuñadura
     part(dark, 0.045, 0.045, 0.12, 0, 0.03, -0.26);   // cañón
     part(accent, 0.02, 0.03, 0.04, 0, 0.09, -0.2);    // mira
   } else if (kind === 'revolver') {
+    tube(dark, 0.075, 0.14, 0, 0.03, 0.03);
+    tube(steel, 0.018, 0.14, 0, 0.04, -0.37);
+    part(rubber, 0.075, 0.06, 0.04, 0, -0.17, 0.1);
+    sight(0, -0.22, 0.04);
     part(mid, 0.06, 0.09, 0.38, 0, 0.03, -0.15);      // cañón largo
     part(dark, 0.09, 0.1, 0.12, 0, 0, 0.02);          // tambor
     part(wood, 0.07, 0.14, 0.1, 0, -0.1, 0.09);       // empuñadura
     part(accent, 0.02, 0.04, 0.04, 0, 0.1, -0.3);     // mira
   } else if (kind === 'launcher') {
+    tube(steel, 0.055, 0.08, 0, 0.01, -0.52);
+    part(rubber, 0.15, 0.04, 0.12, 0, -0.08, 0.02);
+    sight(0, -0.25, 0.08);
+    part(accent, 0.04, 0.04, 0.18, 0, 0.09, -0.18);
     part(dark, 0.13, 0.13, 0.55, 0, 0, -0.15);        // tubo gordo
     part(accent, 0.15, 0.15, 0.1, 0, 0, -0.45);       // boca
     part(mid, 0.08, 0.16, 0.12, 0, -0.12, 0.1);       // empuñadura
     part(wood, 0.08, 0.1, 0.18, 0, -0.02, 0.25);      // culata
   } else if (kind === 'shotgun') {
+    tube(steel, 0.024, 0.55, -0.026, 0.05, -0.63);
+    tube(dark, 0.022, 0.55, 0.026, 0.05, -0.63);
+    part(rubber, 0.1, 0.035, 0.16, 0, 0.08, -0.03);
+    part(wood, 0.09, 0.05, 0.18, 0, -0.1, -0.3);
     part(dark, 0.07, 0.09, 0.7, 0, 0.01, -0.25);      // cañón largo
     part(wood, 0.075, 0.09, 0.22, 0, -0.06, -0.32);   // bomba (pump)
     part(wood, 0.08, 0.12, 0.3, 0, -0.03, 0.25);      // culata
     part(mid, 0.085, 0.12, 0.2, 0, 0, 0.02);          // recámara
     part(accent, 0.03, 0.03, 0.06, 0, 0.07, -0.55);   // mira
   } else if (kind === 'ar') {
+    tube(steel, 0.024, 0.38, 0, 0.02, -0.63);
+    part(rubber, 0.12, 0.035, 0.28, 0, 0.08, -0.3);
+    part(polymer, 0.09, 0.13, 0.08, 0, -0.16, 0.03);
+    sight(0, -0.18, 0.055);
     part(mid, 0.09, 0.13, 0.62, 0, 0, -0.1);          // cuerpo
     part(dark, 0.055, 0.055, 0.45, 0, 0.01, -0.55);   // cañón
     part(dark, 0.07, 0.16, 0.13, 0, -0.13, 0.02);     // cargador
@@ -100,12 +137,20 @@ function buildGunModel(kind) {
     part(dark, 0.03, 0.05, 0.14, 0, 0.09, -0.05);     // mira
     part(accent, 0.06, 0.04, 0.1, 0, -0.02, -0.35);   // detalle
   } else if (kind === 'smg') {
+    tube(steel, 0.022, 0.22, 0, 0.02, -0.48);
+    part(rubber, 0.12, 0.03, 0.2, 0, 0.09, -0.12);
+    part(polymer, 0.08, 0.12, 0.07, 0, -0.11, 0.03);
+    sight(0, -0.24, 0.05);
     part(mid, 0.09, 0.12, 0.42, 0, 0, -0.05);
     part(dark, 0.05, 0.05, 0.25, 0, 0.01, -0.36);
     part(dark, 0.06, 0.2, 0.1, 0, -0.15, 0.03);
     part(dark, 0.07, 0.09, 0.13, 0, -0.02, 0.2);
     part(accent, 0.095, 0.03, 0.08, 0, 0.07, -0.1);
   } else {
+    tube(steel, 0.026, 0.42, 0, 0.03, -0.73);
+    tube(dark, 0.045, 0.22, 0, 0.12, -0.12);
+    part(rubber, 0.1, 0.035, 0.3, 0, 0.09, -0.3);
+    sight(0, -0.42, 0.06);
     part(wood, 0.09, 0.13, 0.75, 0, 0, -0.05);
     part(dark, 0.05, 0.05, 0.6, 0, 0.02, -0.68);
     part(dark, 0.06, 0.12, 0.1, 0, -0.12, 0.08);

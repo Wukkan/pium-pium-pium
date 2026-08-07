@@ -13,7 +13,7 @@ import { KitManager } from './kits.js';
 import { GrenadeManager, explosionDamage } from './grenades.js';
 import { Missions } from './missions.js';
 import { HATS, MAPS, QUICK_CHAT } from './shared/mapdata.js';
-import { loadoutMetadata, menuNavState, readSettings } from './ui-models.js';
+import { buyMenuCategoryState, loadoutMetadata, menuNavState, readSettings } from './ui-models.js';
 import { makeHumanoid } from './humanoid.js';
 
 // ---------------------------------------------------------------------------
@@ -909,6 +909,7 @@ document.addEventListener('pointerlockchange', () => {
     hud.showMenu(false);
     hud.showHud(true);
   } else {
+    if (buyOpen) return;
     if (state === 'playing') {
       state = 'menu';
       hud.showMenu(true);
@@ -965,6 +966,7 @@ addEventListener('keyup', (e) => {
 // teclas de modo: V cuchillo, M equipo, C chat, B compra, 1-6 en overlays
 let chatOpen = false;
 let buyOpen = false;
+let buyCategory = 'all';
 function refreshWeaponInputBlock() {
   weapons.inputBlocked = chatOpen || buyOpen || podiumOpen || teamPickerOpen;
 }
@@ -978,17 +980,33 @@ function setChat(open) {
 function renderBuyMenu() {
   const grid = document.getElementById('buy-grid');
   document.getElementById('buy-money').textContent = `$ ${weapons.money}`;
+  const categoryStates = buyMenuCategoryState(buyCategory);
+  document.querySelectorAll('[data-buy-category]').forEach((button) => {
+    const stateForButton = categoryStates.find((item) => item.id === button.dataset.buyCategory);
+    button.classList.toggle('active', !!stateForButton?.active);
+  });
   grid.textContent = '';
-  weapons.slots.forEach((key, i) => {
+  const visibleSlots = weapons.slots.filter((key) => {
+    if (buyCategory === 'all') return true;
+    const kind = WEAPON_DEFS[key].kind;
+    if (buyCategory === 'pistols') return kind === 'pistol' || kind === 'revolver';
+    if (buyCategory === 'smgs') return kind === 'smg' || kind === 'shotgun';
+    if (buyCategory === 'rifles') return kind === 'ar' || kind === 'sniper' || kind === 'launcher';
+    return true;
+  });
+  visibleSlots.forEach((key) => {
     const def = WEAPON_DEFS[key];
     const card = document.createElement('button');
     const owned = !!weapons.owned[key];
     const equipped = key === weapons.current;
     const affordable = weapons.money >= def.price;
     card.type = 'button';
-    card.className = `buy-card${equipped ? ' equipped' : ''}${!owned && !affordable ? ' locked' : ''}`;
-    const action = equipped ? 'EQUIPADA' : owned ? 'EQUIPAR' : affordable ? `COMPRAR $${def.price}` : `FALTAN $${def.price - weapons.money}`;
-    card.innerHTML = `<span class="buy-key">[${i + 1}] ${def.kind.toUpperCase()}</span>` +
+    card.className = `buy-card${equipped ? ' equipped' : ''}${owned ? ' owned' : ''}${!owned && !affordable ? ' locked' : ''}`;
+    card.dataset.weapon = key;
+    const action = equipped ? 'EQUIPADA' : owned ? 'EQUIPAR' : affordable ? `COMPRAR $${def.price}` : `FALTAN $${def.price}`;
+    const slot = WEAPON_ORDER.indexOf(key) + 1;
+    card.innerHTML = `<span class="buy-key">[${slot}] ${def.kind.toUpperCase()}</span>` +
+      `<span class="buy-weapon-icon ${def.kind}" aria-hidden="true"></span>` +
       `<span class="buy-name">${def.name}</span>` +
       `<span class="buy-info">Cargador ${def.mag} · Reserva ${def.reserve}</span>` +
       `<span class="buy-action">${action}</span>`;
@@ -1007,9 +1025,37 @@ function setBuyMenu(open) {
   if (buyOpen) renderBuyMenu();
   hud.showBuyMenu(buyOpen);
   refreshWeaponInputBlock();
+  if (buyOpen) {
+    if (document.pointerLockElement) document.exitPointerLock();
+  } else if (state === 'playing' && !player.dead) {
+    tryLock();
+  }
 }
 
+document.querySelectorAll('[data-buy-category]').forEach((button) => {
+  button.addEventListener('click', () => {
+    buyCategory = button.dataset.buyCategory;
+    renderBuyMenu();
+  });
+});
+document.getElementById('buy-close')?.addEventListener('click', () => setBuyMenu(false));
+
 addEventListener('keydown', (e) => {
+  if (buyOpen) {
+    if (e.code === 'Escape' || e.code === 'KeyB') {
+      e.preventDefault();
+      setBuyMenu(false);
+      return;
+    }
+    const buyIndex = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'].indexOf(e.code);
+    if (buyIndex >= 0) {
+      const key = WEAPON_ORDER[buyIndex];
+      if (weapons.owned[key]) weapons.switchTo(key);
+      else weapons.tryBuy(key);
+      renderBuyMenu();
+    }
+    return;
+  }
   if (!document.pointerLockElement) return;
   if (e.code === 'KeyB' && !podiumOpen && !teamPickerOpen) {
     setChat(false);
