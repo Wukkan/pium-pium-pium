@@ -35,7 +35,7 @@ test('fallback explosions include a flash, shockwave, smoke, and debris cleanup'
   effects.explosion(new CORE_THREE.Vector3(0, 0, 0));
 
   assert.equal(effects.items.length, 5);
-  assert.ok(scene.children.some((child) => child.geometry?.type === 'RingGeometry'));
+  assert.ok(scene.children.some((child) => child.userData?.effect === 'shockwave' && child.geometry?.type === 'SphereGeometry'));
   effects.update(1.1);
   assert.equal(effects.items.length, 0);
 });
@@ -46,5 +46,5 @@ test('quarks explosions also add a visible expanding shockwave mesh', () => {
 
   effects.explosion(new CORE_THREE.Vector3(0, 0, 0));
 
-  assert.ok(scene.children.some((child) => child.geometry?.type === 'RingGeometry'));
+  assert.ok(scene.children.some((child) => child.userData?.effect === 'shockwave' && child.geometry?.type === 'SphereGeometry'));
 });

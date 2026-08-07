@@ -14,7 +14,7 @@ export class Effects {
     this.items = [];
     this.tracerGeo = new THREE.BoxGeometry(1, 1, 1);
     this.particleGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
-    this.shockwaveGeo = new THREE.RingGeometry(0.16, 0.24, 32);
+    this.shockwaveGeo = new THREE.SphereGeometry(0.14, 20, 12);
     this.smokeGeo = new THREE.SphereGeometry(0.22, 8, 8);
     this.quarks = null;
     if (backend.quarks && backend.THREE) {
@@ -102,18 +102,18 @@ export class Effects {
   shockwave(pos) {
     const waveMat = new THREE.MeshBasicMaterial({
       color: 0xffd98a, transparent: true, opacity: 0.95,
-      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false, wireframe: true,
     });
     const wave = new THREE.Mesh(this.shockwaveGeo, waveMat);
-    wave.rotation.x = -Math.PI / 2;
-    wave.position.copy(pos).add(new THREE.Vector3(0, 0.035, 0));
+    wave.userData.effect = 'shockwave';
+    wave.position.copy(pos);
     this.scene.add(wave);
     const waveTotal = 0.65;
     this.items.push({
       obj: wave, life: waveTotal,
       tick() {
         const p = 1 - this.life / waveTotal;
-        wave.scale.setScalar(0.7 + p * 13);
+        wave.scale.setScalar(0.7 + p * 15);
         waveMat.opacity = 0.95 * (1 - p) ** 1.35;
       },
       dispose() { waveMat.dispose(); },
