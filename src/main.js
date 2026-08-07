@@ -114,6 +114,18 @@ let myGunIdx = 0;
 let podiumOpen = false;
 let teamPickerOpen = false;
 let podiumTimer = null;
+let podiumStage = 'mode';
+
+function startPodiumCountdown(secs = 15) {
+  let remaining = Math.max(0, Number(secs) || 0);
+  hud.setPodiumCountdown(remaining);
+  clearInterval(podiumTimer);
+  podiumTimer = setInterval(() => {
+    remaining--;
+    hud.setPodiumCountdown(Math.max(0, remaining));
+    if (remaining <= 0) clearInterval(podiumTimer);
+  }, 1000);
+}
 
 function fmtTime(s) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -719,6 +731,7 @@ function setupOnline() {
     if (m.map && m.map !== world.mapId) world.load(m.map);
     if (m.st === 'playing') {
       podiumOpen = false;
+      podiumStage = 'mode';
       hud.hidePodium();
       clearInterval(podiumTimer);
       resetStreak();
@@ -734,31 +747,37 @@ function setupOnline() {
     setChat(false);
     setTeamPicker(false);
     podiumOpen = true;
+    podiumStage = m.stage || 'mode';
     weapons.inputBlocked = true;
     hud.showPodium(m);
+    hud.setPodiumStage(podiumStage, m.secs || 15);
     if (m.winner === net.name) missions.event('win');
     audio.streak(4); // fanfarria de fin de partida
-    let secs = m.secs || 12;
-    hud.setPodiumCountdown(secs);
-    clearInterval(podiumTimer);
-    podiumTimer = setInterval(() => {
-      secs--;
-      hud.setPodiumCountdown(Math.max(0, secs));
-      if (secs <= 0) clearInterval(podiumTimer);
-    }, 1000);
+    startPodiumCountdown(m.secs || 15);
+  });
+
+  net.on('podiumStage', (m) => {
+    if (!podiumOpen) return;
+    podiumStage = m.stage || 'mode';
+    hud.setPodiumStage(podiumStage, m.secs || 15);
+    startPodiumCountdown(m.secs || 15);
   });
 
   document.getElementById('podium').onclick = (event) => {
     const button = event.target.closest('.vote-option');
     if (!button || !podiumOpen) return;
+    if (button.dataset.voteType !== podiumStage) return;
     const group = button.parentElement;
     group.querySelectorAll('.vote-option').forEach((option) => option.classList.remove('selected'));
     button.classList.add('selected');
-    if (button.dataset.voteType === 'mode') net.sendVote(button.dataset.vote);
-    if (button.dataset.voteType === 'map') net.sendMapVote(button.dataset.vote);
+    if (podiumStage === 'mode') net.sendVote(button.dataset.vote);
+    if (podiumStage === 'map') net.sendMapVote(button.dataset.vote);
   };
 
-  net.on('votes', (m) => hud.setPodiumVotes(m.tally || {}, m.mapTally || {}));
+  net.on('votes', (m) => hud.setPodiumVotes(
+    podiumStage === 'mode' ? (m.tally || {}) : {},
+    podiumStage === 'map' ? (m.mapTally || {}) : {},
+  ));
 
   net.on('chat', (m) => {
     if (QUICK_CHAT[m.i] !== undefined) {
@@ -1083,8 +1102,8 @@ addEventListener('keydown', (e) => {
       net.sendChat(idx);
       setChat(false);
     } else if (podiumOpen && online) {
-      if (idx < 4) net.sendVote(MODES[idx]);
-      else net.sendMapVote(idx === 4 ? 'arena' : 'ciudad');
+      if (podiumStage === 'mode' && idx < 4) net.sendVote(MODES[idx]);
+      else if (podiumStage === 'map' && idx >= 4) net.sendMapVote(idx === 4 ? 'arena' : 'ciudad');
     } else if (teamPickerOpen) {
       if (idx === 0) net.sendTeam('r');
       else if (idx === 1) net.sendTeam('b');

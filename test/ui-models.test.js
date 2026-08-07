@@ -15,6 +15,7 @@ import {
   readSettings,
   menuNavState,
   buyMenuCategoryState,
+  podiumStageState,
 } from '../src/ui-models.js';
 import { buildGunModel } from '../src/weapons.js';
 
@@ -164,6 +165,15 @@ test('buy menu categories expose one selected filter for mouse navigation', () =
     { id: 'smgs', label: 'SMG', active: false },
     { id: 'rifles', label: 'RIFLES', active: true },
   ]);
+});
+
+test('podium stages expose a clear mode phase followed by a map phase', () => {
+  assert.deepEqual(podiumStageState('mode'), {
+    stage: 'mode', phase: 'FASE 1 / 2', title: 'ELIGE EL MODO DE JUEGO', voteType: 'mode',
+  });
+  assert.deepEqual(podiumStageState('map'), {
+    stage: 'map', phase: 'FASE 2 / 2', title: 'ELIGE EL MAPA', voteType: 'map',
+  });
 });
 
 test('weapon models expose layered AAA silhouettes for each combat class', () => {

@@ -119,7 +119,8 @@ const TEAM_COLORS = { r: 0xd84a3a, b: 0x3a6ad8 };
 const MATCH_TIME = 300;   // 5 minutos
 const KILL_LIMIT = 30;    // ffa y equipos
 const ZOMBIE_WAVES = 8;
-const PODIUM_TIME = 30;
+const PODIUM_STAGE_TIME = 15;
+const PODIUM_TIME = PODIUM_STAGE_TIME * 2;
 
 const match = {
   mode: 'ffa',
@@ -127,6 +128,8 @@ const match = {
   state: 'playing', // playing | podium
   endAt: Date.now() / 1000 + MATCH_TIME,
   podiumEndAt: 0,
+  podiumStageEndAt: 0,
+  podiumStage: 'mode',
   votes: new Map(),           // playerId -> modo votado
   mapVotes: new Map(),        // playerId -> mapa votado
   teamScores: { r: 0, b: 0 },
@@ -137,7 +140,8 @@ const match = {
 function matchMsg() {
   return {
     t: 'match', mode: match.mode, map: match.map, st: match.state,
-    tl: Math.max(0, Math.round((match.state === 'playing' ? match.endAt : match.podiumEndAt) - now())),
+    tl: Math.max(0, Math.round((match.state === 'playing' ? match.endAt : match.podiumStageEndAt) - now())),
+    ps: match.podiumStage,
     ts: match.teamScores,
     wv: match.wave,
     zl: bots.filter((b) => b.zombie && !b.dead).length,
@@ -156,6 +160,8 @@ function assignTeam() {
 function startMatch(mode, mapId = match.map) {
   match.mode = mode;
   match.state = 'playing';
+  match.podiumStage = 'mode';
+  match.podiumStageEndAt = 0;
   match.endAt = now() + MATCH_TIME;
   match.votes = new Map();
   match.mapVotes = new Map();
@@ -199,6 +205,8 @@ function endMatch(reasonTxt) {
   if (match.state !== 'playing') return;
   match.state = 'podium';
   match.podiumEndAt = now() + PODIUM_TIME;
+  match.podiumStage = 'mode';
+  match.podiumStageEndAt = now() + PODIUM_STAGE_TIME;
   const rows = podiumRows();
   let winner = rows.length ? rows[0].n : '—';
   if (match.mode === 'teams') {
@@ -208,7 +216,7 @@ function endMatch(reasonTxt) {
   }
   broadcast({
     t: 'podium', winner, txt: reasonTxt || '', rows,
-    ts: match.teamScores, mode: match.mode, secs: PODIUM_TIME, modes: MODES,
+    ts: match.teamScores, mode: match.mode, secs: PODIUM_STAGE_TIME, stage: match.podiumStage, modes: MODES,
     maps: Object.keys(MAPS), map: match.map,
   });
 }
@@ -255,7 +263,13 @@ function spawnWave(n) {
 
 function modeTick(t) {
   if (match.state === 'podium') {
-    if (t >= match.podiumEndAt) startMatch(nextMode(), nextMap());
+    if (t >= match.podiumStageEndAt && match.podiumStage === 'mode') {
+      match.podiumStage = 'map';
+      match.podiumStageEndAt = t + PODIUM_STAGE_TIME;
+      broadcast({ t: 'podiumStage', stage: 'map', secs: PODIUM_STAGE_TIME, map: match.map });
+      return;
+    }
+    if (t >= match.podiumStageEndAt && match.podiumStage === 'map') startMatch(nextMode(), nextMap());
     return;
   }
   // reaparición de cajas destruidas (45 s)
@@ -526,13 +540,13 @@ wss.on('connection', (ws) => {
       }
     } else if (m.t === 'vote') {
       if (match.state === 'podium') {
-        if (MODES.includes(m.m)) match.votes.set(me.id, m.m);
-        if (MAPS[m.map]) match.mapVotes.set(me.id, m.map);
+        if (match.podiumStage === 'mode' && MODES.includes(m.m)) match.votes.set(me.id, m.m);
+        if (match.podiumStage === 'map' && MAPS[m.map]) match.mapVotes.set(me.id, m.map);
         const tally = {};
         for (const v of match.votes.values()) tally[v] = (tally[v] || 0) + 1;
         const mapTally = {};
         for (const v of match.mapVotes.values()) mapTally[v] = (mapTally[v] || 0) + 1;
-        broadcast({ t: 'votes', tally, mapTally });
+        broadcast({ t: 'votes', stage: match.podiumStage, tally, mapTally });
       }
     }
   });

@@ -119,6 +119,23 @@ export function buyMenuCategoryState(active, categories = [
   return categories.map(([id, label]) => ({ id, label, active: id === active }));
 }
 
+export function podiumStageState(stage = 'mode') {
+  if (stage === 'map') {
+    return {
+      stage: 'map',
+      phase: 'FASE 2 / 2',
+      title: 'ELIGE EL MAPA',
+      voteType: 'map',
+    };
+  }
+  return {
+    stage: 'mode',
+    phase: 'FASE 1 / 2',
+    title: 'ELIGE EL MODO DE JUEGO',
+    voteType: 'mode',
+  };
+}
+
 export function humanoidPoseState(time, speed, aiming, aimPitch = 0) {
   const walkAmount = Math.min(1, Math.max(0, speed) / 5.2);
   const swing = Math.sin(time) * walkAmount * 0.55;

@@ -2,7 +2,7 @@
 // HUD: vida, munición, mira, hitmarker, killfeed, viñeta de daño, pantallas.
 // ---------------------------------------------------------------------------
 
-import { weaponHudLabel } from './ui-models.js';
+import { podiumStageState, weaponHudLabel } from './ui-models.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -261,6 +261,19 @@ export class HUD {
 
   setPodiumCountdown(secs) {
     document.getElementById('podium-count').textContent = `Siguiente partida en ${secs}s...`;
+  }
+
+  setPodiumStage(stage = 'mode', secs = 15) {
+    const state = podiumStageState(stage);
+    const podium = document.getElementById('podium');
+    podium.dataset.stage = state.stage;
+    document.getElementById('podium-phase').textContent = state.phase;
+    document.getElementById('podium-stage-title').textContent = state.title;
+    document.getElementById('podium-stage-help').textContent = state.voteType === 'mode'
+      ? 'Selecciona el modo para la siguiente partida.'
+      : 'Modo confirmado. Ahora selecciona el mapa.';
+    document.getElementById('podium-votes').textContent = '';
+    this.setPodiumCountdown(secs);
   }
 
   showTeamPicker(show) {

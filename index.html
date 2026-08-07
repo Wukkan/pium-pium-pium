@@ -200,6 +200,40 @@
       .vote-option { min-height: 58px; font-size: 13px; }
     }
 
+    /* flujo de votación AAA: una decisión clara por fase */
+    #podium {
+      top: 4%; width: min(980px, calc(100vw - 28px)); max-height: 92vh;
+      padding: 24px 34px 20px; text-align: left;
+      background: radial-gradient(circle at 84% 0%, rgba(52,91,142,.28), transparent 42%),
+        linear-gradient(145deg, rgba(8,14,25,.985), rgba(5,9,16,.985));
+      border: 1px solid rgba(124,171,226,.35); box-shadow: 0 24px 90px rgba(0,0,0,.72);
+    }
+    #podium .podium-topline { display: flex; justify-content: space-between; align-items: center; color: #8da6c9; font: 900 12px Arial, sans-serif; letter-spacing: 1.8px; }
+    #podium .podium-topline b { color: #ffd24d; }
+    #podium h2 { margin: 24px 0 4px; text-align: center; font-size: clamp(32px, 5vw, 52px); letter-spacing: 2px; }
+    #podium-winner { text-align: center; }
+    #podium-rows { margin: 16px auto 0; width: min(650px, 100%); padding: 10px 16px; text-align: center; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
+    #podium .legacy-vote-hint { display: none; }
+    #podium-stage-kicker { margin-top: 24px; color: #ffd24d; font: 900 12px Arial, sans-serif; letter-spacing: 2px; text-align: center; }
+    #podium-stage-title { margin-top: 6px; color: #fff; font: 900 clamp(23px, 3vw, 32px) Arial, sans-serif; letter-spacing: 1px; text-align: center; }
+    #podium-stage-help { margin: 8px 0 0; color: #9fb4d8; text-align: center; }
+    #podium .podium-vote-panel { display: none; }
+    #podium[data-stage="mode"] #mode-vote-panel, #podium[data-stage="map"] #map-vote-panel { display: block; }
+    #podium .vote-heading { margin: 20px 0 10px; color: #9fc7f4; font-size: 13px; letter-spacing: 2px; }
+    #podium .vote-grid { gap: 12px; }
+    #podium .vote-option { min-height: 88px; padding: 12px 10px; font-size: clamp(14px, 1.5vw, 18px); letter-spacing: .3px; background: linear-gradient(145deg, rgba(36,48,67,.9), rgba(18,26,39,.96)); }
+    #podium .vote-option:hover { transform: translateY(-3px); box-shadow: 0 8px 18px rgba(0,0,0,.25); }
+    #podium .vote-option.selected { box-shadow: 0 0 0 2px rgba(255,233,138,.22), 0 10px 25px rgba(255,184,47,.18); }
+    #podium-votes { margin-top: 16px; text-align: center; }
+    #podium-count { margin-top: 18px; text-align: center; font-size: clamp(22px, 3vw, 30px); }
+    #podium .podium-footer { display: flex; justify-content: space-between; margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.1); color: #657c9d; font: 900 11px Arial, sans-serif; letter-spacing: 1px; }
+    @media (max-width: 640px) {
+      #podium { padding: 18px 16px 15px; }
+      #podium .vote-grid { grid-template-columns: repeat(2, 1fr); }
+      #podium .vote-option { min-height: 74px; font-size: 13px; }
+      #podium .podium-footer { font-size: 9px; }
+    }
+
     /* selector de equipo */
     #team-picker {
       display: none;
@@ -552,20 +586,28 @@
     <div id="money" class="hud-text">$ 0</div>
     <div id="match-banner" class="hud-text"></div>
 
-    <div id="podium">
+    <div id="podium" data-stage="mode">
+      <div class="podium-topline"><span>POST-MATCH // VOTACIÓN</span><b id="podium-phase">FASE 1 / 2</b></div>
       <h2>FIN DE LA PARTIDA</h2>
       <div id="podium-winner"></div>
       <div id="podium-rows"></div>
+      <div id="podium-stage-kicker">SIGUIENTE PARTIDA</div>
+      <div id="podium-stage-title">ELIGE EL MODO DE JUEGO</div>
       <div class="vote-hint legacy-vote-hint">Vota el siguiente modo:<br/>
         <b>[1]</b> Todos contra todos &nbsp; <b>[2]</b> Equipos &nbsp; <b>[3]</b> Búsqueda del arma &nbsp; <b>[4]</b> Zombis<br/>
         Y el mapa: <b>[5]</b> Arena &nbsp; <b>[6]</b> Ciudad</div>
-      <div class="vote-hint">Elige con los botones o con las teclas indicadas. Tienes 30 segundos.</div>
+      <div class="vote-hint" id="podium-stage-help">Selecciona el modo para la siguiente partida.</div>
+      <section id="mode-vote-panel" class="podium-vote-panel">
       <div class="vote-heading">Modo de juego</div>
       <div id="mode-vote-options" class="vote-grid"></div>
+      </section>
+      <section id="map-vote-panel" class="podium-vote-panel">
       <div class="vote-heading">Mapa</div>
       <div id="map-vote-options" class="vote-grid maps"></div>
+      </section>
       <div id="podium-votes"></div>
       <div id="podium-count"></div>
+      <div class="podium-footer"><span>VOTA CON CLICK</span><span>1–4 MODO · 5–6 MAPA</span></div>
     </div>
 
     <div id="team-picker">
