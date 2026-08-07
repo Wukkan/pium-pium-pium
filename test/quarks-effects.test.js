@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 import * as QUARKS from '../vendor/three.quarks.module.js';
+import * as CORE_THREE from 'three';
+import { Effects } from '../src/effects.js';
 import { clampParticleCount, effectLifetime, effectProfile, QuarksEffects } from '../src/quarks-effects.js';
 
 test('particle counts stay within the combat budget', () => {
@@ -17,11 +19,23 @@ test('effect lifetimes are bounded for automatic cleanup', () => {
 });
 
 test('explosions use layered fire, smoke, and ember bursts', () => {
-  assert.deepEqual(effectProfile('explosion').layers, ['fire', 'smoke', 'embers']);
+  assert.deepEqual(effectProfile('explosion').layers, ['flash', 'fire', 'shockwave', 'smoke', 'embers']);
 });
 
 test('creates an explosion with the installed three.quarks runtime', () => {
   const effects = new QuarksEffects(new THREE.Scene(), THREE, QUARKS);
 
   assert.doesNotThrow(() => effects.explosion(new THREE.Vector3(0, 0, 0)));
+});
+
+test('fallback explosions include a flash, shockwave, smoke, and debris cleanup', () => {
+  const scene = new CORE_THREE.Scene();
+  const effects = new Effects(scene);
+
+  effects.explosion(new CORE_THREE.Vector3(0, 0, 0));
+
+  assert.equal(effects.items.length, 5);
+  assert.ok(scene.children.some((child) => child.geometry?.type === 'RingGeometry'));
+  effects.update(1.1);
+  assert.equal(effects.items.length, 0);
 });

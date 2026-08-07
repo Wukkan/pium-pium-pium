@@ -14,6 +14,8 @@ export class Effects {
     this.items = [];
     this.tracerGeo = new THREE.BoxGeometry(1, 1, 1);
     this.particleGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
+    this.shockwaveGeo = new THREE.RingGeometry(0.16, 0.24, 32);
+    this.smokeGeo = new THREE.SphereGeometry(0.22, 8, 8);
     this.quarks = null;
     if (backend.quarks && backend.THREE) {
       try {
@@ -118,11 +120,60 @@ export class Effects {
         sphere.scale.setScalar(0.5 + p * 5.5);
         mat.opacity = 0.95 * (1 - p);
       },
-      dispose() { mat.dispose(); },
+      dispose() { mat.dispose(); sphere.geometry.dispose(); },
     });
-    // metralla
+
+    const waveMat = new THREE.MeshBasicMaterial({
+      color: 0xffd98a, transparent: true, opacity: 0.8,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const wave = new THREE.Mesh(this.shockwaveGeo, waveMat);
+    wave.rotation.x = -Math.PI / 2;
+    wave.position.copy(pos).add(new THREE.Vector3(0, 0.035, 0));
+    this.scene.add(wave);
+    const waveTotal = 0.55;
+    this.items.push({
+      obj: wave, life: waveTotal,
+      tick() {
+        const p = 1 - this.life / waveTotal;
+        wave.scale.setScalar(0.7 + p * 11);
+        waveMat.opacity = 0.8 * (1 - p) ** 1.4;
+      },
+      dispose() { waveMat.dispose(); },
+    });
+
+    const smokeMat = new THREE.MeshBasicMaterial({
+      color: 0x454241, transparent: true, opacity: 0.42, depthWrite: false,
+    });
+    const smoke = new THREE.Group();
+    const smokeParts = [];
+    for (let i = 0; i < 8; i++) {
+      const puff = new THREE.Mesh(this.smokeGeo, smokeMat);
+      puff.position.set((Math.random() - 0.5) * 0.7, Math.random() * 0.35, (Math.random() - 0.5) * 0.7);
+      puff.scale.setScalar(0.65 + Math.random() * 0.85);
+      smokeParts.push({ puff, rise: 0.45 + Math.random() * 0.7 });
+      smoke.add(puff);
+    }
+    smoke.position.copy(pos);
+    this.scene.add(smoke);
+    const smokeTotal = 0.95;
+    this.items.push({
+      obj: smoke, life: smokeTotal,
+      tick(dt) {
+        const p = 1 - this.life / smokeTotal;
+        for (const part of smokeParts) {
+          part.puff.position.y += part.rise * dt;
+          part.puff.scale.setScalar((0.65 + p * 1.5) * (0.7 + part.rise * 0.35));
+        }
+        smoke.rotation.y += dt * 0.45;
+        smokeMat.opacity = 0.42 * (1 - p);
+      },
+      dispose() { smokeMat.dispose(); },
+    });
+
+    // metralla y chispas
     this.impact(pos, 0x555049, 14);
-    this.impact(pos, 0xffb347, 8);
+    this.impact(pos, 0xffb347, 10);
   }
 
   // número de daño flotante (amarillo normal, rojo si es headshot)

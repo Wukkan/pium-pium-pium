@@ -14,7 +14,7 @@ const LIFETIMES = {
 };
 
 export function effectProfile(kind) {
-  if (kind === 'explosion') return { layers: ['fire', 'smoke', 'embers'] };
+  if (kind === 'explosion') return { layers: ['flash', 'fire', 'shockwave', 'smoke', 'embers'] };
   if (kind === 'muzzle') return { layers: ['flash', 'sparks'] };
   return { layers: ['particles'] };
 }
@@ -165,37 +165,59 @@ export class QuarksEffects {
 
   explosion(position) {
     this.burst(position, 'explosion', {
-      color: 0xffb347,
-      texture: 'impact',
-      count: 14,
-      maxCount: 20,
-      duration: 0.04,
-      life: [0.16, 0.42],
-      speed: [1.5, 4.5],
-      size: [0.22, 0.55],
-      opacity: 0.9,
+      color: 0xfff2c0,
+      texture: 'default',
+      count: 1,
+      maxCount: 1,
+      duration: 0.02,
+      life: [0.06, 0.11],
+      speed: [0, 0.15],
+      size: [0.9, 1.35],
+      opacity: 1,
     });
     this.burst(position, 'explosion', {
-      color: 0x8c7c70,
+      color: 0xff8b32,
+      texture: 'impact',
+      count: 18,
+      maxCount: 22,
+      duration: 0.04,
+      life: [0.14, 0.38],
+      speed: [1.8, 5.2],
+      size: [0.2, 0.62],
+      opacity: 0.95,
+    });
+    this.burst(position, 'explosion', {
+      color: 0xffe4a1,
+      texture: 'impact',
+      count: 5,
+      maxCount: 6,
+      duration: 0.03,
+      life: [0.08, 0.18],
+      speed: [0.1, 0.45],
+      size: [0.62, 1.05],
+      opacity: 0.62,
+    });
+    this.burst(position, 'explosion', {
+      color: 0x706a68,
       texture: 'smoke',
-      count: 16,
-      maxCount: 20,
+      count: 20,
+      maxCount: 24,
       duration: 0.06,
-      life: [0.45, 0.9],
-      speed: [0.3, 1.8],
-      size: [0.38, 0.8],
-      opacity: 0.42,
+      life: [0.5, 1.05],
+      speed: [0.35, 2.1],
+      size: [0.42, 0.95],
+      opacity: 0.48,
       additive: false,
     });
     this.burst(position, 'explosion', {
-      color: 0xff8f3f,
+      color: 0xffa33e,
       texture: 'default',
-      count: 12,
-      maxCount: 16,
+      count: 16,
+      maxCount: 20,
       duration: 0.05,
-      life: [0.25, 0.65],
-      speed: [2.5, 6],
-      size: [0.04, 0.12],
+      life: [0.25, 0.72],
+      speed: [2.8, 6.8],
+      size: [0.045, 0.14],
       opacity: 0.95,
     });
   }
