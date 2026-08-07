@@ -16,6 +16,7 @@ import {
   menuNavState,
   buyMenuCategoryState,
   podiumStageState,
+  shotTracerState,
 } from '../src/ui-models.js';
 import { buildGunModel } from '../src/weapons.js';
 
@@ -174,6 +175,12 @@ test('podium stages expose a clear mode phase followed by a map phase', () => {
   assert.deepEqual(podiumStageState('map'), {
     stage: 'map', phase: 'FASE 2 / 2', title: 'ELIGE EL MAPA', voteType: 'map',
   });
+});
+
+test('shot tracer is visible for firearms and uses a separate launcher effect', () => {
+  assert.deepEqual(shotTracerState('pistol'), { visible: true, color: 0xfff0a8 });
+  assert.deepEqual(shotTracerState('smg'), { visible: true, color: 0xffd66b });
+  assert.deepEqual(shotTracerState('launcher'), { visible: false, color: 0xff8c42 });
 });
 
 test('weapon models expose layered AAA silhouettes for each combat class', () => {

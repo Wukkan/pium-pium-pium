@@ -13,7 +13,7 @@ import { KitManager } from './kits.js';
 import { GrenadeManager, explosionDamage } from './grenades.js';
 import { Missions } from './missions.js';
 import { HATS, MAPS, QUICK_CHAT } from './shared/mapdata.js';
-import { buyMenuCategoryState, loadoutMetadata, menuNavState, readSettings } from './ui-models.js';
+import { buyMenuCategoryState, loadoutMetadata, menuNavState, readSettings, shotTracerState } from './ui-models.js';
 import { makeHumanoid } from './humanoid.js';
 
 // ---------------------------------------------------------------------------
@@ -642,6 +642,10 @@ function setupOffline() {
     audio.hit();
     if (killed) localBotKilled(data.bot, isHead);
   };
+  weapons.onShot = (a, b, kind) => {
+    const shot = shotTracerState(kind);
+    if (shot.visible) effects.tracer(a, b, shot.color);
+  };
 
   // explosión de granada propia: daño por cercanía a bots y a mí mismo
   grenades.onExplode = (pos) => {
@@ -701,7 +705,11 @@ function setupOnline() {
     audio.hit();
     net.sendHit(data.net.kind, data.net.id, dmg, isHead, weapons.def.kind);
   };
-  weapons.onShot = (a, b, kind) => net.sendFire(a, b, kind);
+  weapons.onShot = (a, b, kind) => {
+    const shot = shotTracerState(kind);
+    if (shot.visible) effects.tracer(a, b, shot.color);
+    net.sendFire(a, b, kind);
+  };
 
   net.on('snap', (m) => {
     lastSnap = m;
@@ -808,7 +816,9 @@ function setupOnline() {
     const a = new THREE.Vector3(m.a[0], m.a[1], m.a[2]);
     const b = new THREE.Vector3(m.b[0], m.b[1], m.b[2]);
     effects.muzzle(a, m.k);
-    if (m.k === 'launcher') effects.trail(a, b, 0xff8c42);
+    const shot = shotTracerState(m.k);
+    if (shot.visible) effects.tracer(a, b, shot.color);
+    else effects.trail(a, b, shot.color);
     player.eyePosition(playerEye);
     audio.shot(m.k, audio.distVol(a.distanceTo(playerEye)) * 0.7);
   });

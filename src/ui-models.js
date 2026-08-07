@@ -136,6 +136,21 @@ export function podiumStageState(stage = 'mode') {
   };
 }
 
+export function shotTracerState(kind = 'pistol') {
+  const colors = {
+    pistol: 0xfff0a8,
+    shotgun: 0xffffd0,
+    smg: 0xffd66b,
+    ar: 0xffff9b,
+    sniper: 0xffdff8,
+    revolver: 0xffffc2,
+  };
+  return {
+    visible: kind !== 'launcher',
+    color: kind === 'launcher' ? 0xff8c42 : (colors[kind] || 0xffd66b),
+  };
+}
+
 export function humanoidPoseState(time, speed, aiming, aimPitch = 0) {
   const walkAmount = Math.min(1, Math.max(0, speed) / 5.2);
   const swing = Math.sin(time) * walkAmount * 0.55;
