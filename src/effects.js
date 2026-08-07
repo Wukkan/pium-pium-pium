@@ -99,7 +99,29 @@ export class Effects {
     });
   }
 
+  shockwave(pos) {
+    const waveMat = new THREE.MeshBasicMaterial({
+      color: 0xffd98a, transparent: true, opacity: 0.95,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const wave = new THREE.Mesh(this.shockwaveGeo, waveMat);
+    wave.rotation.x = -Math.PI / 2;
+    wave.position.copy(pos).add(new THREE.Vector3(0, 0.035, 0));
+    this.scene.add(wave);
+    const waveTotal = 0.65;
+    this.items.push({
+      obj: wave, life: waveTotal,
+      tick() {
+        const p = 1 - this.life / waveTotal;
+        wave.scale.setScalar(0.7 + p * 13);
+        waveMat.opacity = 0.95 * (1 - p) ** 1.35;
+      },
+      dispose() { waveMat.dispose(); },
+    });
+  }
+
   explosion(pos) {
+    this.shockwave(pos);
     if (this.quarks) {
       this.quarks.explosion(pos);
       return;
@@ -121,25 +143,6 @@ export class Effects {
         mat.opacity = 0.95 * (1 - p);
       },
       dispose() { mat.dispose(); sphere.geometry.dispose(); },
-    });
-
-    const waveMat = new THREE.MeshBasicMaterial({
-      color: 0xffd98a, transparent: true, opacity: 0.8,
-      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-    });
-    const wave = new THREE.Mesh(this.shockwaveGeo, waveMat);
-    wave.rotation.x = -Math.PI / 2;
-    wave.position.copy(pos).add(new THREE.Vector3(0, 0.035, 0));
-    this.scene.add(wave);
-    const waveTotal = 0.55;
-    this.items.push({
-      obj: wave, life: waveTotal,
-      tick() {
-        const p = 1 - this.life / waveTotal;
-        wave.scale.setScalar(0.7 + p * 11);
-        waveMat.opacity = 0.8 * (1 - p) ** 1.4;
-      },
-      dispose() { waveMat.dispose(); },
     });
 
     const smokeMat = new THREE.MeshBasicMaterial({

@@ -39,3 +39,12 @@ test('fallback explosions include a flash, shockwave, smoke, and debris cleanup'
   effects.update(1.1);
   assert.equal(effects.items.length, 0);
 });
+
+test('quarks explosions also add a visible expanding shockwave mesh', () => {
+  const scene = new CORE_THREE.Scene();
+  const effects = new Effects(scene, { THREE: CORE_THREE, quarks: QUARKS });
+
+  effects.explosion(new CORE_THREE.Vector3(0, 0, 0));
+
+  assert.ok(scene.children.some((child) => child.geometry?.type === 'RingGeometry'));
+});
