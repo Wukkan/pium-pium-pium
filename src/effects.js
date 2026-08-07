@@ -105,18 +105,28 @@ export class Effects {
       blending: THREE.AdditiveBlending, depthWrite: false, wireframe: true,
     });
     const wave = new THREE.Mesh(this.shockwaveGeo, waveMat);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xff8b32, transparent: true, opacity: 0.2,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+    });
+    const glow = new THREE.Mesh(this.shockwaveGeo, glowMat);
+    glow.scale.setScalar(0.9);
+    wave.add(glow);
     wave.userData.effect = 'shockwave';
     wave.position.copy(pos);
     this.scene.add(wave);
     const waveTotal = 0.65;
     this.items.push({
       obj: wave, life: waveTotal,
-      tick() {
+      tick(dt) {
         const p = 1 - this.life / waveTotal;
         wave.scale.setScalar(0.7 + p * 15);
+        wave.rotation.y += dt * 0.9;
+        wave.rotation.x += dt * 0.45;
         waveMat.opacity = 0.95 * (1 - p) ** 1.35;
+        glowMat.opacity = 0.2 * (1 - p) ** 1.15;
       },
-      dispose() { waveMat.dispose(); },
+      dispose() { waveMat.dispose(); glowMat.dispose(); },
     });
   }
 
