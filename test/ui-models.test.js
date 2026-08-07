@@ -115,7 +115,22 @@ test('humanoid model profile stays blocky and compact', () => {
     body: [0.62, 0.62, 0.34],
     limb: [0.18, 0.6, 0.22],
     leg: [0.24, 0.8, 0.26],
+    helmet: [0.5, 0.2, 0.46],
+    vest: [0.72, 0.68, 0.42],
+    shoulder: [0.22, 0.18, 0.3],
+    boot: [0.27, 0.16, 0.42],
+    backpack: [0.48, 0.68, 0.2],
+    hitParts: ['head', 'body', 'arm', 'leg'],
   });
+});
+
+test('tactical operator profile keeps blocky hitboxes and adds equipment layers', () => {
+  const profile = humanoidModelProfile();
+  assert.deepEqual(profile.hitParts, ['head', 'body', 'arm', 'leg']);
+  assert.ok(profile.helmet[0] > profile.body[0] * 0.5);
+  assert.ok(profile.vest[2] > profile.body[2]);
+  assert.ok(profile.boot[2] > profile.leg[2]);
+  assert.ok(profile.backpack[2] > 0);
 });
 
 test('settings are sanitized for a stable AAA menu profile', () => {
