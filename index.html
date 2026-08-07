@@ -459,6 +459,20 @@
     #menu-screen-play #menu-stats { grid-column: 1; grid-row: 5; }
     #menu-screen-play .menu-hero-side { grid-column: 2; grid-row: 1 / span 5; }
     @media (max-width: 900px) { #menu-screen-play { grid-template-rows: none; } #menu-screen-play h1, #menu-screen-play .subtitle, #menu-screen-play #name-input, #menu-screen-play #play-btn, #menu-screen-play .controls, #menu-screen-play #menu-stats, #menu-screen-play .menu-hero-side { grid-column: auto; grid-row: auto; } #menu-screen-play #play-btn { margin-left: 0; } }
+    #menu-screen-operator { max-width: 1080px; margin: 0 auto; }
+    #menu-screen-operator #menu-loadout { width: 100%; margin: 0; grid-template-columns: 370px minmax(0, 1fr); gap: 24px; padding: 0; border: 0; background: transparent; box-shadow: none; }
+    #menu-screen-operator .operator-card { min-height: 390px; border: 1px solid rgba(141,190,244,.28); border-radius: 12px; background: radial-gradient(circle at 50% 36%, rgba(80,151,221,.22), transparent 38%), linear-gradient(145deg, #203a59, #0c1422); box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), 0 24px 55px rgba(0,0,0,.3); }
+    #menu-screen-operator .operator-card::before { content: ''; position: absolute; inset: 12px; z-index: 0; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.04), transparent 40%); pointer-events: none; }
+    #menu-screen-operator .operator-card::after { content: none; }
+    #operator-preview { position: absolute; inset: 0; z-index: 1; }
+    #operator-preview canvas { display: block; width: 100%; height: 100%; }
+    .operator-preview-badge { position: absolute; top: 24px; left: 25px; z-index: 3; color: #9fb9d9; font: 900 9px Arial, sans-serif; letter-spacing: 1.8px; }
+    .operator-preview-badge i { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: #82df9a; box-shadow: 0 0 10px #82df9a; }
+    .operator-preview-footer { position: absolute; left: 25px; right: 25px; bottom: 23px; z-index: 3; display: flex; align-items: end; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.1); text-align: left; }
+    .operator-preview-footer span { color: #7d9abd; font: 900 9px Arial, sans-serif; letter-spacing: 1.6px; }
+    .operator-preview-footer strong { color: #ffc34d; font: 900 10px Arial, sans-serif; letter-spacing: .7px; }
+    #menu-screen-operator > #custom-panel { margin-top: 24px; }
+    @media (max-width: 760px) { #menu-screen-operator #menu-loadout { grid-template-columns: 1fr; } #menu-screen-operator .operator-card { min-height: 340px; } }
   </style>
 </head>
 <body>
@@ -586,7 +600,9 @@
 
     <div id="menu-loadout">
       <div class="operator-card">
-        <div class="operator-avatar"><span class="avatar-head"></span><span class="avatar-body"></span><span class="avatar-gun"></span></div>
+        <div class="operator-preview-badge"><i></i> VISTA 3D EN VIVO</div>
+        <div id="operator-preview" role="img" aria-label="Vista 3D del operador equipado"></div>
+        <div class="operator-preview-footer"><span>OPERADOR TÁCTICO</span><strong id="operator-preview-weapon">PISTOLA · PISTOL</strong></div>
       </div>
       <div>
         <div class="loadout-title">Tu equipamiento</div>

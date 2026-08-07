@@ -14,6 +14,7 @@ import { GrenadeManager, explosionDamage } from './grenades.js';
 import { Missions } from './missions.js';
 import { HATS, MAPS, QUICK_CHAT } from './shared/mapdata.js';
 import { loadoutMetadata, menuNavState, readSettings } from './ui-models.js';
+import { makeHumanoid } from './humanoid.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — réplica de krunker.io, ahora multijugador.
@@ -137,6 +138,112 @@ const SKIN_COLORS = [0xe05252, 0x5278e0, 0x52b86a, 0xc27ad0, 0xe0a052, 0x52c2c2,
 const COLORS_PRICE = 300;
 let menuMsg = '';
 
+const operatorPreview = {
+  host: null,
+  renderer: null,
+  scene: null,
+  camera: null,
+  rig: null,
+  key: '',
+  angle: 0.08,
+};
+
+function disposePreviewRig() {
+  if (!operatorPreview.rig) return;
+  operatorPreview.scene.remove(operatorPreview.rig.group);
+  operatorPreview.rig.group.traverse((object) => {
+    if (!object.isMesh && !object.isSprite) return;
+    if (object.geometry) object.geometry.dispose();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      if (material.map) material.map.dispose();
+      material.dispose();
+    }
+  });
+  operatorPreview.rig = null;
+}
+
+function refreshOperatorPreview() {
+  if (!operatorPreview.scene) return;
+  const name = (nameInput?.value || 'OPERADOR').toUpperCase();
+  const color = skin.color || 0x3f6ea8;
+  const key = `${name}|${skin.hat || 'none'}|${color}`;
+  if (key === operatorPreview.key) return;
+  operatorPreview.key = key;
+  disposePreviewRig();
+  const rig = makeHumanoid(color, name, (part) => ({ preview: true, part }), '#ffffff', skin.hat || 'none');
+  rig.nameSprite.visible = false;
+  rig.group.scale.setScalar(1.1);
+  rig.group.rotation.y = operatorPreview.angle;
+  operatorPreview.scene.add(rig.group);
+  operatorPreview.rig = rig;
+}
+
+function initOperatorPreview() {
+  const host = document.getElementById('operator-preview');
+  if (!host || operatorPreview.renderer) return;
+  const previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  previewRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  previewRenderer.setClearColor(0x000000, 0);
+  previewRenderer.shadowMap.enabled = true;
+  previewRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  host.appendChild(previewRenderer.domElement);
+
+  const previewScene = new THREE.Scene();
+  const previewCamera = new THREE.PerspectiveCamera(27, 1, 0.1, 50);
+  previewCamera.position.set(1.35, 1.8, -5.35);
+  previewCamera.lookAt(0, 1.15, 0);
+
+  const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x0b1220, 1.8);
+  const keyLight = new THREE.DirectionalLight(0xffe0ae, 3.2);
+  keyLight.position.set(-3.5, 5, -4.5);
+  keyLight.castShadow = true;
+  const rimLight = new THREE.PointLight(0x4e9eff, 2.5, 8);
+  rimLight.position.set(2.6, 2.2, 1.8);
+  previewScene.add(hemi, keyLight, rimLight);
+
+  const platform = new THREE.Mesh(
+    new THREE.CircleGeometry(1.35, 40),
+    new THREE.MeshBasicMaterial({ color: 0x14243a, transparent: true, opacity: 0.82 }),
+  );
+  platform.rotation.x = -Math.PI / 2;
+  platform.position.y = 0.02;
+  previewScene.add(platform);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.05, 0.012, 8, 48),
+    new THREE.MeshBasicMaterial({ color: 0xffc34d, transparent: true, opacity: 0.75 }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.035;
+  previewScene.add(ring);
+
+  operatorPreview.host = host;
+  operatorPreview.renderer = previewRenderer;
+  operatorPreview.scene = previewScene;
+  operatorPreview.camera = previewCamera;
+  refreshOperatorPreview();
+}
+
+function renderOperatorPreview(dt) {
+  if (!operatorPreview.renderer || !operatorPreview.host) return;
+  const rect = operatorPreview.host.getBoundingClientRect();
+  if (rect.width < 4 || rect.height < 4) return;
+  const width = Math.floor(rect.width);
+  const height = Math.floor(rect.height);
+  const pixelRatio = operatorPreview.renderer.getPixelRatio();
+  if (operatorPreview.renderer.domElement.width !== Math.floor(width * pixelRatio) ||
+      operatorPreview.renderer.domElement.height !== Math.floor(height * pixelRatio)) {
+    operatorPreview.renderer.setSize(width, height, false);
+    operatorPreview.camera.aspect = width / height;
+    operatorPreview.camera.updateProjectionMatrix();
+  }
+  if (operatorPreview.rig && !document.body.classList.contains('reduced-motion')) {
+    operatorPreview.angle += dt * 0.12;
+    operatorPreview.rig.group.rotation.y = operatorPreview.angle;
+  }
+  operatorPreview.renderer.render(operatorPreview.scene, operatorPreview.camera);
+}
+
 let settings = readSettings(localStorage.getItem('pium_settings'));
 function saveSettings() {
   localStorage.setItem('pium_settings', JSON.stringify(settings));
@@ -193,11 +300,14 @@ function renderLoadoutPanel() {
   const meta = loadoutMetadata(weapons, skin, grenades.count);
   const weapon = WEAPON_DEFS[meta.weapon];
   const hat = HATS[meta.hat];
+  refreshOperatorPreview();
   document.getElementById('loadout-weapon').textContent = weapon.name;
   document.getElementById('loadout-weapon-detail').textContent = `${weapon.name} · ${weapon.mag}/${weapon.reserve}`;
   document.getElementById('loadout-grenades').textContent = `${meta.grenades} disponibles`;
   document.getElementById('loadout-hat').textContent = hat ? hat.name : 'Sin sombrero';
   document.getElementById('loadout-color').textContent = meta.color ? `#${meta.color.toString(16).padStart(6, '0')}` : 'Predeterminado';
+  const previewWeapon = document.getElementById('operator-preview-weapon');
+  if (previewWeapon) previewWeapon.textContent = `${weapon.name} · ${weapon.kind.toUpperCase()}`;
   const quickWeapon = document.getElementById('menu-quick-weapon');
   const quickDetail = document.getElementById('menu-quick-detail');
   const quickMoney = document.getElementById('menu-quick-money');
@@ -467,6 +577,8 @@ const playerEye = new THREE.Vector3();
 // --- interfaz del menú ---
 const playBtn = document.getElementById('play-btn');
 const nameInput = document.getElementById('name-input');
+
+initOperatorPreview();
 nameInput.value = localStorage.getItem('pium_name') || '';
 document.querySelectorAll('[data-menu-screen]').forEach((button) => {
   button.addEventListener('click', () => showMenuScreen(button.dataset.menuScreen));
@@ -1026,6 +1138,7 @@ function tick(now) {
   }
 
   renderer.render(scene, camera);
+  renderOperatorPreview(dt);
 }
 
 function loop(now) {
