@@ -10,6 +10,15 @@ import {
 import {
   DEFAULT_BOT_CONFIG, effectiveBotCount, sanitizeBotConfigUpdate,
 } from '../src/shared/bot-config.js';
+import {
+  BOT_BODY,
+  PLAYER_BODY,
+  bodyOverlapsCollider,
+  colliderOccupied,
+  isBodyPathClear,
+  requireSafeSpawnPoints,
+  selectSafeSpawn,
+} from '../src/shared/spawn-safety.js';
 import { ServerBot, setBotMap } from './botai.js';
 import * as ranking from './ranking.js';
 
@@ -22,7 +31,16 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.1.0';
+const GAME_VERSION = '1.1.1';
+const ZOMBIE_WAVES = 8;
+const MAX_ZOMBIES_PER_WAVE = 4 + 2 * ZOMBIE_WAVES;
+const MIN_ZOMBIE_SPAWNS = MAX_ZOMBIES_PER_WAVE + TOTAL_SLOTS;
+const MOVEMENT_HORIZONTAL_RATE = 18;
+const MOVEMENT_HORIZONTAL_CAP = 3.25;
+const MOVEMENT_VERTICAL_RATE = 25;
+const MOVEMENT_VERTICAL_CAP = 4;
+const MOVEMENT_INITIAL_HORIZONTAL = 1.5;
+const MOVEMENT_INITIAL_VERTICAL = 1.5;
 
 function isFiniteVectorPayload(value, maxAbs = 10000) {
   return Array.isArray(value) && value.length === 3 &&
@@ -109,6 +127,10 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 const colliders = [];
 const crates = new Map(); // id -> {hp, collider, alive, respawnAt}
 let mapData = null;
+let playerSpawnPoints = [];
+let botSpawnPoints = [];
+let zombieSpawnPoints = [];
+let playBounds = null;
 const players = new Map(); // id -> jugador
 const bots = [];
 const kits = []; // loot del suelo: {id, x, y, z, k, a, expireAt}
@@ -118,10 +140,52 @@ let kitSerial = 0;
 let botConfig = { ...DEFAULT_BOT_CONFIG };
 
 function loadMap(mapId) {
-  mapData = buildMap(mapId);
-  setBotMap(mapData);
+  const nextMapData = buildMap(mapId);
+  const nextColliders = buildColliders(nextMapData.boxes);
+  const nextPlayerSpawns = requireSafeSpawnPoints(nextMapData.playerSpawns, nextColliders, {
+    body: PLAYER_BODY,
+    margin: 1,
+    label: `${mapId}.playerSpawns`,
+  });
+  const nextBotSpawns = requireSafeSpawnPoints(nextMapData.botSpawns, nextColliders, {
+    body: BOT_BODY,
+    margin: 0.15,
+    label: `${mapId}.botSpawns`,
+  });
+  requireSafeSpawnPoints(nextMapData.waypoints, nextColliders, {
+    body: BOT_BODY,
+    margin: 0.05,
+    label: `${mapId}.waypoints`,
+  });
+  const nextZombieSpawns = requireSafeSpawnPoints([
+    ...nextMapData.botSpawns,
+    ...nextMapData.playerSpawns,
+    ...nextMapData.waypoints,
+  ], nextColliders, {
+    body: BOT_BODY,
+    margin: 0.15,
+    label: `${mapId}.zombieSpawns`,
+  }).filter((point, index, list) => list.findIndex((candidate) =>
+    candidate.x === point.x && candidate.y === point.y && candidate.z === point.z) === index);
+  if (nextZombieSpawns.length < MIN_ZOMBIE_SPAWNS) {
+    throw new Error(`${mapId}: se requieren ${MIN_ZOMBIE_SPAWNS} puntos seguros para humanos y la oleada máxima`);
+  }
+  const floor = nextMapData.boxes[0];
+  const nextPlayBounds = {
+    minX: floor.x - floor.w / 2 + PLAYER_BODY.halfX,
+    maxX: floor.x + floor.w / 2 - PLAYER_BODY.halfX,
+    minZ: floor.z - floor.d / 2 + PLAYER_BODY.halfZ,
+    maxZ: floor.z + floor.d / 2 - PLAYER_BODY.halfZ,
+  };
+
+  mapData = nextMapData;
   colliders.length = 0;
-  colliders.push(...buildColliders(mapData.boxes));
+  colliders.push(...nextColliders);
+  playerSpawnPoints = nextPlayerSpawns;
+  botSpawnPoints = nextBotSpawns;
+  zombieSpawnPoints = nextZombieSpawns;
+  playBounds = nextPlayBounds;
+  setBotMap(mapData);
   crates.clear();
   for (const c of colliders) {
     if (c.crate) crates.set(c.crate, { hp: 80, collider: c, alive: true, respawnAt: 0 });
@@ -148,11 +212,11 @@ const GUN_LADDER = ['pistol', 'shotgun', 'smg', 'ar', 'sniper'];
 const TEAM_COLORS = { r: 0xd84a3a, b: 0x3a6ad8 };
 const MATCH_TIME = 300;   // 5 minutos
 const KILL_LIMIT = 30;    // ffa y equipos
-const ZOMBIE_WAVES = 8;
 const PODIUM_STAGE_TIME = 15;
 const PODIUM_TIME = PODIUM_STAGE_TIME * 2;
 
 const match = {
+  roundId: 1,
   mode: 'ffa',
   map: 'arena',
   state: 'playing', // playing | podium
@@ -190,6 +254,7 @@ function botConfigMsg(reason = null, requestId = null) {
 function matchMsg() {
   return {
     t: 'match', mode: match.mode, map: match.map, st: match.state,
+    rid: match.roundId,
     tl: Math.max(0, Math.round((match.state === 'playing' ? match.endAt : match.podiumStageEndAt) - now())),
     ps: match.podiumStage,
     ts: match.teamScores,
@@ -209,6 +274,7 @@ function assignTeam() {
 }
 
 function startMatch(mode, mapId = match.map) {
+  match.roundId++;
   match.mode = mode;
   match.state = 'playing';
   match.podiumStage = 'mode';
@@ -222,20 +288,25 @@ function startMatch(mode, mapId = match.map) {
   bots.length = 0;
   kits.length = 0;
   if (mapId !== match.map) {
-    match.map = mapId;
     loadMap(mapId);
+    match.map = mapId;
   } else {
     // restaurar las cajas destruidas
     for (const c of crates.values()) {
       if (!c.alive) { c.alive = true; c.hp = 80; colliders.push(c.collider); }
     }
   }
+  // Invalidar muertes pendientes y reservar los puntos de la nueva ronda de
+  // forma secuencial. Así ningún jugador conserva una posición del mapa viejo.
+  for (const p of players.values()) {
+    p.alive = false;
+    p.team = null;
+    p.respawnToken = (p.respawnToken || 0) + 1;
+  }
   for (const p of players.values()) {
     p.kills = 0; p.deaths = 0; p.curStreak = 0; p.gunIdx = 0;
     p.team = mode === 'teams' ? assignTeam() : null;
-    const sp = pickSpawn();
-    p.alive = true; p.hp = 100; p.pos = { ...sp };
-    send(p, { t: 'spawn', p: [sp.x, sp.y, sp.z] });
+    spawnPlayer(p);
   }
   rebalanceBots();
   broadcast(matchMsg());
@@ -306,6 +377,7 @@ function spawnWave(n) {
   for (let i = 0; i < count; i++) {
     const b = new ServerBot('z' + botSerial++, `Zombi_${i + 1}`, 0x69a05a, {
       zombie: true, hp: 50 + 8 * n, speedMul: 0.75 + n * 0.07, meleeDmg: 10 + n,
+      spawnPicker: pickZombieSpawn,
     });
     bots.push(b);
   }
@@ -328,6 +400,14 @@ function modeTick(t) {
   // reaparición de cajas destruidas (45 s)
   for (const [id, c] of crates) {
     if (!c.alive && t >= c.respawnAt) {
+      // Reserva predictiva para cubrir movimiento + latencia de red antes de
+      // que el cliente reciba la restauración del collider.
+      const occupiedByPlayer = colliderOccupied(c.collider, [...players.values()], PLAYER_BODY, 2);
+      const occupiedByBot = colliderOccupied(c.collider, bots, BOT_BODY, 1.25);
+      if (occupiedByPlayer || occupiedByBot) {
+        c.respawnAt = t + 1;
+        continue;
+      }
       c.alive = true;
       c.hp = 80;
       colliders.push(c.collider);
@@ -368,8 +448,73 @@ function sanitizeName(raw) {
   return n;
 }
 
-function pickSpawn() {
-  return mapData.playerSpawns[Math.floor(Math.random() * mapData.playerSpawns.length)];
+function liveOccupants(exclude = null) {
+  return [
+    ...[...players.values()].filter((player) => player !== exclude && player.alive),
+    ...bots.filter((bot) => bot !== exclude && !bot.dead),
+  ];
+}
+
+function pickSpawn(player = null) {
+  const spawn = selectSafeSpawn({
+    points: playerSpawnPoints,
+    colliders,
+    body: PLAYER_BODY,
+    margin: 1,
+    occupants: liveOccupants(player),
+    previous: player?.lastSpawn,
+  });
+  if (!spawn) throw new Error(`No hay respawns seguros en ${match.map}`);
+  return spawn;
+}
+
+function pickBotSpawn(bot = null) {
+  const spawn = selectSafeSpawn({
+    points: botSpawnPoints,
+    colliders,
+    body: BOT_BODY,
+    margin: 0.15,
+    occupants: liveOccupants(bot),
+    previous: bot?.lastSpawn,
+    minOccupantDistance: 1.25,
+  });
+  if (!spawn) throw new Error(`No hay respawns seguros para bots en ${match.map}`);
+  return spawn;
+}
+
+function pickZombieSpawn(bot = null) {
+  const spawn = selectSafeSpawn({
+    points: zombieSpawnPoints,
+    colliders,
+    body: BOT_BODY,
+    margin: 0.15,
+    occupants: liveOccupants(bot),
+    previous: bot?.lastSpawn,
+    minOccupantDistance: 1.25,
+  });
+  if (!spawn) throw new Error(`No hay respawns seguros para zombis en ${match.map}`);
+  return spawn;
+}
+
+function spawnPlayer(player, notify = true) {
+  const sp = pickSpawn(player);
+  player.respawnToken = (player.respawnToken || 0) + 1;
+  player.spawnSeq = (player.spawnSeq || 0) + 1;
+  player.alive = true;
+  player.hp = 100;
+  player.pos = { ...sp };
+  player.lastSpawn = { ...sp };
+  resetMovementBudget(player);
+  if (notify) {
+    send(player, {
+      t: 'spawn',
+      p: [sp.x, sp.y, sp.z],
+      sid: player.spawnSeq,
+      rid: match.roundId,
+      map: match.map,
+    });
+  }
+  return sp;
 }
 
 // límite de golpes por jugador (anti-spam básico): 16 por segundo
@@ -394,6 +539,50 @@ function eventAllowed(player, event, limit) {
 
 function distOk(a, b, max = 130) {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= max;
+}
+
+function resetMovementBudget(player) {
+  player._movementBudgetAt = now();
+  player._horizontalBudget = MOVEMENT_INITIAL_HORIZONTAL;
+  player._verticalBudget = MOVEMENT_INITIAL_VERTICAL;
+}
+
+function refillMovementBudget(player, time) {
+  const previousTime = Number.isFinite(player._movementBudgetAt) ? player._movementBudgetAt : time;
+  const elapsed = Math.max(0, Math.min(1, time - previousTime));
+  player._movementBudgetAt = time;
+  player._horizontalBudget = Math.min(
+    MOVEMENT_HORIZONTAL_CAP,
+    Math.max(0, Number(player._horizontalBudget) || 0) + elapsed * MOVEMENT_HORIZONTAL_RATE,
+  );
+  player._verticalBudget = Math.min(
+    MOVEMENT_VERTICAL_CAP,
+    Math.max(0, Number(player._verticalBudget) || 0) + elapsed * MOVEMENT_VERTICAL_RATE,
+  );
+}
+
+function activeMovementColliders() {
+  return colliders.filter((collider) => !collider.crate || crates.get(collider.crate)?.alive !== false);
+}
+
+function playerPositionAllowed(player, pos) {
+  if (!playBounds || !Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) return false;
+  if (pos.x < playBounds.minX || pos.x > playBounds.maxX ||
+      pos.z < playBounds.minZ || pos.z > playBounds.maxZ || pos.y < -2 || pos.y > 60) return false;
+  const time = now();
+  refillMovementBudget(player, time);
+  const horizontalCost = Math.hypot(pos.x - player.pos.x, pos.z - player.pos.z);
+  const verticalCost = Math.abs(pos.y - player.pos.y);
+  if (horizontalCost > player._horizontalBudget + 0.01 ||
+      verticalCost > player._verticalBudget + 0.01) return false;
+
+  const activeColliders = activeMovementColliders();
+  if (activeColliders.some((collider) => bodyOverlapsCollider(pos, collider, PLAYER_BODY)) ||
+      !isBodyPathClear(player.pos, pos, activeColliders, { body: PLAYER_BODY })) return false;
+
+  player._horizontalBudget = Math.max(0, player._horizontalBudget - horizontalCost);
+  player._verticalBudget = Math.max(0, player._verticalBudget - verticalCost);
+  return true;
 }
 
 function send(p, msg) {
@@ -422,6 +611,7 @@ function rebalanceBots() {
       'b' + idx,
       BOT_NAMES[idx % BOT_NAMES.length] + (idx >= BOT_NAMES.length ? '_' + idx : ''),
       BOT_COLORS[idx % BOT_COLORS.length],
+      { spawnPicker: pickBotSpawn },
     );
     bots.push(b);
   }
@@ -457,6 +647,8 @@ function creditKill(killer, weaponKind) {
 
 function killPlayer(victim, killerName, isHead) {
   victim.alive = false;
+  const respawnToken = (victim.respawnToken || 0) + 1;
+  victim.respawnToken = respawnToken;
   victim.hp = 0;
   victim.deaths++;
   victim.curStreak = 0;
@@ -464,12 +656,9 @@ function killPlayer(victim, killerName, isHead) {
   spawnKit(victim.pos);
   broadcast({ t: 'kill', vn: victim.name, vid: victim.id, kn: killerName, h: !!isHead });
   setTimeout(() => {
-    if (!players.has(victim.id)) return;
-    const sp = pickSpawn();
-    victim.alive = true;
-    victim.hp = 100;
-    victim.pos = { ...sp };
-    send(victim, { t: 'spawn', p: [sp.x, sp.y, sp.z] });
+    if (!players.has(victim.id) || victim.respawnToken !== respawnToken ||
+        victim.alive || match.state !== 'playing') return;
+    spawnPlayer(victim);
   }, 2600);
 }
 
@@ -489,6 +678,9 @@ function damagePlayer(victim, dmg, sourceName, isHead, killerPlayer = null, weap
 wss.on('connection', (ws) => {
   const id = nextId++;
   let me = null;
+  const helloTimeout = setTimeout(() => {
+    if (!me && ws.readyState === 1) ws.close(1008, 'Saludo requerido');
+  }, 5000);
 
   ws.on('message', (raw) => {
     let m;
@@ -496,6 +688,13 @@ wss.on('connection', (ws) => {
     if (!m || typeof m !== 'object' || Array.isArray(m)) return;
 
     if (m.t === 'hola' && !me) {
+      if (players.size >= TOTAL_SLOTS) {
+        clearTimeout(helloTimeout);
+        if (ws.readyState === 1) ws.send(JSON.stringify({ t: 'full', slots: TOTAL_SLOTS }));
+        ws.close(1013, 'Sala llena');
+        return;
+      }
+      clearTimeout(helloTimeout);
       const sp = pickSpawn();
       me = {
         id, ws,
@@ -503,6 +702,10 @@ wss.on('connection', (ws) => {
         color: BOT_COLORS[(id * 3) % BOT_COLORS.length],
         pos: { ...sp }, ry: 0, rx: 0, speed: 0, sliding: false,
         hp: 100, kills: 0, deaths: 0, alive: true, lastDmg: 0,
+        spawnSeq: 1, respawnToken: 0, lastSpawn: { ...sp },
+        _movementBudgetAt: now(),
+        _horizontalBudget: MOVEMENT_INITIAL_HORIZONTAL,
+        _verticalBudget: MOVEMENT_INITIAL_VERTICAL,
         team: match.mode === 'teams' ? assignTeam() : null,
         curStreak: 0, gunIdx: 0,
         hat: (m.skin && HATS[m.skin.h]) ? m.skin.h : 'none',
@@ -517,6 +720,7 @@ wss.on('connection', (ws) => {
       rebalanceBots();
       send(me, {
         t: 'hi', id, name: me.name, spawn: [sp.x, sp.y, sp.z], slots: TOTAL_SLOTS,
+        sid: me.spawnSeq, rid: match.roundId, map: match.map,
         bc: botConfigData(),
       });
       send(me, matchMsg());
@@ -530,8 +734,14 @@ wss.on('connection', (ws) => {
 
     if (m.t === 'st') {
       // estado del jugador: posición, orientación, velocidad
+      if (!me.alive || match.state !== 'playing' ||
+          !Number.isSafeInteger(m.sid) || m.sid !== me.spawnSeq ||
+          !eventAllowed(me, 'state', 45)) return;
       if (isFiniteVectorPayload(m.p, 1000)) {
-        me.pos = { x: m.p[0], y: m.p[1], z: m.p[2] };
+        const nextPos = { x: m.p[0], y: m.p[1], z: m.p[2] };
+        if (playerPositionAllowed(me, nextPos)) {
+          me.pos = nextPos;
+        }
       }
       if (Number.isFinite(m.ry)) me.ry = Math.atan2(Math.sin(m.ry), Math.cos(m.ry));
       if (Number.isFinite(m.rx)) me.rx = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, m.rx));
@@ -654,6 +864,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    clearTimeout(helloTimeout);
     if (me) {
       players.delete(me.id);
       broadcast({ t: 'aviso', txt: `${me.name} salió de la partida` });

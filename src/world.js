@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { buildMap, buildColliders } from './shared/mapdata.js';
+import {
+  BOT_BODY,
+  PLAYER_BODY,
+  requireSafeSpawnPoints,
+} from './shared/spawn-safety.js';
 
 // ---------------------------------------------------------------------------
 // Escena 3D del mapa. Recargable en caliente (votación de mapas): load(mapId)
@@ -34,7 +39,34 @@ export function buildWorld(scene) {
 
   function load(mapId) {
     if (mapId === world.mapId) return;
+
+    // Preparar y validar primero: si un mapa futuro está mal definido, el
+    // mundo visible anterior permanece intacto en vez de quedar a medias.
+    const data = buildMap(mapId);
+    const colliders = buildColliders(data.boxes);
+    const playerSpawns = requireSafeSpawnPoints(data.playerSpawns, colliders, {
+      body: PLAYER_BODY,
+      margin: 1,
+      label: `${mapId}.playerSpawns`,
+    });
+    const botSpawns = requireSafeSpawnPoints(data.botSpawns, colliders, {
+      body: BOT_BODY,
+      margin: 0.15,
+      label: `${mapId}.botSpawns`,
+    });
+    const waypoints = requireSafeSpawnPoints(data.waypoints, colliders, {
+      body: BOT_BODY,
+      margin: 0.05,
+      label: `${mapId}.waypoints`,
+    });
+
     world.mapId = mapId;
+
+    // Liberar las geometrías del mapa anterior antes de reconstruirlo. Los
+    // materiales se conservan en caché y se reutilizan entre mapas.
+    group.traverse((object) => {
+      if (object !== group && object.geometry?.dispose) object.geometry.dispose();
+    });
 
     // vaciar lo anterior
     group.clear();
@@ -46,8 +78,6 @@ export function buildWorld(scene) {
     world.jumpPads.length = 0;
     world.crates.clear();
 
-    const data = buildMap(mapId);
-    const colliders = buildColliders(data.boxes);
     world.colliders.push(...colliders);
 
     for (const b of data.boxes) {
@@ -67,9 +97,9 @@ export function buildWorld(scene) {
     }
 
     const toVec = (p) => new THREE.Vector3(p.x, p.y, p.z);
-    world.playerSpawns.push(...data.playerSpawns.map(toVec));
-    world.botSpawns.push(...data.botSpawns.map(toVec));
-    world.waypoints.push(...data.waypoints.map(toVec));
+    world.playerSpawns.push(...playerSpawns.map(toVec));
+    world.botSpawns.push(...botSpawns.map(toVec));
+    world.waypoints.push(...waypoints.map(toVec));
     world.jumpPads.push(...data.jumpPads);
   }
 

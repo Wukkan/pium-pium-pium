@@ -18,3 +18,29 @@ test('bot configuration messages include the request id used for acknowledgement
 
   assert.deepEqual(sent, [{ t: 'botcfg', enabled: true, count: 3, rid: 42 }]);
 });
+
+test('state messages carry the accepted spawn sequence and stop while dead', () => {
+  const sent = [];
+  const net = new Net();
+  net.connected = true;
+  net.ws = { readyState: 1, send: (raw) => sent.push(JSON.parse(raw)) };
+  assert.equal(net.acceptSpawn(7), 7);
+  assert.equal(net.acceptSpawn('8'), 7);
+
+  const player = {
+    dead: false,
+    pos: { x: 1, y: 0.1, z: 2 },
+    yaw: 0.2,
+    pitch: -0.1,
+    sliding: false,
+    horizontalSpeed: () => 3,
+  };
+  net.tickState(1, player);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].sid, 7);
+
+  player.dead = true;
+  net._sendTimer = 0;
+  net.tickState(1, player);
+  assert.equal(sent.length, 1);
+});

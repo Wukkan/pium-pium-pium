@@ -14,6 +14,13 @@ import { GrenadeManager, explosionDamage } from './grenades.js';
 import { Missions } from './missions.js';
 import { HATS, MAPS, MAX_BOTS, QUICK_CHAT, TOTAL_SLOTS } from './shared/mapdata.js';
 import {
+  BOT_BODY,
+  PLAYER_BODY,
+  colliderOccupied,
+  isSpawnPointSafe,
+  selectSafeSpawn,
+} from './shared/spawn-safety.js';
+import {
   botPanelState, buyMenuCategoryState, isBotConfigAcknowledgement, loadoutMetadata,
   effectiveMasterVolume, effectivePixelRatio, menuNavState, readSettings, shotTracerState,
 } from './ui-models.js';
@@ -85,6 +92,25 @@ const kitsMgr = new KitManager(scene);
 const grenades = new GrenadeManager(scene, world.colliders, effects, audio);
 grenades.onCount = (n) => hud.updateGrenades(n);
 
+function safePlayerSpawn(preferred = null, occupants = []) {
+  const preferredPoint = preferred && {
+    x: Number(preferred.x), y: Number(preferred.y), z: Number(preferred.z),
+  };
+  const selected = preferredPoint && isSpawnPointSafe(preferredPoint, world.colliders, {
+    body: PLAYER_BODY,
+    margin: 1,
+  }) ? preferredPoint : selectSafeSpawn({
+    points: world.playerSpawns,
+    colliders: world.colliders,
+    body: PLAYER_BODY,
+    margin: 1,
+    occupants,
+    previous: player.pos,
+  });
+  if (!selected) throw new Error(`El mapa ${world.mapId} no tiene un respawn seguro`);
+  return new THREE.Vector3(selected.x, selected.y, selected.z);
+}
+
 function onHealed() {
   audio.medkit();
   hud.announce('+25 PV ❤');
@@ -103,6 +129,63 @@ weapons.onLaunch = () => grenades.launch(camera);
 
 // cajas destruibles
 const localCrateHp = new Map();
+const pendingOnlineCrateRestores = new Map();
+
+function cancelOnlineCrateRestore(id) {
+  const timer = pendingOnlineCrateRestores.get(id);
+  if (timer) clearTimeout(timer);
+  pendingOnlineCrateRestores.delete(id);
+}
+
+function clearOnlineCrateRestores() {
+  for (const timer of pendingOnlineCrateRestores.values()) clearTimeout(timer);
+  pendingOnlineCrateRestores.clear();
+}
+
+function syncOnlineCrate(id, alive) {
+  if (!alive) {
+    cancelOnlineCrateRestore(id);
+    return world.setCrate(id, false);
+  }
+  if (!net.connected) {
+    cancelOnlineCrateRestore(id);
+    return null;
+  }
+  const crate = world.crates.get(id);
+  if (!crate) return null;
+  if (colliderOccupied(crate.collider, [player], PLAYER_BODY, 1)) {
+    if (!pendingOnlineCrateRestores.has(id)) {
+      const timer = setTimeout(() => {
+        pendingOnlineCrateRestores.delete(id);
+        syncOnlineCrate(id, true);
+      }, 120);
+      pendingOnlineCrateRestores.set(id, timer);
+    }
+    return null;
+  }
+  cancelOnlineCrateRestore(id);
+  return world.setCrate(id, true);
+}
+
+function loadWorldMap(mapId) {
+  if (!mapId || mapId === world.mapId) return;
+  clearOnlineCrateRestores();
+  world.load(mapId);
+}
+
+function restoreLocalCrateWhenClear(id) {
+  const crate = world.crates.get(id);
+  if (!crate) return;
+  const occupiedByPlayer = colliderOccupied(crate.collider, [player], PLAYER_BODY);
+  const occupiedByBot = colliderOccupied(crate.collider, botsLocal?.bots || [], BOT_BODY);
+  if (occupiedByPlayer || occupiedByBot) {
+    setTimeout(() => restoreLocalCrateWhenClear(id), 1000);
+    return;
+  }
+  localCrateHp.delete(id);
+  world.setCrate(id, true);
+}
+
 weapons.onCrateHit = (id, dmg, kind) => {
   if (online) {
     net.sendHit('crate', id, dmg, false, kind);
@@ -116,7 +199,7 @@ weapons.onCrateHit = (id, dmg, kind) => {
       effects.impact(pos, 0xc09858, 14);
       audio.boom(0.3);
     }
-    setTimeout(() => { localCrateHp.delete(id); world.setCrate(id, true); }, 45000);
+    setTimeout(() => restoreLocalCrateWhenClear(id), 45000);
   }
 };
 
@@ -1153,7 +1236,7 @@ function setupOffline() {
     setTimeout(() => {
       if (state !== 'dead') return;
       hud.showDeath(false);
-      player.spawn(world.playerSpawns[Math.floor(Math.random() * world.playerSpawns.length)]);
+      player.spawn(safePlayerSpawn(null, botsLocal?.bots || []));
       weapons.refill();
       grenades.refill();
       hud.updateHealth(player.health, player.maxHealth);
@@ -1189,10 +1272,10 @@ function setupOnline() {
 
   net.on('snap', (m) => {
     lastSnap = m;
-    if (m.m && m.m.map && m.m.map !== world.mapId) world.load(m.m.map);
+    if (m.m?.map) loadWorldMap(m.m.map);
     if (m.dc) {
       const rotas = new Set(m.dc);
-      for (const id of world.crates.keys()) world.setCrate(id, !rotas.has(id));
+      for (const id of world.crates.keys()) syncOnlineCrate(id, !rotas.has(id));
     }
     remotes.applySnapshot(m, net.id);
     kitsMgr.sync(m.kits || []);
@@ -1214,7 +1297,7 @@ function setupOnline() {
   net.on('match', (m) => {
     matchInfo = m;
     if (m.bc) receiveBotConfig(m.bc);
-    if (m.map && m.map !== world.mapId) world.load(m.map);
+    if (m.map) loadWorldMap(m.map);
     if (m.st === 'playing') {
       const returningFromPodium = podiumOpen;
       if (botPanelOpen && m.mode === 'teams') setBotPanel(false, false);
@@ -1302,7 +1385,7 @@ function setupOnline() {
   setInterval(() => { if (net.connected) net.sendPing(); }, 3000);
 
   net.on('cbox', (m) => {
-    const pos = world.setCrate(m.id, !!m.al);
+    const pos = syncOnlineCrate(m.id, !!m.al);
     if (pos && !m.al) {
       effects.impact(pos, 0xc09858, 14);
       audio.boom(0.3);
@@ -1379,7 +1462,9 @@ function setupOnline() {
   });
 
   net.on('spawn', (m) => {
-    player.spawn(new THREE.Vector3(m.p[0], m.p[1], m.p[2]));
+    if (m.map) loadWorldMap(m.map);
+    net.acceptSpawn(m.sid);
+    player.spawn(safePlayerSpawn(new THREE.Vector3(m.p[0], m.p[1], m.p[2])));
     weapons.refill();
     grenades.refill();
     hud.showDeath(false);
@@ -1396,6 +1481,7 @@ function setupOnline() {
   net.on('aviso', (m) => hud.info(String(m.txt).slice(0, 40)));
   net.on('botbye', (m) => remotes.removeBot(m.id));
   net.onClose(() => {
+    clearOnlineCrateRestores();
     pendingBotRequestId = null;
     if (botPanelOpen) setBotPanel(false, false);
     hud.setNetStatus('🔴 Conexión perdida — recarga la página', false);
@@ -1428,10 +1514,12 @@ async function joinAndPlay() {
     if (hi.bc) receiveBotConfig(hi.bc, true);
     nameInput.value = net.name;
     nameInput.disabled = true;
-    player.spawn(new THREE.Vector3(hi.spawn[0], hi.spawn[1], hi.spawn[2]));
-  } catch {
+    if (hi.map) loadWorldMap(hi.map);
+    player.spawn(safePlayerSpawn(new THREE.Vector3(hi.spawn[0], hi.spawn[1], hi.spawn[2])));
+  } catch (error) {
     setupOffline();
-    player.spawn(world.playerSpawns[0]);
+    player.spawn(safePlayerSpawn(null, botsLocal?.bots || []));
+    if (error?.code === 'ROOM_FULL') hud.info('Sala online llena · modo local activado');
   }
   connecting = false;
   playBtn.textContent = 'JUGAR';
@@ -1951,7 +2039,7 @@ player.onDamaged = (amount) => {
 };
 
 // posición inicial de la cámara para el fondo del menú
-player.spawn(new THREE.Vector3(0, 0.1, 30));
+player.spawn(safePlayerSpawn(world.playerSpawns[0]));
 hud.updateHealth(player.health, player.maxHealth);
 hud.updateAmmo(weapons);
 hud.updateScore(0, 0);
@@ -2000,7 +2088,7 @@ function tick(now) {
   }
   // el mundo online sigue vivo aunque estés en el menú
   if (remotes) remotes.update(dt);
-  if (online && joined) net.tickState(dt, player);
+  if (online && joined && state === 'playing' && !podiumOpen && !player.dead) net.tickState(dt, player);
   kitsMgr.update(dt);
   grenades.update(dt, player.eyePosition(playerEye));
   effects.update(dt);

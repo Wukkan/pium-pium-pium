@@ -13,6 +13,7 @@ export class Net {
     this.name = null;
     this.slots = 10;
     this.connected = false;
+    this.spawnSequence = 0;
     this.handlers = {};   // t -> callback(msg)
     this._sendTimer = 0;
   }
@@ -46,8 +47,18 @@ export class Net {
           this.id = m.id;
           this.name = m.name;
           this.slots = m.slots || 10;
+          this.acceptSpawn(m.sid);
           this.connected = true;
           resolve(m);
+          return;
+        }
+        if (m.t === 'full' && !settled) {
+          settled = true;
+          clearTimeout(timeout);
+          const error = new Error('room-full');
+          error.code = 'ROOM_FULL';
+          reject(error);
+          ws.close();
           return;
         }
         const h = this.handlers[m.t];
@@ -67,13 +78,18 @@ export class Net {
 
   onClose(cb) { this.handlers._close = cb; }
 
+  acceptSpawn(sequence) {
+    if (Number.isSafeInteger(sequence) && sequence >= 0) this.spawnSequence = sequence;
+    return this.spawnSequence;
+  }
+
   _send(obj) {
     if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj));
   }
 
   // llamar cada frame; emite el estado a ~15 Hz
   tickState(dt, player) {
-    if (!this.connected) return;
+    if (!this.connected || !player || player.dead) return;
     this._sendTimer -= dt;
     if (this._sendTimer > 0) return;
     this._sendTimer = 1 / 15;
@@ -84,6 +100,7 @@ export class Net {
       rx: +player.pitch.toFixed(2),
       s: +player.horizontalSpeed().toFixed(1),
       sl: player.sliding,
+      sid: this.spawnSequence,
     });
   }
 

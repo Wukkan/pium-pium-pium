@@ -52,7 +52,6 @@ async function flush() {
       back.deaths += e.deaths;
       back.streak = Math.max(back.streak, e.streak);
       console.error('ranking: fallo al guardar,', err.message);
-      break;
     }
   }
 }

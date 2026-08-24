@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { moveBody } from './shared/physics.js';
+import { PLAYER_BODY, selectSafeSpawn } from './shared/spawn-safety.js';
 import { DEFAULT_BINDINGS } from './input-bindings.js';
 
 // ---------------------------------------------------------------------------
@@ -16,7 +17,7 @@ const GRAVITY = 24;
 const JUMP_VEL = 8.6;
 const EYE_STAND = 1.62;
 const EYE_SLIDE = 0.95;
-const HALF_X = 0.38, HALF_Z = 0.38, HEIGHT = 1.8;
+const { halfX: HALF_X, halfZ: HALF_Z, height: HEIGHT } = PLAYER_BODY;
 
 export class Player {
   constructor(camera, world) {
@@ -92,11 +93,20 @@ export class Player {
     this.health = this.maxHealth;
     this.dead = false;
     this.sliding = false;
+    this.slideTime = 0;
+    this.slideCooldown = 0;
+    this.slideDir.set(0, 0, 0);
+    this.onGround = false;
+    this._wasGrounded = true;
+    this.eyeHeight = EYE_STAND;
     this.recoilPitch = 0;
     this.shakeTime = 0;
     this.landingKick = 0;
+    this.lastDamageTime = -99;
+    this.lastAttacker = null;
     this.yaw = Math.atan2(point.x, point.z); // mirar hacia el centro
     this.pitch = 0;
+    this.keys = {};
     this._jumpWasHeld = false;
   }
 
@@ -231,8 +241,24 @@ export class Player {
     }
     this._wasGrounded = this.onGround;
 
-    // red de seguridad si algo sale mal
-    if (this.pos.y < -30) this.pos.set(0, 5, 20);
+    // Red de seguridad: volver a un punto fijo validado, nunca a una
+    // coordenada mágica que pueda coincidir con la geometría de otro mapa.
+    if (this.pos.y < -30) {
+      const recovery = selectSafeSpawn({
+        points: this.world.playerSpawns,
+        colliders: this.world.colliders,
+        body: PLAYER_BODY,
+        margin: 0.2,
+        previous: this.pos,
+        random: () => 0,
+      });
+      if (recovery) {
+        this.pos.set(recovery.x, recovery.y, recovery.z);
+        this.vel.set(0, 0, 0);
+        this.onGround = false;
+        this._wasGrounded = true;
+      }
+    }
 
     // --- regeneración de vida (en online la lleva el servidor) ---
     const now = performance.now() / 1000;

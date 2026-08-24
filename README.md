@@ -4,6 +4,8 @@ Shooter multijugador original para navegador hecho con Three.js + Node.js. Su id
 
 La actualización **Combat Update 1.1** incorpora manos articuladas y animaciones completas en primera persona, operadores tácticos animados, impactos por superficie, casquillos, humo, audio espacial, hitmarkers y feedback de daño. El menú recibió una jerarquía visual nueva, tarjetas de arsenal con estadísticas, vista 3D del operador y navegación adaptable a móvil.
 
+El parche **Spawn Safety 1.1.1** audita toda la geometría de Arena y Ciudad: cada mapa dispone de 10 respawns fijos con un metro de margen, el servidor elige el más alejado de entidades vivas y nunca reutiliza paquetes de una vida anterior. Los spawns de bots, waypoints y la reaparición de cajas también se validan para impedir que una entidad quede dentro de una estructura.
+
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.
 
 ## Jugar en local
@@ -92,7 +94,7 @@ Al final de cada partida hay **podio y votación** del siguiente modo (teclas 1-
 
 - `server/server.js` — HTTP estático + WebSocket. Estado autoritativo: vida, muertes, respawns, marcador y nº de bots.
 - `server/botai.js` — IA de los bots en el servidor (patrulla, combate, ráfagas con probabilidad de acierto).
-- `src/shared/` — mapa y física compartidos entre cliente y servidor (mismo código de colisiones).
+- `src/shared/` — mapa, física y selector de respawn seguro compartidos entre cliente y servidor.
 - `src/net.js` — cliente WebSocket (estado a 15 Hz, disparos, impactos).
 - `src/remotes.js` — marionetas interpoladas de jugadores remotos y bots.
 - `src/main.js` — arranque; modo online o local según haya servidor.

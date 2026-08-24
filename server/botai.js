@@ -1,5 +1,6 @@
 import { moveBody, segmentBlocked } from '../src/shared/physics.js';
 import { buildMap } from '../src/shared/mapdata.js';
+import { BOT_BODY } from '../src/shared/spawn-safety.js';
 
 // mapa activo (el servidor lo cambia al votar mapa)
 let MAP = buildMap('arena');
@@ -13,7 +14,7 @@ export function setBotMap(mapData) { MAP = mapData; }
 
 const BOT_SPEED = 5.2;
 const GRAVITY = 24;
-const HALF = 0.35, HEIGHT = 1.8;
+const { halfX: HALF, height: HEIGHT } = BOT_BODY;
 const ENGAGE_DIST = 42;
 
 const now = () => Date.now() / 1000;
@@ -29,6 +30,7 @@ export class ServerBot {
     this.maxHp = opts.hp || 100;
     this.speedMul = opts.speedMul || 1;
     this.meleeDmg = opts.meleeDmg || 12;
+    this.spawnPicker = typeof opts.spawnPicker === 'function' ? opts.spawnPicker : null;
     this.nextMeleeAt = 0;
     this.pos = { x: 0, y: 0, z: 0 };
     this.vel = { x: 0, y: 0, z: 0 };
@@ -55,12 +57,26 @@ export class ServerBot {
   }
 
   spawn() {
-    const sp = MAP.botSpawns[Math.floor(Math.random() * MAP.botSpawns.length)];
+    const sp = this.spawnPicker?.(this) || MAP.botSpawns[0];
+    if (!sp) return false;
     this.pos = { ...sp };
     this.vel = { x: 0, y: 0, z: 0 };
     this.hp = this.maxHp;
     this.dead = false;
+    this.respawnAt = 0;
     this.waypoint = null;
+    this.onGround = false;
+    this.engaging = false;
+    this.speed = 0;
+    this.repathAt = 0;
+    this.stuckCheckAt = 0;
+    this.lastCheckPos = { ...sp };
+    this.burstLeft = 0;
+    this.nextShotAt = 0;
+    this.nextBurstAt = 0;
+    this.nextMeleeAt = 0;
+    this.lastSpawn = { ...sp };
+    return true;
   }
 
   eyePos() {

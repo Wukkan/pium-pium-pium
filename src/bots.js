@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { moveBody } from './shared/physics.js';
+import { BOT_BODY, selectSafeSpawn } from './shared/spawn-safety.js';
 import {
   animateHumanoid,
   animateHumanoidDeath,
@@ -20,7 +21,7 @@ import { BOT_NAMES, BOT_COLORS, MAX_BOTS } from './shared/mapdata.js';
 
 const BOT_SPEED = 5.2;
 const GRAVITY = 24;
-const HALF = 0.35, HEIGHT = 1.8;
+const { halfX: HALF, height: HEIGHT } = BOT_BODY;
 const ENGAGE_DIST = 42;
 
 export function playLocalBotShot(audio, origin, player, fallbackDistance = 0) {
@@ -81,6 +82,7 @@ class Bot {
   }
 
   spawn(point) {
+    if (!point) return false;
     this.pos.copy(point);
     this.vel.set(0, 0, 0);
     this.health = 100;
@@ -88,10 +90,19 @@ class Bot {
     this.deathAnim = 0;
     this.state = 'patrol';
     this.waypoint = null;
+    this.repathAt = 0;
+    this.stuckCheckAt = 0;
+    this.lastCheckPos.copy(point);
+    this.onGround = false;
+    this.burstLeft = 0;
+    this.nextShotAt = 0;
+    this.nextBurstAt = 0;
     this.group.visible = true;
     resetHumanoidPose(this.rig);
     this.group.rotation.y = this.yaw;
     this.group.position.copy(point);
+    this.lastSpawn = { x: point.x, y: point.y, z: point.z };
+    return true;
   }
 
   eyePos(target = new THREE.Vector3()) {
@@ -131,8 +142,7 @@ class Bot {
         this.group.position.y -= dt * 2;
       }
       if (now >= this.respawnAt) {
-        const sp = ctx.botSpawns[Math.floor(Math.random() * ctx.botSpawns.length)];
-        this.spawn(sp);
+        this.spawn(ctx.pickSpawn(this));
       }
       return;
     }
@@ -221,7 +231,7 @@ class Bot {
 
     const res = moveBody(this.pos, this.vel, dt, HALF, HALF, HEIGHT, ctx.colliders);
     this.onGround = res.onGround;
-    if (this.pos.y < -30) this.pos.set(0, 5, 0);
+    if (this.pos.y < -30) this.spawn(ctx.pickSpawn(this));
 
     let dy = this.targetYaw - this.yaw;
     while (dy > Math.PI) dy -= Math.PI * 2;
@@ -294,6 +304,7 @@ export class BotManager {
       occluders: world.occluders,
       waypoints: world.waypoints,
       botSpawns: this.botSpawns,
+      pickSpawn: (exclude) => this.pickSpawn(exclude),
       raycaster: new THREE.Raycaster(),
     };
 
@@ -316,12 +327,23 @@ export class BotManager {
       const baseName = BOT_NAMES[serial % BOT_NAMES.length];
       const name = serial < BOT_NAMES.length ? baseName : `${baseName}_${serial}`;
       const bot = new Bot(name, BOT_COLORS[serial % BOT_COLORS.length]);
-      bot.spawn(this.botSpawns[serial % this.botSpawns.length]);
+      bot.spawn(this.pickSpawn(bot));
       this.scene.add(bot.group);
       this.bots.push(bot);
     }
 
     return this.bots.length;
+  }
+
+  pickSpawn(exclude = null) {
+    return selectSafeSpawn({
+      points: this.botSpawns,
+      colliders: this.ctx.colliders,
+      body: BOT_BODY,
+      margin: 0.15,
+      occupants: [this.player, ...this.bots.filter((bot) => bot !== exclude)],
+      previous: exclude?.lastSpawn,
+    });
   }
 
   disposeBot(bot) {
