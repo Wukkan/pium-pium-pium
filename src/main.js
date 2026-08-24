@@ -12,21 +12,32 @@ import { Remotes } from './remotes.js';
 import { KitManager } from './kits.js';
 import { GrenadeManager, explosionDamage } from './grenades.js';
 import { Missions } from './missions.js';
-import { HATS, MAPS, QUICK_CHAT } from './shared/mapdata.js';
-import { buyMenuCategoryState, loadoutMetadata, menuNavState, readSettings, shotTracerState } from './ui-models.js';
+import { HATS, MAPS, MAX_BOTS, QUICK_CHAT, TOTAL_SLOTS } from './shared/mapdata.js';
+import {
+  botPanelState, buyMenuCategoryState, isBotConfigAcknowledgement, loadoutMetadata,
+  effectiveMasterVolume, effectivePixelRatio, menuNavState, readSettings, shotTracerState,
+} from './ui-models.js';
+import {
+  BINDING_ACTIONS, assignBinding, bindingSlotIndex, keyCodeLabel,
+  matchesBinding, readBindings,
+} from './input-bindings.js';
 import { makeHumanoid } from './humanoid.js';
+import { SKIN_COLORS, sanitizeSkin } from './player-profile.js';
 
 // ---------------------------------------------------------------------------
-// PIUM PIUM PIUM — réplica de krunker.io, ahora multijugador.
-// Con servidor: otros jugadores + bots del servidor (rellenan hasta 10).
-// Sin servidor (o si falla la conexión): modo local contra 9 bots.
+// PIUM PIUM PIUM — shooter multijugador original para navegador.
+// Con servidor: otros jugadores + hasta 5 bots configurables de la sala.
+// Sin servidor (o si falla la conexión): modo local con hasta 5 bots.
 // ---------------------------------------------------------------------------
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
 document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -56,6 +67,8 @@ sun.shadow.camera.left = -50; sun.shadow.camera.right = 50;
 sun.shadow.camera.top = 50; sun.shadow.camera.bottom = -50;
 sun.shadow.camera.near = 5; sun.shadow.camera.far = 130;
 sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.025;
+sun.shadow.radius = 2;
 sun.shadow.camera.updateProjectionMatrix();
 scene.add(sun);
 scene.add(sun.target);
@@ -141,12 +154,30 @@ function bannerText(mm) {
   return '';
 }
 
+function safeStorageGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const ARSENAL_STORAGE_KEY = 'pium_arsenal_v1';
+weapons.restoreEconomyState(safeStorageGet(ARSENAL_STORAGE_KEY));
+const saveArsenalEconomy = (snapshot = weapons.exportEconomyState()) =>
+  safeStorageSet(ARSENAL_STORAGE_KEY, JSON.stringify(snapshot));
+weapons.onEconomyChange = saveArsenalEconomy;
+
 // --- personalización (sombrero + color), guardada en el navegador ---
-let skin;
-try { skin = JSON.parse(localStorage.getItem('pium_skin')); } catch { /* nada */ }
-if (!skin) skin = { hat: 'none', color: null, ownedHats: ['none'], colorsUnlocked: false };
-const saveSkin = () => localStorage.setItem('pium_skin', JSON.stringify(skin));
-const SKIN_COLORS = [0xe05252, 0x5278e0, 0x52b86a, 0xc27ad0, 0xe0a052, 0x52c2c2, 0xf2f2f2, 0x333340];
+let storedSkin = null;
+try { storedSkin = JSON.parse(safeStorageGet('pium_skin')); } catch { /* se reparará abajo */ }
+let skin = sanitizeSkin(storedSkin);
+const saveSkin = () => safeStorageSet('pium_skin', JSON.stringify(skin));
 const COLORS_PRICE = 300;
 let menuMsg = '';
 
@@ -155,9 +186,11 @@ const operatorPreview = {
   renderer: null,
   scene: null,
   camera: null,
+  keyLight: null,
   rig: null,
   key: '',
   angle: 0.08,
+  renderAccumulator: 0,
 };
 
 function disposePreviewRig() {
@@ -194,11 +227,14 @@ function refreshOperatorPreview() {
 function initOperatorPreview() {
   const host = document.getElementById('operator-preview');
   if (!host || operatorPreview.renderer) return;
-  const previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  previewRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  const previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+  previewRenderer.setPixelRatio(effectivePixelRatio(settings.renderScale, devicePixelRatio));
   previewRenderer.setClearColor(0x000000, 0);
-  previewRenderer.shadowMap.enabled = true;
+  previewRenderer.shadowMap.enabled = settings.shadowsEnabled;
   previewRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  previewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  previewRenderer.toneMappingExposure = 1.08;
   host.appendChild(previewRenderer.domElement);
 
   const previewScene = new THREE.Scene();
@@ -209,7 +245,9 @@ function initOperatorPreview() {
   const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x0b1220, 1.8);
   const keyLight = new THREE.DirectionalLight(0xffe0ae, 3.2);
   keyLight.position.set(-3.5, 5, -4.5);
-  keyLight.castShadow = true;
+  keyLight.castShadow = settings.shadowsEnabled;
+  const shadowSize = { low: 512, medium: 1024, high: 2048 }[settings.shadowQuality] || 1024;
+  setShadowResolution(keyLight, Math.max(256, shadowSize / 2));
   const rimLight = new THREE.PointLight(0x4e9eff, 2.5, 8);
   rimLight.position.set(2.6, 2.2, 1.8);
   previewScene.add(hemi, keyLight, rimLight);
@@ -233,11 +271,16 @@ function initOperatorPreview() {
   operatorPreview.renderer = previewRenderer;
   operatorPreview.scene = previewScene;
   operatorPreview.camera = previewCamera;
+  operatorPreview.keyLight = keyLight;
   refreshOperatorPreview();
 }
 
 function renderOperatorPreview(dt) {
   if (!operatorPreview.renderer || !operatorPreview.host) return;
+  operatorPreview.renderAccumulator += Math.max(0, dt);
+  if (operatorPreview.renderAccumulator < 1 / 30) return;
+  const previewDt = Math.min(0.1, operatorPreview.renderAccumulator);
+  operatorPreview.renderAccumulator = 0;
   const rect = operatorPreview.host.getBoundingClientRect();
   if (rect.width < 4 || rect.height < 4) return;
   const width = Math.floor(rect.width);
@@ -250,60 +293,432 @@ function renderOperatorPreview(dt) {
     operatorPreview.camera.updateProjectionMatrix();
   }
   if (operatorPreview.rig && !document.body.classList.contains('reduced-motion')) {
-    operatorPreview.angle += dt * 0.12;
+    operatorPreview.angle += previewDt * 0.12;
     operatorPreview.rig.group.rotation.y = operatorPreview.angle;
   }
   operatorPreview.renderer.render(operatorPreview.scene, operatorPreview.camera);
 }
 
-let settings = readSettings(localStorage.getItem('pium_settings'));
+let settings = readSettings(safeStorageGet('pium_settings'));
+let bindings = readBindings(safeStorageGet('pium_bindings_v1'));
+let activeSettingsTab = 'audio';
+let bindingCaptureAction = null;
+let appliedBindingsSignature = '';
+
 function saveSettings() {
-  localStorage.setItem('pium_settings', JSON.stringify(settings));
+  return safeStorageSet('pium_settings', JSON.stringify(settings));
+}
+
+function saveBindings() {
+  return safeStorageSet('pium_bindings_v1', JSON.stringify(bindings));
+}
+
+function bindingLabel(action) {
+  return keyCodeLabel(bindings[action]);
+}
+
+function isAction(event, action) {
+  return matchesBinding(bindings, action, event.code);
+}
+
+function setShadowResolution(light, size) {
+  if (!light?.shadow || light.shadow.mapSize.x === size) return;
+  light.shadow.map?.dispose();
+  light.shadow.map = null;
+  light.shadow.mapSize.set(size, size);
+  light.shadow.needsUpdate = true;
+}
+
+function renderMenuControlSummary() {
+  const summary = document.getElementById('menu-control-summary');
+  if (!summary) return;
+  const item = (action, text) => `<span><b>${bindingLabel(action)}</b> ${text}</span>`;
+  summary.innerHTML = [
+    item('moveForward', 'avanzar'), item('jump', 'saltar'), item('slide', 'deslizar'),
+    item('reload', 'recargar'), item('grenade', 'granada'), item('melee', 'cuchillo'),
+    item('openArsenal', 'arsenal'), item('openBots', 'bots'), item('scoreboard', 'marcador'),
+    item('muteSound', 'silenciar'),
+  ].join('');
+  const botShortcut = document.getElementById('bot-panel-shortcut');
+  if (botShortcut) botShortcut.textContent = bindingLabel('openBots');
+  const buyShortcut = document.getElementById('buy-menu-shortcut');
+  if (buyShortcut) buyShortcut.textContent = bindingLabel('openArsenal');
+  const menuArsenalShortcut = document.getElementById('menu-arsenal-shortcut');
+  if (menuArsenalShortcut) menuArsenalShortcut.textContent = bindingLabel('openArsenal');
+  const buyHelpClose = document.getElementById('buy-help-close');
+  if (buyHelpClose) buyHelpClose.textContent = `${bindingLabel('openArsenal')} / ESC`;
+  const buyHelpSlots = document.getElementById('buy-help-slots');
+  if (buyHelpSlots) {
+    buyHelpSlots.textContent = Array.from({ length: 7 }, (_, index) => bindingLabel(`slot${index + 1}`)).join(' / ');
+  }
+  const teamAction = document.getElementById('team-action-shortcut');
+  if (teamAction) teamAction.textContent = bindingLabel('changeTeam');
+  for (const [id, action] of [
+    ['team-key-red', 'slot1'], ['team-key-blue', 'slot2'], ['team-key-auto', 'slot3'],
+  ]) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = bindingLabel(action);
+  }
+  const podiumHint = document.getElementById('podium-key-hint');
+  if (podiumHint) {
+    const modeKeys = Array.from({ length: 4 }, (_, index) => bindingLabel(`slot${index + 1}`)).join(' / ');
+    const mapKeys = [bindingLabel('slot5'), bindingLabel('slot6')].join(' / ');
+    podiumHint.textContent = `${modeKeys} MODO · ${mapKeys} MAPA`;
+  }
 }
 
 function applySettings() {
   player.sensitivity = settings.sensitivity;
   player.invertY = settings.invertY;
+  player.bunnyHopEnabled = settings.bunnyHopEnabled;
+  player.screenShake = settings.reducedMotion ? 0 : settings.screenShake;
   weapons.setFov(settings.fov);
-  audio.setMasterVolume(settings.masterVolume);
+  const bindingsSignature = JSON.stringify(bindings);
+  if (bindingsSignature !== appliedBindingsSignature) {
+    player.setBindings(bindings);
+    weapons.setBindings(bindings);
+    appliedBindingsSignature = bindingsSignature;
+  }
+  weapons.setPreferences({
+    aimMode: settings.aimMode,
+    weaponBob: settings.reducedMotion ? 0 : settings.weaponBob,
+  });
+  audio.setMasterVolume(effectiveMasterVolume(settings));
+  const pixelRatio = effectivePixelRatio(settings.renderScale, devicePixelRatio);
+  if (renderer.getPixelRatio() !== pixelRatio) renderer.setPixelRatio(pixelRatio);
+  if (operatorPreview.renderer && operatorPreview.renderer.getPixelRatio() !== pixelRatio) {
+    operatorPreview.renderer.setPixelRatio(pixelRatio);
+  }
+  renderer.shadowMap.enabled = settings.shadowsEnabled;
+  renderer.shadowMap.needsUpdate = true;
+  sun.castShadow = settings.shadowsEnabled;
+  const shadowSize = { low: 512, medium: 1024, high: 2048 }[settings.shadowQuality] || 1024;
+  setShadowResolution(sun, shadowSize);
+  if (operatorPreview.renderer) {
+    operatorPreview.renderer.shadowMap.enabled = settings.shadowsEnabled;
+    setShadowResolution(operatorPreview.keyLight, Math.max(256, shadowSize / 2));
+  }
+  effects.setQuality(settings.effectsQuality);
+  audio.setVoiceLimit({ low: 18, balanced: 28, high: 40 }[settings.effectsQuality] || 28);
   document.body.classList.toggle('reduced-motion', settings.reducedMotion);
+  document.body.classList.toggle('high-contrast', settings.highContrast);
   hud.setFpsVisible(settings.showFps);
+  hud.setPingVisible(settings.showPing);
+  hud.setDamageFlashEnabled(settings.damageFlash);
+  hud.setCrosshairPreferences({
+    visible: settings.crosshairVisible,
+    color: settings.crosshairColor,
+    scale: settings.crosshairScale,
+  });
+  hud.setBindingLabels({
+    grenade: bindingLabel('grenade'),
+    reload: bindingLabel('reload'),
+    slots: Array.from({ length: 7 }, (_, index) => bindingLabel(`slot${index + 1}`)),
+  });
+  renderMenuControlSummary();
+}
+
+function setSettingsStatus(message, tone = 'saved') {
+  for (const id of ['settings-save-status', 'keybinding-status']) {
+    const status = document.getElementById(id);
+    if (!status) continue;
+    status.textContent = message;
+    status.dataset.tone = tone;
+  }
+}
+
+function renderBindings() {
+  const list = document.getElementById('keybinding-list');
+  if (!list) return;
+  list.textContent = '';
+  let group = '';
+  for (const definition of BINDING_ACTIONS) {
+    if (definition.group !== group) {
+      group = definition.group;
+      const heading = document.createElement('h4');
+      heading.className = 'keybind-group-title';
+      heading.textContent = group;
+      list.append(heading);
+    }
+    const row = document.createElement('div');
+    row.className = 'keybind-row';
+    const label = document.createElement('span');
+    label.textContent = definition.label;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'keybind-button';
+    button.dataset.bindingAction = definition.action;
+    button.textContent = bindingCaptureAction === definition.action
+      ? 'PULSA UNA TECLA…'
+      : bindingLabel(definition.action);
+    button.classList.toggle('listening', bindingCaptureAction === definition.action);
+    button.setAttribute('aria-label', `Cambiar ${definition.label}. Tecla actual: ${bindingLabel(definition.action)}`);
+    row.append(label, button);
+    list.append(row);
+  }
+}
+
+function cancelBindingCapture(message = 'Asignación cancelada al salir de Controles.') {
+  if (!bindingCaptureAction) return false;
+  bindingCaptureAction = null;
+  renderBindings();
+  setSettingsStatus(message, 'warning');
+  return true;
+}
+
+function renderFullscreenState() {
+  const active = !!document.fullscreenElement;
+  for (const button of document.querySelectorAll('[data-fullscreen-action]')) {
+    button.textContent = active ? 'SALIR DE PANTALLA COMPLETA' : 'PANTALLA COMPLETA';
+    button.setAttribute('aria-label', 'Pantalla completa');
+    button.setAttribute('aria-pressed', String(active));
+  }
+}
+
+function setSettingsTab(tab, focus = false) {
+  const valid = ['audio', 'video', 'controls', 'gameplay', 'accessibility'];
+  const nextTab = valid.includes(tab) ? tab : 'audio';
+  if (nextTab !== 'controls') cancelBindingCapture();
+  activeSettingsTab = nextTab;
+  document.querySelectorAll('[data-settings-tab]').forEach((button) => {
+    const active = button.dataset.settingsTab === activeSettingsTab;
+    button.setAttribute('aria-selected', String(active));
+    button.tabIndex = active ? 0 : -1;
+    if (focus && active) button.focus();
+  });
+  document.querySelectorAll('[data-settings-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== activeSettingsTab;
+  });
 }
 
 function renderSettings() {
-  const fov = document.getElementById('option-fov');
-  const sensitivity = document.getElementById('option-sensitivity');
+  const value = (id, next) => { const el = document.getElementById(id); if (el) el.value = next; };
+  const checked = (id, next) => { const el = document.getElementById(id); if (el) el.checked = next; };
+  const output = (id, next) => { const el = document.getElementById(id); if (el) el.textContent = next; };
+  value('option-fov', settings.fov);
+  value('option-sensitivity', settings.sensitivity);
+  value('option-volume', settings.masterVolume);
+  value('option-render-scale', settings.renderScale);
+  value('option-shadow-quality', settings.shadowQuality);
+  value('option-effects-quality', settings.effectsQuality);
+  value('option-aim-mode', settings.aimMode);
+  value('option-weapon-bob', settings.weaponBob);
+  value('option-screen-shake', settings.screenShake);
+  value('option-crosshair-color', settings.crosshairColor);
+  value('option-crosshair-scale', settings.crosshairScale);
+  checked('option-sound-enabled', settings.soundEnabled);
+  checked('option-shadows', settings.shadowsEnabled);
+  checked('option-invert', settings.invertY);
+  checked('option-show-fps', settings.showFps);
+  checked('option-show-ping', settings.showPing);
+  checked('option-bunny-hop', settings.bunnyHopEnabled);
+  checked('option-crosshair-visible', settings.crosshairVisible);
+  checked('option-damage-flash', settings.damageFlash);
+  checked('option-high-contrast', settings.highContrast);
+  checked('option-reduced-motion', settings.reducedMotion);
+  output('option-fov-value', `${settings.fov}°`);
+  output('option-sensitivity-value', `${Math.round((settings.sensitivity / 0.0023) * 100)}%`);
+  output('option-render-scale-value', `${Math.round(settings.renderScale * 100)}%`);
+  output('option-weapon-bob-value', `${Math.round(settings.weaponBob * 100)}%`);
+  output('option-screen-shake-value', `${Math.round(settings.screenShake * 100)}%`);
+  output('option-crosshair-scale-value', `${Math.round(settings.crosshairScale * 100)}%`);
   const volume = document.getElementById('option-volume');
-  if (!fov || !sensitivity || !volume) return;
-  fov.value = settings.fov;
-  sensitivity.value = settings.sensitivity;
-  volume.value = settings.masterVolume;
-  document.getElementById('option-fov-value').textContent = `${settings.fov}°`;
-  document.getElementById('option-sensitivity-value').textContent = `${Math.round((settings.sensitivity / 0.0023) * 100)}%`;
-  document.getElementById('option-volume-value').textContent = `${Math.round(settings.masterVolume * 100)}%`;
-  document.getElementById('option-invert').checked = settings.invertY;
-  document.getElementById('option-show-fps').checked = settings.showFps;
-  document.getElementById('option-reduced-motion').checked = settings.reducedMotion;
+  if (volume) {
+    volume.disabled = !settings.soundEnabled;
+    volume.closest('.option-row')?.classList.toggle('is-muted', !settings.soundEnabled);
+  }
+  const volumePercent = `${Math.round(settings.masterVolume * 100)}%`;
+  output('option-volume-value', settings.soundEnabled ? volumePercent : `SILENCIADO · ${volumePercent}`);
+  output('mute-shortcut-label', bindingLabel('muteSound'));
+  output('settings-audio-state', settings.soundEnabled ? `ACTIVO · ${volumePercent}` : `SILENCIADO · ${volumePercent} GUARDADO`);
+
+  const quickMute = document.getElementById('quick-mute');
+  if (quickMute) {
+    quickMute.classList.toggle('muted', !settings.soundEnabled);
+    quickMute.setAttribute('aria-pressed', String(!settings.soundEnabled));
+    quickMute.setAttribute('aria-label', settings.soundEnabled ? 'Silenciar juego' : 'Activar sonido del juego');
+    output('quick-mute-icon', settings.soundEnabled ? '🔊' : '🔇');
+    output('quick-mute-label', settings.soundEnabled ? 'AUDIO' : 'SILENCIADO');
+  }
+  const muteAction = document.getElementById('settings-mute-action');
+  if (muteAction) {
+    muteAction.textContent = settings.soundEnabled ? '🔇 SILENCIAR AHORA' : '🔊 ACTIVAR SONIDO';
+    muteAction.classList.toggle('muted', !settings.soundEnabled);
+  }
+  const setDisabled = (id, disabled) => {
+    const control = document.getElementById(id);
+    if (!control) return;
+    control.disabled = disabled;
+    control.closest('.option-row')?.classList.toggle('is-disabled', disabled);
+  };
+  setDisabled('option-weapon-bob', settings.reducedMotion);
+  setDisabled('option-screen-shake', settings.reducedMotion);
+  setDisabled('option-shadow-quality', !settings.shadowsEnabled);
+  setDisabled('option-crosshair-scale', !settings.crosshairVisible);
+  setDisabled('option-crosshair-color', !settings.crosshairVisible);
+  if (settings.reducedMotion) {
+    output('option-weapon-bob-value', `ANULADO · ${Math.round(settings.weaponBob * 100)}%`);
+    output('option-screen-shake-value', `ANULADO · ${Math.round(settings.screenShake * 100)}%`);
+  }
+  if (!settings.crosshairVisible) {
+    output('option-crosshair-scale-value', `OCULTA · ${Math.round(settings.crosshairScale * 100)}%`);
+  }
+  renderBindings();
+  renderFullscreenState();
+  setSettingsTab(activeSettingsTab);
+}
+
+function commitSettings(message = 'Cambios guardados automáticamente.', announce = true) {
+  applySettings();
+  const settingsSaved = saveSettings();
+  const bindingsSaved = saveBindings();
+  renderSettings();
+  if (announce && (!settingsSaved || !bindingsSaved)) {
+    setSettingsStatus('Cambios aplicados solo durante esta sesión: el navegador bloqueó el guardado.', 'warning');
+  } else if (announce && message) {
+    setSettingsStatus(message);
+  }
+  return settingsSaved && bindingsSaved;
+}
+
+function toggleSound() {
+  settings.soundEnabled = !settings.soundEnabled;
+  commitSettings(settings.soundEnabled ? 'Sonido activado.' : 'Juego silenciado. Tu volumen queda guardado.');
+}
+
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen();
+  } catch {
+    setSettingsStatus('El navegador no permitió cambiar a pantalla completa.', 'warning');
+  }
+  renderFullscreenState();
 }
 
 function bindSettings() {
-  const fov = document.getElementById('option-fov');
-  const sensitivity = document.getElementById('option-sensitivity');
-  const volume = document.getElementById('option-volume');
-  const invert = document.getElementById('option-invert');
-  const showFps = document.getElementById('option-show-fps');
-  const reducedMotion = document.getElementById('option-reduced-motion');
-  if (!fov || !sensitivity || !volume || !invert || !showFps || !reducedMotion) return;
-  const update = () => { applySettings(); saveSettings(); renderSettings(); };
-  fov.addEventListener('input', () => { settings.fov = Number(fov.value); update(); });
-  sensitivity.addEventListener('input', () => { settings.sensitivity = Number(sensitivity.value); update(); });
-  volume.addEventListener('input', () => { settings.masterVolume = Number(volume.value); update(); });
-  invert.addEventListener('change', () => { settings.invertY = invert.checked; update(); });
-  showFps.addEventListener('change', () => { settings.showFps = showFps.checked; update(); });
-  reducedMotion.addEventListener('change', () => { settings.reducedMotion = reducedMotion.checked; update(); });
-  document.getElementById('reset-settings').addEventListener('click', () => {
+  const numberInput = (id, property) => {
+    const control = document.getElementById(id);
+    control?.addEventListener('input', (event) => {
+      settings[property] = Number(event.currentTarget.value);
+      commitSettings(null, false);
+    });
+    control?.addEventListener('change', () => commitSettings());
+  };
+  const toggleInput = (id, property) => document.getElementById(id)?.addEventListener('change', (event) => {
+    settings[property] = event.currentTarget.checked;
+    commitSettings();
+  });
+  const selectInput = (id, property) => document.getElementById(id)?.addEventListener('change', (event) => {
+    settings[property] = event.currentTarget.value;
+    commitSettings();
+  });
+
+  numberInput('option-fov', 'fov');
+  numberInput('option-sensitivity', 'sensitivity');
+  numberInput('option-volume', 'masterVolume');
+  numberInput('option-render-scale', 'renderScale');
+  numberInput('option-weapon-bob', 'weaponBob');
+  numberInput('option-screen-shake', 'screenShake');
+  numberInput('option-crosshair-scale', 'crosshairScale');
+  toggleInput('option-sound-enabled', 'soundEnabled');
+  toggleInput('option-shadows', 'shadowsEnabled');
+  toggleInput('option-invert', 'invertY');
+  toggleInput('option-show-fps', 'showFps');
+  toggleInput('option-show-ping', 'showPing');
+  toggleInput('option-bunny-hop', 'bunnyHopEnabled');
+  toggleInput('option-crosshair-visible', 'crosshairVisible');
+  toggleInput('option-damage-flash', 'damageFlash');
+  toggleInput('option-high-contrast', 'highContrast');
+  toggleInput('option-reduced-motion', 'reducedMotion');
+  selectInput('option-aim-mode', 'aimMode');
+  selectInput('option-crosshair-color', 'crosshairColor');
+  selectInput('option-shadow-quality', 'shadowQuality');
+  selectInput('option-effects-quality', 'effectsQuality');
+
+  document.getElementById('quick-mute')?.addEventListener('click', toggleSound);
+  document.getElementById('settings-mute-action')?.addEventListener('click', toggleSound);
+  document.querySelectorAll('[data-fullscreen-action]').forEach((button) => {
+    button.addEventListener('click', toggleFullscreen);
+  });
+  document.addEventListener('fullscreenchange', renderFullscreenState);
+
+  document.querySelectorAll('[data-settings-tab]').forEach((button) => {
+    button.addEventListener('click', () => setSettingsTab(button.dataset.settingsTab));
+    button.addEventListener('keydown', (event) => {
+      const tabs = [...document.querySelectorAll('[data-settings-tab]')];
+      const current = tabs.indexOf(button);
+      let next = current;
+      if (event.code === 'ArrowRight' || event.code === 'ArrowDown') next = (current + 1) % tabs.length;
+      else if (event.code === 'ArrowLeft' || event.code === 'ArrowUp') next = (current - 1 + tabs.length) % tabs.length;
+      else if (event.code === 'Home') next = 0;
+      else if (event.code === 'End') next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      setSettingsTab(tabs[next].dataset.settingsTab, true);
+    });
+  });
+
+  document.getElementById('keybinding-list')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-binding-action]');
+    if (!button) return;
+    bindingCaptureAction = button.dataset.bindingAction;
+    setSettingsStatus('Pulsa una tecla. ESC cancela; las teclas ocupadas se intercambian.', 'listening');
+    renderBindings();
+    document.querySelector(`[data-binding-action="${bindingCaptureAction}"]`)?.focus();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (!bindingCaptureAction) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.code === 'Escape') {
+      const cancelledAction = bindingCaptureAction;
+      bindingCaptureAction = null;
+      setSettingsStatus('Asignación cancelada.', 'warning');
+      renderBindings();
+      document.querySelector(`[data-binding-action="${cancelledAction}"]`)?.focus();
+      return;
+    }
+    const modifierOnly = /^(?:Control|Alt|Shift)/.test(event.code);
+    if (!modifierOnly && (event.ctrlKey || event.altKey || event.metaKey)) {
+      setSettingsStatus('No se permiten combinaciones del navegador. Pulsa una sola tecla.', 'warning');
+      return;
+    }
+    const action = bindingCaptureAction;
+    const result = assignBinding(bindings, action, event.code);
+    if (result.error) {
+      const message = result.error === 'occupied-key'
+        ? 'Para mover el marcador desde TAB, elige primero una tecla que esté libre.'
+        : result.error === 'tab-reserved'
+          ? 'TAB se reserva para la navegación o el marcador. Elige otra tecla.'
+          : 'Esa tecla está reservada. Elige otra o pulsa ESC.';
+      setSettingsStatus(message, 'warning');
+      return;
+    }
+    bindings = result.bindings;
+    bindingCaptureAction = null;
+    const conflictLabel = result.conflict
+      ? BINDING_ACTIONS.find((item) => item.action === result.conflict)?.label
+      : '';
+    commitSettings(conflictLabel
+      ? `Tecla asignada; se intercambió con «${conflictLabel}».`
+      : 'Tecla asignada y guardada.');
+    document.querySelector(`[data-binding-action="${action}"]`)?.focus();
+  }, true);
+
+  document.getElementById('reset-bindings')?.addEventListener('click', () => {
+    if (!window.confirm('¿Restaurar las 22 teclas predeterminadas?')) return;
+    bindings = readBindings(null);
+    bindingCaptureAction = null;
+    commitSettings('Controles restaurados.');
+  });
+  document.getElementById('reset-settings')?.addEventListener('click', () => {
+    if (!window.confirm('¿Restaurar audio, video, controles, jugabilidad y accesibilidad?')) return;
     settings = readSettings(null);
-    applySettings(); saveSettings(); renderSettings();
+    bindings = readBindings(null);
+    bindingCaptureAction = null;
+    activeSettingsTab = 'audio';
+    commitSettings('Toda la configuración fue restaurada.');
   });
   renderSettings();
 }
@@ -322,11 +737,9 @@ function renderLoadoutPanel() {
   if (previewWeapon) previewWeapon.textContent = `${weapon.name} · ${weapon.kind.toUpperCase()}`;
   const quickWeapon = document.getElementById('menu-quick-weapon');
   const quickDetail = document.getElementById('menu-quick-detail');
-  const quickMoney = document.getElementById('menu-quick-money');
   const playerLabel = document.getElementById('menu-player-label');
   if (quickWeapon) quickWeapon.textContent = weapon.name;
-  if (quickDetail) quickDetail.textContent = `${weapon.mag} / ${weapon.reserve} Â· ${meta.grenades} granadas`;
-  if (quickMoney) quickMoney.textContent = `$ ${weapons.money}`;
+  if (quickDetail) quickDetail.textContent = `${weapon.mag} / ${weapon.reserve} · ${meta.grenades} granadas`;
   if (playerLabel) playerLabel.textContent = nameInput ? (nameInput.value || 'INVITADO').toUpperCase() : 'INVITADO';
   document.getElementById('loadout-owned').textContent = `Armas desbloqueadas: ${meta.ownedWeapons.map((key) => WEAPON_DEFS[key].name).join(' · ')}`;
 }
@@ -339,13 +752,24 @@ const missions = new Missions((amount, txt) => {
   renderMenuPanels();
 });
 
+let menuArsenalFilter = 'all';
+
 function renderMenuArsenal() {
   const grid = document.getElementById('menu-arsenal-grid');
   const money = document.getElementById('menu-arsenal-money');
   if (!grid || !money) return;
   money.textContent = `$ ${weapons.money}`;
   grid.textContent = '';
+  document.querySelectorAll('[data-menu-arsenal-filter]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.menuArsenalFilter === menuArsenalFilter));
+  });
+  const categories = {
+    pistols: new Set(['pistol', 'revolver']),
+    primary: new Set(['shotgun', 'smg', 'ar', 'sniper']),
+    special: new Set(['launcher']),
+  };
   weapons.slots.forEach((key, i) => {
+    if (menuArsenalFilter !== 'all' && !categories[menuArsenalFilter]?.has(key)) return;
     const def = WEAPON_DEFS[key];
     const owned = !!weapons.owned[key];
     const equipped = key === weapons.current;
@@ -353,9 +777,14 @@ function renderMenuArsenal() {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = `menu-weapon-card${equipped ? ' equipped' : ''}${!owned && !affordable ? ' locked' : ''}`;
+    card.dataset.kind = def.kind;
     card.disabled = !owned && !affordable;
     const action = equipped ? 'EQUIPADA' : owned ? 'EQUIPAR' : affordable ? `COMPRAR $${def.price}` : `FALTAN $${def.price - weapons.money}`;
-    card.innerHTML = `<span class="weapon-index">[${i + 1}] ${def.kind.toUpperCase()}</span><span class="weapon-icon"></span><span class="weapon-name">${def.name}</span><span class="weapon-info">Cargador ${def.mag} · Reserva ${def.reserve}</span><span class="weapon-action">${action}</span>`;
+    const damage = def.launcher ? 100 : Math.min(100, Math.round((def.damage / 105) * 100));
+    const cadence = Math.min(100, Math.round((def.rpm / 950) * 100));
+    const control = Math.min(100, Math.round((1 - Math.min(0.07, def.recoil) / 0.07) * 100));
+    card.setAttribute('aria-label', `${def.name}. ${action}. Cargador ${def.mag}, reserva ${def.reserve}.`);
+    card.innerHTML = `<span class="weapon-index">[${bindingLabel(`slot${i + 1}`)}] ${def.kind.toUpperCase()}</span><span class="weapon-icon" aria-hidden="true"></span><span class="weapon-name">${def.name}</span><span class="weapon-info">Cargador ${def.mag} · Reserva ${def.reserve}</span><span class="weapon-stats" aria-hidden="true"><span class="weapon-stat">DAÑO <i style="--stat:${damage}%"></i></span><span class="weapon-stat">CADENCIA <i style="--stat:${cadence}%"></i></span><span class="weapon-stat">CONTROL <i style="--stat:${control}%"></i></span></span><span class="weapon-action">${action}</span>`;
     card.addEventListener('click', () => {
       if (owned) weapons.switchTo(key);
       else if (affordable) weapons.tryBuy(key);
@@ -369,6 +798,7 @@ function renderMenuArsenal() {
 function showMenuScreen(screen) {
   const valid = ['play', 'arsenal', 'operator', 'options'];
   const active = valid.includes(screen) ? screen : 'play';
+  cancelBindingCapture('Asignación cancelada al cambiar de sección.');
   for (const id of valid) {
     const panel = document.getElementById(`menu-screen-${id}`);
     if (panel) panel.classList.toggle('active', id === active);
@@ -377,24 +807,33 @@ function showMenuScreen(screen) {
   document.querySelectorAll('.menu-nav-btn').forEach((button) => {
     const stateForButton = states.find((item) => item.id === button.dataset.menuScreen);
     button.classList.toggle('active', !!stateForButton?.active);
+    if (stateForButton?.active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
   });
   if (active === 'arsenal') renderMenuArsenal();
-  if (active === 'operator') renderMenuPanels();
+  if (active === 'operator') {
+    initOperatorPreview();
+    renderMenuPanels();
+  }
   if (active === 'options') renderSettings();
 }
 
 function renderMenuPanels() {
   renderLoadoutPanel();
+  renderRoomSummary();
   // sombreros
   const hatList = document.getElementById('hat-list');
   hatList.textContent = '';
   for (const [id, def] of Object.entries(HATS)) {
     const btn = document.createElement('button');
+    btn.type = 'button';
     btn.className = 'hat-btn';
     const owned = skin.ownedHats.includes(id);
     if (skin.hat === id) btn.classList.add('equipped');
     if (!owned) btn.classList.add('locked');
     btn.textContent = owned ? def.name : `${def.name} $${def.price}`;
+    btn.setAttribute('aria-pressed', String(skin.hat === id));
+    btn.setAttribute('aria-label', `${def.name}. ${skin.hat === id ? 'Equipado' : owned ? 'Disponible' : `Bloqueado, cuesta $${def.price}`}.`);
     btn.onclick = () => {
       if (!owned) {
         if (weapons.money < def.price) {
@@ -403,6 +842,7 @@ function renderMenuPanels() {
           return;
         }
         weapons.money -= def.price;
+        saveArsenalEconomy();
         skin.ownedHats.push(id);
         audio.ensure(); audio.buy();
       }
@@ -422,10 +862,14 @@ function renderMenuPanels() {
   colorList.textContent = '';
   for (const c of SKIN_COLORS) {
     const btn = document.createElement('button');
+    const colorHex = c.toString(16).padStart(6, '0').toUpperCase();
+    btn.type = 'button';
     btn.className = 'color-btn';
-    btn.style.background = `#${c.toString(16).padStart(6, '0')}`;
+    btn.style.background = `#${colorHex}`;
     if (skin.color === c) btn.classList.add('equipped');
     if (!skin.colorsUnlocked) btn.classList.add('locked');
+    btn.setAttribute('aria-pressed', String(skin.color === c));
+    btn.setAttribute('aria-label', `Color #${colorHex}. ${skin.color === c ? 'Equipado' : skin.colorsUnlocked ? 'Disponible' : `Bloqueado, desbloquear colores cuesta $${COLORS_PRICE}`}.`);
     btn.onclick = () => {
       if (!skin.colorsUnlocked) {
         if (weapons.money < COLORS_PRICE) {
@@ -434,6 +878,7 @@ function renderMenuPanels() {
           return;
         }
         weapons.money -= COLORS_PRICE;
+        saveArsenalEconomy();
         skin.colorsUnlocked = true;
         audio.ensure(); audio.buy();
       }
@@ -460,9 +905,10 @@ function renderMenuPanels() {
 }
 
 function setTeamPicker(open) {
+  if (open) setChat(false);
   teamPickerOpen = open;
   hud.showTeamPicker(open);
-  weapons.inputBlocked = open || podiumOpen;
+  refreshWeaponInputBlock();
 }
 
 // --- economía y rachas: se activan con cada baja mía ---
@@ -491,10 +937,10 @@ function onMyKill(isHead, victimName) {
 
 function resetStreak() { streak = 0; }
 
-// lanzar granada con G
+// lanzar granada con la tecla configurada
 addEventListener('keydown', (e) => {
-  if (e.code !== 'KeyG' || !document.pointerLockElement) return;
-  if (state !== 'playing' || player.dead) return;
+  if (!isAction(e, 'grenade') || e.repeat || !document.pointerLockElement) return;
+  if (state !== 'playing' || player.dead || weapons.inputBlocked) return;
   if (grenades.throwFrom(camera)) audio.nadeThrow();
 });
 
@@ -553,7 +999,7 @@ function doKnife() {
         const dmg = calcDmg(ent.rig.group.rotation.y);
         effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
         hud.hitmarker(false);
-        audio.hit();
+        audio.hit(dmg >= 100);
         lastKnifeHitAt = performance.now();
         net.sendHit(kind, ent.id, dmg, dmg >= 100, 'knife');
         return;
@@ -566,7 +1012,7 @@ function doKnife() {
       const killed = bot.takeDamage(dmg, player.pos);
       effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
       hud.hitmarker(killed);
-      audio.hit();
+      audio.hit(dmg >= 100);
       if (killed) {
         missions.event('knifekill');
         if (offlineBotKilled) offlineBotKilled(bot, false);
@@ -579,21 +1025,28 @@ function doKnife() {
 let remotes = null;      // modo online
 let botsLocal = null;    // modo offline
 let online = false;
+let serverAvailable = false;
 let joined = false;
 let lastSnap = null;
 let kills = 0, deaths = 0;
 let state = 'menu'; // menu | playing | dead
 
 const playerEye = new THREE.Vector3();
+const remoteAudioForward = new THREE.Vector3();
 
 // --- interfaz del menú ---
 const playBtn = document.getElementById('play-btn');
 const nameInput = document.getElementById('name-input');
 
-initOperatorPreview();
-nameInput.value = localStorage.getItem('pium_name') || '';
+nameInput.value = safeStorageGet('pium_name') || '';
 document.querySelectorAll('[data-menu-screen]').forEach((button) => {
   button.addEventListener('click', () => showMenuScreen(button.dataset.menuScreen));
+});
+document.querySelectorAll('[data-menu-arsenal-filter]').forEach((button) => {
+  button.addEventListener('click', () => {
+    menuArsenalFilter = button.dataset.menuArsenalFilter || 'all';
+    renderMenuArsenal();
+  });
 });
 nameInput.addEventListener('input', () => {
   const label = document.getElementById('menu-player-label');
@@ -604,15 +1057,33 @@ applySettings();
 
 // sondeo rápido: ¿hay servidor?
 fetch('/salud').then((r) => {
+  serverAvailable = r.ok;
   if (r.ok) hud.setNetStatus('🟢 Servidor online — pon tu nombre y JUGAR', true);
   else hud.setNetStatus('🔴 Sin servidor — jugarás contra bots locales', false);
+  renderRoomSummary();
 }).catch(() => {
+  serverAvailable = false;
   hud.setNetStatus('🔴 Sin servidor — jugarás contra bots locales', false);
+  renderRoomSummary();
 });
 
 // --- cableado modo OFFLINE (bots locales) ---
+function localBotStatus(count) {
+  return `🔴 Modo local — tú contra ${count} bot${count === 1 ? '' : 's'}`;
+}
+
 function setupOffline() {
+  online = false;
   botsLocal = new BotManager(scene, world, player, effects, audio, 5);
+  receiveBotConfig({
+    enabled: true,
+    count: botsLocal.bots.length,
+    actual: botsLocal.bots.length,
+    max: MAX_BOTS,
+    humans: 1,
+    slots: TOTAL_SLOTS,
+    locked: false,
+  }, true);
   botsLocal.ctx.onKill = (killer, victim) => hud.killfeed(killer, victim, false);
   botsLocal.ctx.onBotDeath = (bot) => {
     kitsMgr.spawnLocal(bot.pos);
@@ -637,9 +1108,9 @@ function setupOffline() {
     if (!data.bot) return;
     const killed = data.bot.takeDamage(dmg, player.pos);
     effects.popup(point, String(dmg), isHead);
-    effects.impact(point, 0xcc4444, 4);
+    effects.impact(point, 0xcc4444, 4, 'flesh');
     hud.hitmarker(killed);
-    audio.hit();
+    audio.hit(isHead);
     if (killed) localBotKilled(data.bot, isHead);
   };
   weapons.onShot = (a, b, kind) => {
@@ -669,6 +1140,9 @@ function setupOffline() {
   hud.setMatchBanner('🔴 MODO LOCAL · partida libre');
 
   player.onDeath = (killerName) => {
+    if (botPanelOpen) setBotPanel(false, false);
+    if (buyOpen) setBuyMenu(false, false);
+    weapons.clearInput();
     deaths++;
     resetStreak();
     kitsMgr.spawnLocal({ x: player.pos.x, y: player.pos.y, z: player.pos.z });
@@ -687,12 +1161,14 @@ function setupOffline() {
       if (state === 'menu') hud.showMenu(true);
     }, 2600);
   };
-  hud.setNetStatus('🔴 Modo local — tú contra 9 bots', false);
+  hud.setNetStatus(localBotStatus(botsLocal.bots.length), false);
+  renderRoomSummary();
 }
 
 // --- cableado modo ONLINE ---
 function setupOnline() {
   online = true;
+  serverAvailable = true;
   player.netMode = true;
   remotes = new Remotes(scene);
 
@@ -700,9 +1176,9 @@ function setupOnline() {
   weapons.onTargetHit = (data, dmg, isHead, point) => {
     if (!data.net) return;
     effects.popup(point, String(dmg), isHead);
-    effects.impact(point, 0xcc4444, 4);
+    effects.impact(point, 0xcc4444, 4, 'flesh');
     hud.hitmarker(false);
-    audio.hit();
+    audio.hit(isHead);
     net.sendHit(data.net.kind, data.net.id, dmg, isHead, weapons.def.kind);
   };
   weapons.onShot = (a, b, kind) => {
@@ -729,6 +1205,7 @@ function setupOnline() {
     }
     if (m.m) {
       matchInfo = m.m;
+      if (m.m.bc) receiveBotConfig(m.m.bc);
       hud.setMatchBanner(bannerText(matchInfo));
     }
     hud.setNetStatus(`🟢 ONLINE — ${m.pl.length}/${net.slots} jugadores · ${m.bots.length} bots`, true);
@@ -736,8 +1213,11 @@ function setupOnline() {
 
   net.on('match', (m) => {
     matchInfo = m;
+    if (m.bc) receiveBotConfig(m.bc);
     if (m.map && m.map !== world.mapId) world.load(m.map);
     if (m.st === 'playing') {
+      const returningFromPodium = podiumOpen;
+      if (botPanelOpen && m.mode === 'teams') setBotPanel(false, false);
       podiumOpen = false;
       podiumStage = 'mode';
       hud.hidePodium();
@@ -747,16 +1227,24 @@ function setupOnline() {
       weapons.setForced(m.mode === 'gun' ? WEAPON_ORDER[0] : null);
       if (m.mode === 'teams') setTeamPicker(true);
       else setTeamPicker(false);
+      if (returningFromPodium && !document.pointerLockElement) {
+        hud.info(m.mode === 'teams'
+          ? 'Elige equipo y haz clic en la arena para continuar'
+          : 'Haz clic en la arena para retomar el control');
+      }
     }
     hud.setMatchBanner(bannerText(matchInfo));
   });
 
   net.on('podium', (m) => {
+    if (botPanelOpen) setBotPanel(false, false);
+    if (buyOpen) setBuyMenu(false, false);
     setChat(false);
     setTeamPicker(false);
     podiumOpen = true;
     podiumStage = m.stage || 'mode';
-    weapons.inputBlocked = true;
+    refreshWeaponInputBlock();
+    if (document.pointerLockElement) document.exitPointerLock();
     hud.showPodium(m);
     hud.setPodiumStage(podiumStage, m.secs || 15);
     if (m.winner === net.name) missions.event('win');
@@ -796,6 +1284,21 @@ function setupOnline() {
 
   net.on('pong', (m) => hud.setPing(Date.now() - m.ts));
   net.on('ammo', (m) => onAmmoPicked(m.a || 20));
+  net.on('botcfg', (m) => {
+    const acknowledged = isBotConfigAcknowledgement(m, pendingBotRequestId);
+    if (acknowledged) {
+      const messages = {
+        zombies: 'No se puede cambiar la cantidad durante una oleada de Zombis.',
+        rate: 'Espera un instante antes de volver a aplicar cambios.',
+        invalid: 'El servidor rechazó una cantidad no válida.',
+      };
+      pendingBotRequestId = null;
+      botPanelStatus = messages[m.reason] || 'Configuración sincronizada con la sala.';
+    } else if (!botDraftDirty) {
+      botPanelStatus = 'Configuración sincronizada con la sala.';
+    }
+    receiveBotConfig(m, acknowledged);
+  });
   setInterval(() => { if (net.connected) net.sendPing(); }, 3000);
 
   net.on('cbox', (m) => {
@@ -813,14 +1316,18 @@ function setupOnline() {
   });
 
   net.on('fire', (m) => {
+    if (!isFiniteVectorPayload(m.a) || !isFiniteVectorPayload(m.b)) return;
     const a = new THREE.Vector3(m.a[0], m.a[1], m.a[2]);
     const b = new THREE.Vector3(m.b[0], m.b[1], m.b[2]);
     effects.muzzle(a, m.k);
     const shot = shotTracerState(m.k);
     if (shot.visible) effects.tracer(a, b, shot.color);
     else effects.trail(a, b, shot.color);
+    if (m.bid != null) remotes?.triggerShot('bot', m.bid);
+    else if (m.id != null) remotes?.triggerShot('pl', m.id);
     player.eyePosition(playerEye);
-    audio.shot(m.k, audio.distVol(a.distanceTo(playerEye)) * 0.7);
+    camera.getWorldDirection(remoteAudioForward);
+    audio.shotAt(m.k, a, playerEye, remoteAudioForward, 0.7);
   });
 
   net.on('kill', (m) => {
@@ -833,6 +1340,9 @@ function setupOnline() {
       onMyKill(!!m.h, m.vn);
     }
     if (m.vid === net.id) {
+      if (botPanelOpen) setBotPanel(false, false);
+      if (buyOpen) setBuyMenu(false, false);
+      weapons.clearInput();
       resetStreak();
       player.dead = true;
       player.health = 0;
@@ -842,8 +1352,8 @@ function setupOnline() {
   });
 
   // granadas de otros jugadores (visuales, explotan en su sitio)
-  net.on('nade', (m) => grenades.spawnRemote(m.p, m.v));
-  grenades.onThrow = (pos, vel) => net.sendNade(pos, vel);
+  net.on('nade', (m) => grenades.spawnRemote(m.p, m.v, !!m.im));
+  grenades.onThrow = (pos, vel, impact) => net.sendNade(pos, vel, impact);
 
   // explosión de granada propia: daño a entidades remotas vía servidor
   grenades.onExplode = (pos) => {
@@ -886,26 +1396,36 @@ function setupOnline() {
   net.on('aviso', (m) => hud.info(String(m.txt).slice(0, 40)));
   net.on('botbye', (m) => remotes.removeBot(m.id));
   net.onClose(() => {
+    pendingBotRequestId = null;
+    if (botPanelOpen) setBotPanel(false, false);
     hud.setNetStatus('🔴 Conexión perdida — recarga la página', false);
     hud.info('⚠ Conexión perdida');
+    renderRoomSummary();
   });
+
+  renderRoomSummary();
 }
 
 // --- entrar al juego ---
 let connecting = false;
 
 async function joinAndPlay() {
+  cancelBindingCapture('Asignación cancelada al iniciar la partida.');
   audio.ensure();
   if (joined || botsLocal) { tryLock(); return; }
   if (connecting) return;
   connecting = true;
+  // La activación del usuario puede caducar mientras espera la conexión.
+  // Pedir el pointer lock antes del await permite entrar con un solo clic.
+  tryLock();
   playBtn.textContent = 'CONECTANDO...';
   const name = nameInput.value.trim();
-  if (name) localStorage.setItem('pium_name', name);
+  if (name) safeStorageSet('pium_name', name);
   try {
     const hi = await net.connect(name, { h: skin.hat, c: skin.color });
     setupOnline();
     joined = true;
+    if (hi.bc) receiveBotConfig(hi.bc, true);
     nameInput.value = net.name;
     nameInput.disabled = true;
     player.spawn(new THREE.Vector3(hi.spawn[0], hi.spawn[1], hi.spawn[2]));
@@ -923,10 +1443,19 @@ async function joinAndPlay() {
 
 function tryLock() {
   const p = renderer.domElement.requestPointerLock({ unadjustedMovement: true });
-  if (p && p.catch) p.catch(() => renderer.domElement.requestPointerLock());
+  if (p && p.catch) {
+    p.catch(() => {
+      const fallback = renderer.domElement.requestPointerLock();
+      if (fallback && fallback.catch) fallback.catch(() => {});
+    });
+  }
 }
 
 playBtn.addEventListener('click', joinAndPlay);
+renderer.domElement.addEventListener('click', () => {
+  if (state === 'playing' && !document.pointerLockElement && !player.dead &&
+      !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen) tryLock();
+});
 nameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinAndPlay();
   e.stopPropagation();
@@ -938,7 +1467,7 @@ document.addEventListener('pointerlockchange', () => {
     hud.showMenu(false);
     hud.showHud(true);
   } else {
-    if (buyOpen) return;
+    if (buyOpen || botPanelOpen || podiumOpen || teamPickerOpen) return;
     if (state === 'playing') {
       state = 'menu';
       hud.showMenu(true);
@@ -966,7 +1495,7 @@ function refreshWorldRanking() {
 }
 
 addEventListener('keydown', (e) => {
-  if (e.code === 'Tab' && document.pointerLockElement) {
+  if (isAction(e, 'scoreboard') && !e.repeat && document.pointerLockElement && !weapons.inputBlocked) {
     e.preventDefault();
     refreshWorldRanking();
     const rows = [];
@@ -989,22 +1518,236 @@ addEventListener('keydown', (e) => {
   }
 });
 addEventListener('keyup', (e) => {
-  if (e.code === 'Tab') hud.showScores(false);
+  if (isAction(e, 'scoreboard')) hud.showScores(false);
 });
 
-// teclas de modo: V cuchillo, M equipo, C chat, B compra, 1-6 en overlays
+// teclas de modo: V cuchillo, M equipo, C chat, B compra, H bots, 1-6 en overlays
 let chatOpen = false;
 let buyOpen = false;
+let botPanelOpen = false;
 let buyCategory = 'all';
+let buyMenuReturnFocus = null;
+let botControl = botPanelState({
+  enabled: true,
+  count: MAX_BOTS,
+  actual: 0,
+  max: MAX_BOTS,
+  humans: 0,
+  slots: TOTAL_SLOTS,
+  locked: false,
+});
+let botDraftDirty = false;
+let botPanelStatus = 'Ajusta la configuración y pulsa APLICAR.';
+let botRequestSerial = 0;
+let pendingBotRequestId = null;
+let botPanelReturnFocus = null;
+
+function renderRoomSummary() {
+  const title = document.getElementById('menu-room-state');
+  const detail = document.getElementById('menu-room-detail');
+  const status = document.getElementById('menu-room-status');
+  const modes = { ffa: 'TODOS CONTRA TODOS', teams: 'EQUIPOS', gun: 'BÚSQUEDA DEL ARMA', zombies: 'ZOMBIS' };
+  if (title) title.textContent = modes[matchInfo.mode] || 'LISTA PARA COMBATIR';
+  if (detail) {
+    detail.textContent = botControl.locked
+      ? 'Las oleadas controlan automáticamente a sus enemigos.'
+      : botControl.enabled
+        ? `${botControl.actual} bot${botControl.actual === 1 ? '' : 's'} activo${botControl.actual === 1 ? '' : 's'} · objetivo configurado: ${botControl.count}.`
+        : 'Bots desactivados para la sala actual.';
+  }
+  if (status) {
+    status.textContent = net.connected
+      ? 'SERVIDOR ONLINE'
+      : serverAvailable
+        ? 'SERVIDOR DISPONIBLE'
+        : 'ENTRENAMIENTO LOCAL';
+  }
+}
+
 function refreshWeaponInputBlock() {
-  weapons.inputBlocked = chatOpen || buyOpen || podiumOpen || teamPickerOpen;
+  const blocked = chatOpen || buyOpen || botPanelOpen || podiumOpen || teamPickerOpen;
+  if (blocked && !weapons.inputBlocked) weapons.clearInput();
+  weapons.inputBlocked = blocked;
+}
+
+function isFiniteVectorPayload(value) {
+  return Array.isArray(value) && value.length === 3 &&
+    value.every((component) => Number.isFinite(component) && Math.abs(component) <= 10000);
 }
 
 function setChat(open) {
+  if (open) setTeamPicker(false);
   chatOpen = open;
   hud.showChatMenu(open, QUICK_CHAT);
   refreshWeaponInputBlock();
 }
+
+function receiveBotConfig(raw, acknowledged = false) {
+  const hasExplicitLock = raw && (raw.locked === true || raw.locked === false || raw.locked === 1 || raw.locked === 0);
+  const mode = hasExplicitLock ? (raw.locked === true || raw.locked === 1 ? 'zombies' : 'ffa') : matchInfo.mode;
+  botControl = botPanelState(raw, mode);
+  if (acknowledged) botDraftDirty = false;
+  renderRoomSummary();
+  if (botPanelOpen) renderBotPanel(acknowledged || !botDraftDirty);
+}
+
+function renderBotPanel(syncControls = true) {
+  const panel = document.getElementById('bot-panel');
+  if (!panel) return;
+  const enabled = document.getElementById('bot-enabled');
+  const count = document.getElementById('bot-count');
+  const minus = document.getElementById('bot-minus');
+  const plus = document.getElementById('bot-plus');
+  const apply = document.getElementById('bot-apply');
+  const capacity = Math.max(0, botControl.slots - botControl.humans);
+  const controlsDisabled = botControl.locked || pendingBotRequestId !== null;
+
+  panel.dataset.locked = botControl.locked ? 'true' : 'false';
+  panel.dataset.pending = pendingBotRequestId !== null ? 'true' : 'false';
+  document.getElementById('bot-active').textContent = String(botControl.actual);
+  document.getElementById('bot-humans').textContent = String(botControl.humans);
+  document.getElementById('bot-slots').textContent = String(botControl.slots);
+  document.getElementById('bot-panel-status').textContent = botPanelStatus;
+  document.getElementById('bot-panel-note').textContent = botControl.locked
+    ? botControl.note
+    : `${botControl.note}${botControl.enabled && botControl.actual < botControl.count
+      ? ` Hay ${capacity} plazas disponibles; se conserva la cantidad deseada.`
+      : ''}`;
+
+  count.max = String(botControl.max);
+  if (syncControls) {
+    enabled.checked = botControl.enabled;
+    count.value = String(botControl.count);
+  }
+  for (const control of [enabled, count, minus, plus, apply]) control.disabled = controlsDisabled;
+}
+
+function markBotDraft() {
+  botDraftDirty = true;
+  botPanelStatus = 'Cambios sin aplicar.';
+  renderBotPanel(false);
+}
+
+function draftBotCount() {
+  const input = document.getElementById('bot-count');
+  const raw = Number(input.value);
+  const value = Number.isFinite(raw) ? Math.round(raw) : botControl.count;
+  return Math.min(botControl.max, Math.max(0, value));
+}
+
+function adjustBotCount(delta) {
+  const input = document.getElementById('bot-count');
+  input.value = String(Math.min(botControl.max, Math.max(0, draftBotCount() + delta)));
+  markBotDraft();
+}
+
+function setBotBackgroundInert(inert) {
+  for (const id of ['app', 'hud', 'menu', 'buy-menu', 'death']) {
+    const element = document.getElementById(id);
+    if (!element) continue;
+    if (inert) element.setAttribute('inert', '');
+    else element.removeAttribute('inert');
+  }
+}
+
+function trapBotPanelFocus(event) {
+  const focusable = [...document.querySelectorAll(
+    '#bot-panel button:not(:disabled), #bot-panel input:not(:disabled)',
+  )].filter((element) => element.offsetParent !== null);
+  if (focusable.length === 0) return;
+  const current = focusable.indexOf(document.activeElement);
+  const next = event.shiftKey
+    ? (current <= 0 ? focusable.length - 1 : current - 1)
+    : (current < 0 || current === focusable.length - 1 ? 0 : current + 1);
+  event.preventDefault();
+  focusable[next].focus();
+}
+
+function applyBotDraft() {
+  if (botControl.locked) return;
+  const count = draftBotCount();
+  const enabledInput = document.getElementById('bot-enabled');
+  const enabled = enabledInput.checked && count > 0;
+  enabledInput.checked = enabled;
+  document.getElementById('bot-count').value = String(count);
+  botPanelStatus = online ? 'Aplicando cambios en la sala...' : 'Aplicando cambios en modo local...';
+
+  if (online && net.connected) {
+    botDraftDirty = true;
+    pendingBotRequestId = ++botRequestSerial;
+    renderBotPanel(false);
+    net.sendBotConfig(enabled, count, pendingBotRequestId);
+    return;
+  }
+  renderBotPanel(false);
+  if (botsLocal) {
+    const actual = botsLocal.setCount(enabled ? count : 0);
+    botPanelStatus = 'Configuración aplicada en modo local.';
+    receiveBotConfig({
+      enabled,
+      count,
+      actual,
+      max: MAX_BOTS,
+      humans: 1,
+      slots: TOTAL_SLOTS,
+      locked: false,
+    }, true);
+    hud.setNetStatus(localBotStatus(actual), false);
+  }
+}
+
+function setBotPanel(open, restorePointer = true) {
+  const canOpen = (state === 'playing' || state === 'menu') && !player.dead && (joined || !!botsLocal) &&
+    !podiumOpen && !teamPickerOpen && !buyOpen;
+  if (open && !canOpen) return;
+  botPanelOpen = !!open;
+  if (botPanelOpen) {
+    botPanelReturnFocus = document.activeElement;
+    setBotBackgroundInert(true);
+    setChat(false);
+    botDraftDirty = false;
+    botPanelStatus = botControl.locked
+      ? 'Control bloqueado durante el modo Zombis.'
+      : 'Ajusta la configuración y pulsa APLICAR.';
+    weapons.triggerDown = false;
+    weapons.ads = false;
+    hud.setScope(false);
+    renderBotPanel(true);
+  }
+  hud.showBotPanel(botPanelOpen);
+  refreshWeaponInputBlock();
+  if (botPanelOpen) {
+    if (document.pointerLockElement) document.exitPointerLock();
+    requestAnimationFrame(() => {
+      document.getElementById(botControl.locked ? 'bot-close' : 'bot-count')?.focus();
+    });
+  } else {
+    setBotBackgroundInert(false);
+    const returnFocus = botPanelReturnFocus;
+    botPanelReturnFocus = null;
+    if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') {
+      returnFocus.focus({ preventScroll: true });
+    }
+    if (restorePointer && state === 'playing' && !player.dead && !podiumOpen && !teamPickerOpen) tryLock();
+  }
+}
+
+document.getElementById('bot-close')?.addEventListener('click', () => setBotPanel(false));
+document.getElementById('bot-apply')?.addEventListener('click', applyBotDraft);
+document.getElementById('bot-minus')?.addEventListener('click', () => adjustBotCount(-1));
+document.getElementById('bot-plus')?.addEventListener('click', () => adjustBotCount(1));
+document.getElementById('bot-enabled')?.addEventListener('change', markBotDraft);
+document.getElementById('bot-count')?.addEventListener('input', markBotDraft);
+document.getElementById('bot-count')?.addEventListener('keydown', (event) => {
+  if (event.code === 'Enter') {
+    event.preventDefault();
+    event.stopPropagation();
+    applyBotDraft();
+  }
+});
+document.getElementById('bot-panel')?.addEventListener('click', (event) => {
+  if (event.target.id === 'bot-panel') setBotPanel(false);
+});
 
 function renderBuyMenu() {
   const grid = document.getElementById('buy-grid');
@@ -1034,7 +1777,7 @@ function renderBuyMenu() {
     card.dataset.weapon = key;
     const action = equipped ? 'EQUIPADA' : owned ? 'EQUIPAR' : affordable ? `COMPRAR $${def.price}` : `FALTAN $${def.price}`;
     const slot = WEAPON_ORDER.indexOf(key) + 1;
-    card.innerHTML = `<span class="buy-key">[${slot}] ${def.kind.toUpperCase()}</span>` +
+    card.innerHTML = `<span class="buy-key">[${bindingLabel(`slot${slot}`)}] ${def.kind.toUpperCase()}</span>` +
       `<span class="buy-weapon-icon ${def.kind}" aria-hidden="true"></span>` +
       `<span class="buy-name">${def.name}</span>` +
       `<span class="buy-info">Cargador ${def.mag} · Reserva ${def.reserve}</span>` +
@@ -1049,15 +1792,49 @@ function renderBuyMenu() {
   });
 }
 
-function setBuyMenu(open) {
-  buyOpen = open && state === 'playing' && !player.dead;
+function setBuyMenu(open, restorePointer = true) {
+  const nextOpen = !!open && state === 'playing' && !player.dead;
+  if (nextOpen && !buyOpen) buyMenuReturnFocus = document.activeElement;
+  buyOpen = nextOpen;
   if (buyOpen) renderBuyMenu();
   hud.showBuyMenu(buyOpen);
+  setBuyBackgroundInert(buyOpen);
   refreshWeaponInputBlock();
   if (buyOpen) {
     if (document.pointerLockElement) document.exitPointerLock();
-  } else if (state === 'playing' && !player.dead) {
-    tryLock();
+    requestAnimationFrame(() => document.getElementById('buy-close')?.focus());
+  } else {
+    const returnFocus = buyMenuReturnFocus;
+    buyMenuReturnFocus = null;
+    if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') {
+      returnFocus.focus({ preventScroll: true });
+    }
+    if (restorePointer && state === 'playing' && !player.dead) tryLock();
+  }
+}
+
+function setBuyBackgroundInert(inert) {
+  for (const id of ['app', 'hud', 'menu', 'death', 'bot-panel']) {
+    const element = document.getElementById(id);
+    if (!element) continue;
+    if (inert) element.setAttribute('inert', '');
+    else element.removeAttribute('inert');
+  }
+}
+
+function trapBuyMenuFocus(event) {
+  const focusable = [...document.querySelectorAll(
+    '#buy-menu button:not(:disabled), #buy-menu input:not(:disabled), #buy-menu select:not(:disabled), #buy-menu [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => !element.hasAttribute('hidden'));
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
   }
 }
 
@@ -1069,15 +1846,56 @@ document.querySelectorAll('[data-buy-category]').forEach((button) => {
 });
 document.getElementById('buy-close')?.addEventListener('click', () => setBuyMenu(false));
 
+function handleMatchOverlaySlot(index) {
+  if (podiumOpen && online) {
+    if (podiumStage === 'mode' && index < 4) net.sendVote(MODES[index]);
+    else if (podiumStage === 'map' && index >= 4) net.sendMapVote(index === 4 ? 'arena' : 'ciudad');
+    else return false;
+    return true;
+  }
+  if (teamPickerOpen) {
+    if (index === 0) net.sendTeam('r');
+    else if (index === 1) net.sendTeam('b');
+    else if (index === 2) net.sendTeam(null);
+    else return false;
+    setTeamPicker(false);
+    if (!document.pointerLockElement) hud.info('Haz clic en la arena para retomar el control');
+    return true;
+  }
+  return false;
+}
+
 addEventListener('keydown', (e) => {
+  const uiFocused = e.target instanceof HTMLElement &&
+    (e.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(e.target.tagName));
+  if (!uiFocused && isAction(e, 'muteSound') && !e.repeat) {
+    e.preventDefault();
+    toggleSound();
+    return;
+  }
+  if (botPanelOpen) {
+    if (e.code === 'Tab') {
+      trapBotPanelFocus(e);
+      return;
+    }
+    if ((e.code === 'Escape' || isAction(e, 'openBots')) && !e.repeat) {
+      e.preventDefault();
+      setBotPanel(false);
+    }
+    return;
+  }
   if (buyOpen) {
-    if (e.code === 'Escape' || e.code === 'KeyB') {
+    if (e.code === 'Tab') {
+      trapBuyMenuFocus(e);
+      return;
+    }
+    if (e.code === 'Escape' || (isAction(e, 'openArsenal') && !e.repeat)) {
       e.preventDefault();
       setBuyMenu(false);
       return;
     }
-    const buyIndex = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'].indexOf(e.code);
-    if (buyIndex >= 0) {
+    const buyIndex = bindingSlotIndex(bindings, e.code);
+    if (buyIndex >= 0 && !e.repeat) {
       const key = WEAPON_ORDER[buyIndex];
       if (weapons.owned[key]) weapons.switchTo(key);
       else weapons.tryBuy(key);
@@ -1085,39 +1903,35 @@ addEventListener('keydown', (e) => {
     }
     return;
   }
+  const overlayIndex = bindingSlotIndex(bindings, e.code);
+  if (!e.repeat && (podiumOpen || teamPickerOpen) && overlayIndex >= 0 && handleMatchOverlaySlot(overlayIndex)) {
+    e.preventDefault();
+    return;
+  }
+  if (uiFocused && !document.pointerLockElement) return;
+  if (isAction(e, 'openBots') && !e.repeat && !podiumOpen && !teamPickerOpen) {
+    e.preventDefault();
+    setBotPanel(true);
+    return;
+  }
   if (!document.pointerLockElement) return;
-  if (e.code === 'KeyB' && !podiumOpen && !teamPickerOpen) {
+  if (isAction(e, 'openArsenal') && !e.repeat && !podiumOpen && !teamPickerOpen) {
     setChat(false);
     setBuyMenu(!buyOpen);
     return;
   }
-  if (e.code === 'KeyV') doKnife();
-  if (e.code === 'KeyM' && online && matchInfo.mode === 'teams' && !podiumOpen) {
+  if (isAction(e, 'melee') && !e.repeat && !weapons.inputBlocked) doKnife();
+  if (isAction(e, 'changeTeam') && !e.repeat && online && matchInfo.mode === 'teams' && !podiumOpen) {
     setTeamPicker(!teamPickerOpen);
   }
-  if (e.code === 'KeyC' && online && !podiumOpen) {
+  if (isAction(e, 'quickChat') && !e.repeat && online && !podiumOpen) {
     setChat(!chatOpen);
   }
-  const idx7 = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'].indexOf(e.code);
-  if (buyOpen && idx7 >= 0) {
-    const key = WEAPON_ORDER[idx7];
-    if (weapons.owned[key]) weapons.switchTo(key);
-    else weapons.tryBuy(key);
-    renderBuyMenu();
-    return;
-  }
-  const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].indexOf(e.code);
-  if (idx >= 0) {
+  const idx = bindingSlotIndex(bindings, e.code);
+  if (idx >= 0 && !e.repeat) {
     if (chatOpen) {
       net.sendChat(idx);
       setChat(false);
-    } else if (podiumOpen && online) {
-      if (podiumStage === 'mode' && idx < 4) net.sendVote(MODES[idx]);
-      else if (podiumStage === 'map' && idx >= 4) net.sendMapVote(idx === 4 ? 'arena' : 'ciudad');
-    } else if (teamPickerOpen) {
-      if (idx === 0) net.sendTeam('r');
-      else if (idx === 1) net.sendTeam('b');
-      if (idx < 3) setTeamPicker(false);
     }
   }
 });
@@ -1150,15 +1964,21 @@ showMenuScreen('play');
 
 // --- bucle de juego ---
 let lastTime = performance.now();
-let fpsAccum = 0, fpsCount = 0, fpsTimer = 0;
+let fpsCount = 0, fpsTimer = 0;
+document.addEventListener('visibilitychange', () => {
+  lastTime = performance.now();
+  if (document.hidden) weapons.clearInput();
+});
 
 function tick(now) {
   fitViewport();
-  const dt = Math.min(0.05, (now - lastTime) / 1000);
+  const rawDt = Math.max(0, (now - lastTime) / 1000);
+  const dt = Math.min(0.05, rawDt);
   lastTime = now;
 
   const playing = state === 'playing';
-  const inputEnabled = playing && !player.dead;
+  const inputEnabled = playing && !!document.pointerLockElement && !connecting && !player.dead &&
+    !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;
 
   if (state !== 'menu') {
     player.update(dt, inputEnabled);
@@ -1206,13 +2026,16 @@ function tick(now) {
     hud.updateHealth(player.health, player.maxHealth);
   }
 
-  fpsAccum += 1 / Math.max(dt, 1e-4); fpsCount++; fpsTimer += dt;
+  if (!document.hidden) {
+    fpsCount++;
+    fpsTimer += rawDt;
+  }
   if (fpsTimer > 0.5) {
-    hud.el.fps.textContent = Math.round(fpsAccum / fpsCount);
-    fpsAccum = 0; fpsCount = 0; fpsTimer = 0;
+    hud.el.fps.textContent = String(Math.round(fpsCount / fpsTimer));
+    fpsCount = 0; fpsTimer = 0;
   }
 
-  renderer.render(scene, camera);
+  if (state !== 'menu') renderer.render(scene, camera);
   renderOperatorPreview(dt);
 }
 

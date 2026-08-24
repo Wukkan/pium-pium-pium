@@ -1,12 +1,35 @@
 import * as THREE from 'three';
 
 // ---------------------------------------------------------------------------
-// Loot: kits de vida y cajas de municiÃ³n caen donde muere alguien.
+// Loot: kits de vida y cajas de munición caen donde muere alguien.
 // Online: el servidor decide (lista en cada snapshot). Offline: lógica local.
 // ---------------------------------------------------------------------------
 
 const PICKUP_DIST_SQ = 1.2 * 1.2;
 const LIFETIME = 30;
+
+// Un mismo pickup puede reutilizar material o textura en varias mallas (la
+// cruz roja, por ejemplo). Los Sets garantizan un unico dispose por recurso.
+export function disposePickupMesh(root) {
+  const geometries = new Set();
+  const materials = new Set();
+  const textures = new Set();
+  root?.traverse?.((object) => {
+    if (object.geometry?.dispose) geometries.add(object.geometry);
+    const list = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of list) {
+      if (!material?.dispose) continue;
+      materials.add(material);
+      for (const value of Object.values(material)) {
+        if (value?.isTexture && value.dispose) textures.add(value);
+      }
+    }
+  });
+  for (const texture of textures) texture.dispose();
+  for (const material of materials) material.dispose();
+  for (const geometry of geometries) geometry.dispose();
+  return { geometries: geometries.size, materials: materials.size, textures: textures.size };
+}
 
 function buildKitMesh() {
   const group = new THREE.Group();
@@ -135,6 +158,7 @@ export class KitManager {
     if (kit) {
       this.scene.remove(kit.mesh);
       this.kits.delete(id);
+      disposePickupMesh(kit.mesh);
     }
   }
 

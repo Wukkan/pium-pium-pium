@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { moveBody } from './shared/physics.js';
+import { DEFAULT_BINDINGS } from './input-bindings.js';
 
 // ---------------------------------------------------------------------------
 // Jugador en primera persona: WASD + salto + bunny-hop + deslizamiento.
@@ -42,11 +43,15 @@ export class Player {
 
     this.recoilPitch = 0;   // lo empujan las armas
     this.shakeTime = 0;
+    this.landingKick = 0;
     this.netMode = false;   // true en partidas online (el servidor manda en la vida)
 
     this.keys = {};
+    this.bindings = { ...DEFAULT_BINDINGS };
     this.sensitivity = 0.0023;
     this.invertY = false;
+    this.bunnyHopEnabled = true;
+    this.screenShake = 1;
     this.fovOffset = 0;
 
     this.onJump = null;
@@ -55,9 +60,17 @@ export class Player {
     this.onDeath = null;
 
     this._wasGrounded = true;
+    this._jumpWasHeld = false;
 
     addEventListener('keydown', (e) => { this.keys[e.code] = true; });
     addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+    addEventListener('blur', () => { this.keys = {}; this._jumpWasHeld = false; });
+    document.addEventListener('pointerlockchange', () => {
+      if (!document.pointerLockElement) {
+        this.keys = {};
+        this._jumpWasHeld = false;
+      }
+    });
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement) {
         this.yaw -= e.movementX * this.sensitivity;
@@ -67,6 +80,12 @@ export class Player {
     });
   }
 
+  setBindings(bindings) {
+    this.bindings = { ...DEFAULT_BINDINGS, ...bindings };
+    this.keys = {};
+    this._jumpWasHeld = false;
+  }
+
   spawn(point) {
     this.pos.copy(point);
     this.vel.set(0, 0, 0);
@@ -74,8 +93,11 @@ export class Player {
     this.dead = false;
     this.sliding = false;
     this.recoilPitch = 0;
+    this.shakeTime = 0;
+    this.landingKick = 0;
     this.yaw = Math.atan2(point.x, point.z); // mirar hacia el centro
     this.pitch = 0;
+    this._jumpWasHeld = false;
   }
 
   eyePosition(target = new THREE.Vector3()) {
@@ -91,7 +113,7 @@ export class Player {
     this.health -= amount;
     this.lastDamageTime = performance.now() / 1000;
     this.lastAttacker = attackerName;
-    this.shakeTime = 0.25;
+    this.shakeTime = Math.min(0.38, 0.18 + Math.max(0, amount) * 0.004);
     if (this.onDamaged) this.onDamaged(amount);
     if (this.health <= 0) {
       this.health = 0;
@@ -102,10 +124,19 @@ export class Player {
 
   update(dt, inputEnabled) {
     const k = this.keys;
-    const fwd = inputEnabled ? (k['KeyW'] ? 1 : 0) - (k['KeyS'] ? 1 : 0) : 0;
-    const strafe = inputEnabled ? (k['KeyD'] ? 1 : 0) - (k['KeyA'] ? 1 : 0) : 0;
-    const jumpHeld = inputEnabled && k['Space'];
-    const slideHeld = inputEnabled && (k['ShiftLeft'] || k['ShiftRight']);
+    const bind = this.bindings;
+    const fwd = inputEnabled ? (k[bind.moveForward] ? 1 : 0) - (k[bind.moveBackward] ? 1 : 0) : 0;
+    const strafe = inputEnabled ? (k[bind.moveRight] ? 1 : 0) - (k[bind.moveLeft] ? 1 : 0) : 0;
+    const jumpHeld = inputEnabled && !!k[bind.jump];
+    const jumpPressed = jumpHeld && !this._jumpWasHeld;
+    this._jumpWasHeld = jumpHeld;
+    const jumpRequested = this.bunnyHopEnabled ? jumpHeld : jumpPressed;
+    const pairedShift = bind.slide === 'ShiftLeft'
+      ? 'ShiftRight'
+      : bind.slide === 'ShiftRight' ? 'ShiftLeft' : null;
+    const pairedShiftIsFree = pairedShift && !Object.entries(bind)
+      .some(([action, code]) => action !== 'slide' && code === pairedShift);
+    const slideHeld = inputEnabled && !!(k[bind.slide] || (pairedShiftIsFree && k[pairedShift]));
 
     // dirección deseada en el plano XZ según la cámara
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
@@ -169,7 +200,7 @@ export class Player {
     }
 
     // --- salto / bunny-hop ---
-    if (jumpHeld && this.onGround) {
+    if (jumpRequested && this.onGround) {
       this.vel.y = JUMP_VEL;
       this.onGround = false;
       if (this.sliding) {
@@ -194,6 +225,7 @@ export class Player {
     const res = moveBody(this.pos, this.vel, dt, HALF_X, HALF_Z, HEIGHT, this.world.colliders);
     this.onGround = res.onGround;
     if (!wasGrounded && this.onGround) {
+      this.landingKick = Math.min(0.075, Math.max(0, fallSpeed - 5) * 0.0045);
       if (this.onLand) this.onLand();
       if (fallSpeed > 16 && this.onHardLand) this.onHardLand(fallSpeed);
     }
@@ -215,9 +247,19 @@ export class Player {
     // retroceso vuelve a su sitio
     this.recoilPitch *= Math.max(0, 1 - dt * 9);
     this.shakeTime = Math.max(0, this.shakeTime - dt);
-    const shake = this.shakeTime > 0 ? Math.sin(now * 80) * 0.004 * (this.shakeTime / 0.25) : 0;
+    const trauma = this.shakeTime > 0 ? Math.min(1, this.shakeTime / 0.3) * this.screenShake : 0;
+    const shakePitch = Math.sin(now * 79) * 0.009 * trauma;
+    const shakeYaw = Math.sin(now * 61 + 1.7) * 0.006 * trauma;
+    const shakeRoll = Math.sin(now * 93 + 0.8) * 0.008 * trauma;
+    const landingOffset = this.landingKick;
+    this.landingKick += (0 - this.landingKick) * Math.min(1, dt * 13);
 
-    this.camera.position.set(this.pos.x, this.pos.y + this.eyeHeight, this.pos.z);
-    this.camera.rotation.set(this.pitch + this.recoilPitch + shake, this.yaw, 0, 'YXZ');
+    this.camera.position.set(this.pos.x, this.pos.y + this.eyeHeight - landingOffset, this.pos.z);
+    this.camera.rotation.set(
+      this.pitch + this.recoilPitch + shakePitch,
+      this.yaw + shakeYaw,
+      shakeRoll,
+      'YXZ',
+    );
   }
 }

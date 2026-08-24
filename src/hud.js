@@ -14,7 +14,7 @@ const SLOT_NAMES = {
 export class HUD {
   constructor() {
     this.el = {
-      hud: $('hud'), menu: $('menu'), death: $('death'), buyMenu: $('buy-menu'),
+      hud: $('hud'), menu: $('menu'), death: $('death'), buyMenu: $('buy-menu'), botPanel: $('bot-panel'),
       crosshair: $('crosshair'), hitmarker: $('hitmarker'),
       vignette: $('damage-vignette'), scope: $('scope'),
       healthBar: $('health-bar'), healthLabel: $('health-label'),
@@ -25,10 +25,26 @@ export class HUD {
     this._hitTimer = null;
     this._announceTimer = null;
     this._vignetteLevel = 0;
+    this._damageFlashEnabled = true;
+    this._crosshairVisible = true;
+    this._showPing = true;
+    this._grenadeCount = 0;
+    this._weapons = null;
+    this.bindingLabels = {
+      grenade: 'G', reload: 'R',
+      slots: ['1', '2', '3', '4', '5', '6', '7'],
+    };
   }
 
   showMenu(show) { this.el.menu.style.display = show ? 'flex' : 'none'; }
-  showBuyMenu(show) { this.el.buyMenu.style.display = show ? 'flex' : 'none'; }
+  showBuyMenu(show) {
+    this.el.buyMenu.style.display = show ? 'flex' : 'none';
+    this.el.buyMenu.setAttribute('aria-hidden', show ? 'false' : 'true');
+  }
+  showBotPanel(show) {
+    this.el.botPanel.style.display = show ? 'flex' : 'none';
+    this.el.botPanel.setAttribute('aria-hidden', show ? 'false' : 'true');
+  }
   showHud(show) { this.el.hud.style.display = show ? 'block' : 'none'; }
   showDeath(show, killerName) {
     this.el.death.style.display = show ? 'flex' : 'none';
@@ -39,9 +55,39 @@ export class HUD {
     this.el.crosshair.style.setProperty('--gap', `${px.toFixed(1)}px`);
   }
 
+  setCrosshairPreferences({ visible = true, color = '#ffffff', scale = 1 } = {}) {
+    this._crosshairVisible = visible;
+    this.el.crosshair.style.setProperty('--crosshair-color', color);
+    this.el.crosshair.style.setProperty('--crosshair-scale', String(scale));
+    if (this.el.scope.style.display !== 'block') {
+      this.el.crosshair.style.display = visible ? 'block' : 'none';
+    }
+  }
+
+  setBindingLabels({ grenade, reload, slots } = {}) {
+    if (grenade) this.bindingLabels.grenade = grenade;
+    if (reload) this.bindingLabels.reload = reload;
+    if (Array.isArray(slots)) this.bindingLabels.slots = slots;
+    this.updateGrenades(this._grenadeCount);
+    if (this._weapons) this.updateSlots(this._weapons);
+  }
+
+  setDamageFlashEnabled(enabled) {
+    this._damageFlashEnabled = !!enabled;
+    if (!this._damageFlashEnabled) {
+      this._vignetteLevel = 0;
+      this.el.vignette.style.opacity = '0';
+    }
+  }
+
+  setPingVisible(show) {
+    this._showPing = !!show;
+    document.getElementById('ping').style.display = this._showPing ? 'block' : 'none';
+  }
+
   setScope(on) {
     this.el.scope.style.display = on ? 'block' : 'none';
-    this.el.crosshair.style.display = on ? 'none' : 'block';
+    this.el.crosshair.style.display = on || !this._crosshairVisible ? 'none' : 'block';
   }
 
   updateHealth(hp, max) {
@@ -80,11 +126,13 @@ export class HUD {
   }
 
   updateGrenades(n) {
-    document.getElementById('nades').textContent = `🧨 [G] Granadas: ${n}`;
+    this._grenadeCount = n;
+    document.getElementById('nades').textContent = `🧨 [${this.bindingLabels.grenade}] Granadas: ${n}`;
   }
 
   // ranuras compactas: las compras viven exclusivamente en el arsenal B
   updateSlots(weapons) {
+    this._weapons = weapons;
     const wrap = document.getElementById('weapon-slots');
     wrap.textContent = '';
     weapons.slots.forEach((key, i) => {
@@ -93,7 +141,7 @@ export class HUD {
       span.className = 'slot';
       if (key === weapons.current) span.classList.add('current');
       if (!weapons.owned[key]) span.classList.add('locked');
-      span.textContent = weaponHudLabel(def, i, SLOT_NAMES[key]);
+      span.textContent = weaponHudLabel(def, i, SLOT_NAMES[key], this.bindingLabels.slots[i]);
       wrap.append(span);
       return;
       /*
@@ -108,7 +156,7 @@ export class HUD {
     });
     const extra = document.createElement('span');
     extra.className = 'slot';
-    extra.textContent = '[R] Recargar';
+    extra.textContent = `[${this.bindingLabels.reload}] Recargar`;
     wrap.append(extra);
   }
 
@@ -121,6 +169,7 @@ export class HUD {
   }
 
   damageFlash(intensity = 0.5) {
+    if (!this._damageFlashEnabled) return;
     this._vignetteLevel = Math.min(1, this._vignetteLevel + intensity);
   }
 
@@ -206,7 +255,7 @@ export class HUD {
         button.className = 'vote-option';
         button.dataset.vote = option.kind;
         button.dataset.voteType = option.type;
-        button.textContent = `[${option.key}] ${option.label}`;
+        button.textContent = `[${this.bindingLabels.slots[option.key - 1] || option.key}] ${option.label}`;
         wrap.append(button);
       }
     };
@@ -252,7 +301,7 @@ export class HUD {
         const div = document.createElement('div');
         div.className = 'chat-opt';
         const b = document.createElement('b');
-        b.textContent = `[${i + 1}] `;
+        b.textContent = `[${this.bindingLabels.slots[i] || i + 1}] `;
         div.append(b, txt);
         list.append(div);
       });

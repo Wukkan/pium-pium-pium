@@ -1,7 +1,16 @@
 import * as THREE from 'three';
 import { moveBody } from './shared/physics.js';
-import { makeHumanoid, animateHumanoid } from './humanoid.js';
-import { BOT_NAMES, BOT_COLORS } from './shared/mapdata.js';
+import {
+  animateHumanoid,
+  animateHumanoidDeath,
+  disposeHumanoid,
+  makeHumanoid,
+  resetHumanoidPose,
+  triggerHumanoidHit,
+  triggerHumanoidShot,
+} from './humanoid.js';
+import { hitReactionSide, stablePoseSide } from './character-motion.js';
+import { BOT_NAMES, BOT_COLORS, MAX_BOTS } from './shared/mapdata.js';
 
 // ---------------------------------------------------------------------------
 // Bots LOCALES: solo se usan en modo sin conexión (cuando no hay servidor).
@@ -14,6 +23,33 @@ const GRAVITY = 24;
 const HALF = 0.35, HEIGHT = 1.8;
 const ENGAGE_DIST = 42;
 
+export function playLocalBotShot(audio, origin, player, fallbackDistance = 0) {
+  if (!audio) return null;
+  const listener = typeof player?.eyePosition === 'function'
+    ? player.eyePosition(new THREE.Vector3())
+    : new THREE.Vector3(
+        Number(player?.pos?.x) || 0,
+        (Number(player?.pos?.y) || 0) + (Number(player?.eyeHeight) || 1.62),
+        Number(player?.pos?.z) || 0,
+      );
+  const forward = new THREE.Vector3(0, 0, -1);
+  if (typeof player?.camera?.getWorldDirection === 'function') {
+    player.camera.getWorldDirection(forward);
+  } else {
+    const yaw = Number.isFinite(player?.yaw) ? player.yaw : 0;
+    forward.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  }
+
+  if (typeof audio.shotAt === 'function') {
+    return audio.shotAt('smg', origin, listener, forward, 0.7);
+  }
+  const attenuation = typeof audio.distVol === 'function'
+    ? audio.distVol(fallbackDistance)
+    : 1;
+  if (typeof audio.shot === 'function') audio.shot('smg', attenuation * 0.7);
+  return null;
+}
+
 class Bot {
   constructor(name, color) {
     this.name = name;
@@ -25,6 +61,7 @@ class Bot {
     this.dead = false;
     this.respawnAt = 0;
     this.deathAnim = 0;
+    this.deathSide = stablePoseSide(name);
 
     this.state = 'patrol';
     this.waypoint = null;
@@ -52,7 +89,8 @@ class Bot {
     this.state = 'patrol';
     this.waypoint = null;
     this.group.visible = true;
-    this.group.rotation.set(0, 0, 0);
+    resetHumanoidPose(this.rig);
+    this.group.rotation.y = this.yaw;
     this.group.position.copy(point);
   }
 
@@ -62,10 +100,15 @@ class Bot {
 
   takeDamage(amount, attackerPos) {
     if (this.dead) return false;
+    const impactSide = attackerPos
+      ? hitReactionSide(attackerPos, this.pos, this.yaw)
+      : this.deathSide;
+    triggerHumanoidHit(this.rig, Math.min(1, Math.max(0.2, Number(amount) / 45)), impactSide);
     this.health -= amount;
     if (this.health <= 0) {
       this.dead = true;
       this.deathAnim = 0.001;
+      this.deathSide = impactSide;
       this.respawnAt = performance.now() / 1000 + 3.5;
       return true;
     }
@@ -82,8 +125,9 @@ class Bot {
     if (this.dead) {
       if (this.deathAnim > 0 && this.deathAnim < 1) {
         this.deathAnim = Math.min(1, this.deathAnim + dt * 3.5);
-        this.group.rotation.x = -this.deathAnim * Math.PI / 2;
+        animateHumanoidDeath(this.rig, this.deathAnim, this.deathSide);
       } else if (now > this.respawnAt - 1) {
+        animateHumanoidDeath(this.rig, 1, this.deathSide);
         this.group.position.y -= dt * 2;
       }
       if (now >= this.respawnAt) {
@@ -209,6 +253,7 @@ class Bot {
     const tSpeed = isPlayer ? target.horizontalSpeed() : Math.hypot(target.vel.x, target.vel.z);
     const hitChance = Math.max(0.06, 0.55 - dist * 0.008 - tSpeed * 0.022 - (target.sliding ? 0.1 : 0));
     const hits = Math.random() < hitChance;
+    triggerHumanoidShot(this.rig, 0.82);
 
     let end = to;
     if (hits) {
@@ -227,15 +272,17 @@ class Bot {
       ));
     }
     ctx.effects.tracer(from, end, 0xff8866);
-    ctx.audio.shot('smg', ctx.audio.distVol(dist) * 0.7);
+    playLocalBotShot(ctx.audio, from, ctx.player, dist);
   }
 }
 
 export class BotManager {
-  constructor(scene, world, player, effects, audio, count = 9) {
+  constructor(scene, world, player, effects, audio, count = MAX_BOTS) {
     this.scene = scene;
     this.player = player;
     this.bots = [];
+    this.botSpawns = world.botSpawns;
+    this.botSerial = 0;
     this.ctx = {
       player,
       effects,
@@ -246,16 +293,40 @@ export class BotManager {
       colliders: world.colliders,
       occluders: world.occluders,
       waypoints: world.waypoints,
-      botSpawns: world.botSpawns,
+      botSpawns: this.botSpawns,
       raycaster: new THREE.Raycaster(),
     };
 
-    for (let i = 0; i < count; i++) {
-      const bot = new Bot(BOT_NAMES[i % BOT_NAMES.length], BOT_COLORS[i % BOT_COLORS.length]);
-      bot.spawn(world.botSpawns[i % world.botSpawns.length]);
-      scene.add(bot.group);
+    this.setCount(count);
+  }
+
+  setCount(count) {
+    const parsed = Number(count);
+    const target = Number.isFinite(parsed)
+      ? Math.max(0, Math.min(MAX_BOTS, Math.trunc(parsed)))
+      : 0;
+
+    while (this.bots.length > target) {
+      const bot = this.bots.pop();
+      this.disposeBot(bot);
+    }
+
+    while (this.bots.length < target && this.botSpawns.length > 0) {
+      const serial = this.botSerial++;
+      const baseName = BOT_NAMES[serial % BOT_NAMES.length];
+      const name = serial < BOT_NAMES.length ? baseName : `${baseName}_${serial}`;
+      const bot = new Bot(name, BOT_COLORS[serial % BOT_COLORS.length]);
+      bot.spawn(this.botSpawns[serial % this.botSpawns.length]);
+      this.scene.add(bot.group);
       this.bots.push(bot);
     }
+
+    return this.bots.length;
+  }
+
+  disposeBot(bot) {
+    this.scene.remove(bot.group);
+    disposeHumanoid(bot.rig);
   }
 
   update(dt) {

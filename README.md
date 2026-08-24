@@ -1,6 +1,8 @@
 # PIUM PIUM PIUM 🔫
 
-Shooter multijugador en el navegador (réplica de krunker.io) hecho con Three.js + Node.js.
+Shooter multijugador original para navegador hecho con Three.js + Node.js. Su identidad visual, operadores y arsenal son propios.
+
+La actualización **Combat Update 1.1** incorpora manos articuladas y animaciones completas en primera persona, operadores tácticos animados, impactos por superficie, casquillos, humo, audio espacial, hitmarkers y feedback de daño. El menú recibió una jerarquía visual nueva, tarjetas de arsenal con estadísticas, vista 3D del operador y navegación adaptable a móvil.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.
 
@@ -14,7 +16,25 @@ node server/server.js
 
 y abre **http://localhost:5173**. Escribe tu nombre y pulsa **JUGAR**.
 
-> Si abres el juego sin servidor Node (por ejemplo con `python serve.py`), funciona en modo local: tú contra 9 bots.
+> Si abres el juego sin servidor Node (por ejemplo con `python serve.py`), funciona en modo local: tú contra 5 bots.
+
+## Control de bots
+
+Durante una partida, pulsa **H** para abrir el panel **Control de bots · Sala actual**. Desde ahí puedes activar o desactivar los bots y elegir una cantidad de **0 a 5**; usar 0 retira todos los bots de la sala actual. El servidor puede reducir la cantidad si no quedan plazas libres para jugadores.
+
+En el modo **Zombis** estos controles permanecen bloqueados, porque las oleadas administran automáticamente sus propios enemigos.
+
+## Centro de configuración
+
+El botón **🔊 AUDIO** de la barra superior permite silenciar el juego inmediatamente. También puedes abrir **OPCIONES**, que ahora incluye cinco secciones:
+
+- **Audio**: activar o silenciar todo el juego y conservar el volumen elegido.
+- **Video**: FOV, escala de resolución, sombras y su calidad, presupuesto de efectos, FPS y pantalla completa.
+- **Controles**: sensibilidad, apuntado y reasignación persistente de 22 acciones. Si eliges una tecla ocupada, las dos funciones intercambian sus asignaciones.
+- **Jugabilidad**: bunny-hop, balanceo del arma, sacudida de cámara, ping y apariencia de la mira.
+- **Accesibilidad**: movimiento reducido, destello de daño y contraste alto.
+
+Los cambios se aplican al momento y se guardan en el navegador. **Escape** permanece reservado como salida segura.
 
 ## Desplegar gratis en Render
 
@@ -34,10 +54,18 @@ y abre **http://localhost:5173**. Escribe tu nombre y pulsa **JUGAR**.
 | Shift | Deslizarse |
 | Clic izq / der | Disparar / Apuntar |
 | R | Recargar |
-| 1-5 | Pistola / Escopeta ($300) / Subfusil ($500) / Rifle ($800) / Francotirador ($1200) |
+| 1-7 | Pistola / Escopeta / Subfusil / Rifle / Francotirador / Revólver / Lanzagranadas |
 | G | Lanzar granada (2 por vida) |
+| H | Abrir/cerrar el control de bots de la sala |
+| B | Abrir/cerrar el arsenal |
+| V | Ataque con cuchillo |
+| M | Cambiar de equipo |
+| C | Chat rápido |
+| P | Silenciar/activar todo el sonido |
 | TAB | Marcador |
 | ESC | Menú |
+
+Estas son las asignaciones iniciales; todas las teclas jugables se pueden cambiar desde **OPCIONES → CONTROLES**.
 
 Empiezas con la pistola. Cada baja da **$100** (+$50 headshot, + bonus por racha) para desbloquear el resto de armas. Las rachas de bajas se anuncian a las 3, 5, 8, 10...
 
@@ -49,7 +77,7 @@ Empiezas con la pistola. Cada baja da **$100** (+$50 headshot, + bonus por racha
 
 ## Modos de juego (online)
 
-Al final de cada partida hay **podio y votación** del siguiente modo (teclas 1-4). Los bots rellenan siempre que falten jugadores.
+Al final de cada partida hay **podio y votación** del siguiente modo (teclas 1-4). Si están activados, los bots ocupan las plazas configuradas que queden libres.
 
 - **Todos contra todos** — primero a 30 bajas o 5 minutos.
 - **Equipos** 🔴🔵 — eliges bando al empezar (y cambias con `M`); los bots equilibran los equipos; sin fuego amigo.

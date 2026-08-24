@@ -3,8 +3,19 @@ import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 import * as QUARKS from '../vendor/three.quarks.module.js';
 import * as CORE_THREE from 'three';
-import { Effects } from '../src/effects.js';
-import { clampParticleCount, effectLifetime, effectProfile, QuarksEffects } from '../src/quarks-effects.js';
+import {
+  classifyImpactSurface,
+  effectBudgetCount,
+  Effects,
+  normalizeEffectQuality,
+} from '../src/effects.js';
+import {
+  clampParticleCount,
+  effectLifetime,
+  effectProfile,
+  impactSurfaceProfile,
+  QuarksEffects,
+} from '../src/quarks-effects.js';
 
 test('particle counts stay within the combat budget', () => {
   assert.equal(clampParticleCount(2, 1, 24), 2);
@@ -20,6 +31,22 @@ test('effect lifetimes are bounded for automatic cleanup', () => {
 
 test('explosions use layered fire, smoke, and ember bursts', () => {
   assert.deepEqual(effectProfile('explosion').layers, ['flash', 'fire', 'shockwave', 'smoke', 'embers']);
+});
+
+test('combat impacts select a distinct surface treatment', () => {
+  assert.equal(classifyImpactSurface(0xcc4444), 'flesh');
+  assert.equal(classifyImpactSurface(0xc09858), 'wood');
+  assert.equal(classifyImpactSurface(0x555049), 'metal');
+  assert.equal(classifyImpactSurface(0xd8d0b8), 'concrete');
+  assert.equal(impactSurfaceProfile('metal').additive, true);
+  assert.equal(impactSurfaceProfile('flesh').texture, 'smoke');
+});
+
+test('quality and classic effect budgets have safe fallbacks', () => {
+  assert.equal(normalizeEffectQuality('high'), 'high');
+  assert.equal(normalizeEffectQuality('ultra'), 'balanced');
+  assert.equal(effectBudgetCount(90, 16), 16);
+  assert.equal(effectBudgetCount(0, 16), 1);
 });
 
 test('creates an explosion with the installed three.quarks runtime', () => {
@@ -51,4 +78,29 @@ test('quarks explosions also add a visible expanding shockwave mesh', () => {
   const shockwave = scene.children.find((child) => child.userData?.effect === 'shockwave');
   assert.equal(shockwave?.geometry?.type, 'SphereGeometry');
   assert.equal(shockwave?.children.length, 1);
+});
+
+test('low effect quality reduces classic transient objects', () => {
+  const scene = new CORE_THREE.Scene();
+  const effects = new Effects(scene);
+  effects.setQuality('low');
+  const origin = new CORE_THREE.Vector3(0, 2, 0);
+
+  for (let i = 0; i < 60; i++) effects.tracer(origin, new CORE_THREE.Vector3(0, 2, -10));
+
+  assert.equal(effects.quality, 'low');
+  assert.ok(effects.items.length <= 36);
+});
+
+test('high quality muzzle feedback includes flash, smoke, and a bounded casing', () => {
+  const scene = new CORE_THREE.Scene();
+  const effects = new Effects(scene);
+  effects.setQuality('high');
+
+  effects.muzzle(new CORE_THREE.Vector3(0, 2, 0), 'ar');
+
+  assert.equal(effects.items.length, 3);
+  assert.ok(scene.children.some((child) => child.geometry?.type === 'CylinderGeometry'));
+  effects.update(2);
+  assert.equal(effects.items.length, 0);
 });

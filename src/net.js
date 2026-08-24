@@ -2,6 +2,10 @@
 // Cliente WebSocket: conexión, protocolo y envío periódico del estado local.
 // ---------------------------------------------------------------------------
 
+export function isProtocolMessage(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && typeof value.t === 'string';
+}
+
 export class Net {
   constructor() {
     this.ws = null;
@@ -35,6 +39,7 @@ export class Net {
       ws.onmessage = (ev) => {
         let m;
         try { m = JSON.parse(ev.data); } catch { return; }
+        if (!isProtocolMessage(m)) return;
         if (m.t === 'hi' && !settled) {
           settled = true;
           clearTimeout(timeout);
@@ -101,6 +106,9 @@ export class Net {
   sendSelfDmg(d) { this._send({ t: 'selfdmg', d }); }
   sendChat(i) { this._send({ t: 'chat', i }); }
   sendSkin(h, c) { this._send({ t: 'skin', h, c }); }
+  sendBotConfig(enabled, count, requestId) {
+    this._send({ t: 'botcfg', enabled, count, rid: requestId });
+  }
   sendPing() { this._send({ t: 'ping', ts: Date.now() }); }
 
   sendNade(pos, vel, impact) {

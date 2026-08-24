@@ -13,9 +13,13 @@ import {
   weaponAnimationState,
   humanoidModelProfile,
   readSettings,
+  effectiveMasterVolume,
+  effectivePixelRatio,
   menuNavState,
   buyMenuCategoryState,
   podiumStageState,
+  botPanelState,
+  isBotConfigAcknowledgement,
   shotTracerState,
 } from '../src/ui-models.js';
 import { buildGunModel } from '../src/weapons.js';
@@ -112,6 +116,9 @@ test('weapon animation state adds bob, recoil and a visible reload motion', () =
   assert.ok(reload.position.y < -0.3);
   assert.ok(reload.rotation.x < -0.4);
   assert.ok(Math.abs(reload.position.x - idle.position.x) > 0.001);
+
+  const noBob = weaponAnimationState({ speed: 7, bobTime: 1.2, bobAmount: 0 });
+  assert.deepEqual(noBob.position, idle.position);
 });
 
 test('humanoid model profile stays blocky and compact', () => {
@@ -142,12 +149,56 @@ test('settings are sanitized for a stable AAA menu profile', () => {
     fov: 120, sensitivity: -2, masterVolume: 2, invertY: 1, showFps: true,
   })), {
     fov: 110, sensitivity: 0.001, masterVolume: 1,
-    invertY: true, showFps: true, reducedMotion: false,
+    soundEnabled: true, renderScale: 1, shadowsEnabled: true,
+    shadowQuality: 'high', effectsQuality: 'balanced',
+    invertY: true, showFps: true, showPing: true, aimMode: 'hold',
+    bunnyHopEnabled: true, weaponBob: 1, screenShake: 1,
+    crosshairVisible: true, crosshairColor: '#ffffff', crosshairScale: 1,
+    damageFlash: true, highContrast: false, reducedMotion: false,
   });
   assert.deepEqual(readSettings('broken'), {
     fov: 78, sensitivity: 0.0023, masterVolume: 0.45,
-    invertY: false, showFps: false, reducedMotion: false,
+    soundEnabled: true, renderScale: 1, shadowsEnabled: true,
+    shadowQuality: 'high', effectsQuality: 'balanced',
+    invertY: false, showFps: false, showPing: true, aimMode: 'hold',
+    bunnyHopEnabled: true, weaponBob: 1, screenShake: 1,
+    crosshairVisible: true, crosshairColor: '#ffffff', crosshairScale: 1,
+    damageFlash: true, highContrast: false, reducedMotion: false,
   });
+});
+
+test('muting keeps the chosen volume and only changes the effective output', () => {
+  const settings = readSettings({ soundEnabled: false, masterVolume: 0.72 });
+  assert.equal(settings.soundEnabled, false);
+  assert.equal(settings.masterVolume, 0.72);
+  assert.equal(effectiveMasterVolume(settings), 0);
+  assert.equal(effectiveMasterVolume({ ...settings, soundEnabled: true }), 0.72);
+});
+
+test('extended video, gameplay, and accessibility settings are sanitized', () => {
+  const settings = readSettings({
+    renderScale: 0.1, shadowsEnabled: false, shadowQuality: 'medium', effectsQuality: 'low',
+    showPing: false, aimMode: 'toggle',
+    bunnyHopEnabled: false, weaponBob: 8, screenShake: -2,
+    crosshairVisible: false, crosshairColor: '#66E5FF', crosshairScale: 5,
+    damageFlash: false, highContrast: true,
+  });
+  assert.equal(settings.renderScale, 0.5);
+  assert.equal(settings.shadowsEnabled, false);
+  assert.equal(settings.shadowQuality, 'medium');
+  assert.equal(settings.effectsQuality, 'low');
+  assert.equal(settings.showPing, false);
+  assert.equal(settings.aimMode, 'toggle');
+  assert.equal(settings.bunnyHopEnabled, false);
+  assert.equal(settings.weaponBob, 1);
+  assert.equal(settings.screenShake, 0);
+  assert.equal(settings.crosshairVisible, false);
+  assert.equal(settings.crosshairColor, '#66e5ff');
+  assert.equal(settings.crosshairScale, 1.8);
+  assert.equal(settings.damageFlash, false);
+  assert.equal(settings.highContrast, true);
+  assert.equal(effectivePixelRatio(settings.renderScale, 3), 1.5);
+  assert.equal(effectivePixelRatio(1, 3), 2);
 });
 
 test('menu navigation marks one active destination', () => {
@@ -175,6 +226,40 @@ test('podium stages expose a clear mode phase followed by a map phase', () => {
   assert.deepEqual(podiumStageState('map'), {
     stage: 'map', phase: 'FASE 2 / 2', title: 'ELIGE EL MAPA', voteType: 'map',
   });
+});
+
+test('bot panel distinguishes desired and active bots while clamping server data', () => {
+  assert.deepEqual(botPanelState({
+    enabled: true, count: 9, actual: 3, max: 5, humans: 7, slots: 10,
+  }), {
+    enabled: true,
+    count: 5,
+    actual: 3,
+    max: 5,
+    humans: 7,
+    slots: 10,
+    locked: false,
+    note: '3 bots activos en la sala.',
+  });
+
+  const disabled = botPanelState({ enabled: false, count: 4, actual: 0, max: 5 });
+  assert.equal(disabled.enabled, false);
+  assert.equal(disabled.count, 4);
+  assert.equal(disabled.note, 'Los bots están desactivados en esta sala.');
+});
+
+test('bot panel locks configuration during zombie waves', () => {
+  const state = botPanelState({ enabled: true, count: 5, actual: 12, max: 5 }, 'zombies');
+  assert.equal(state.locked, true);
+  assert.equal(state.actual, 12);
+  assert.match(state.note, /oleadas de Zombis/);
+});
+
+test('bot config acknowledgements only match the pending request', () => {
+  assert.equal(isBotConfigAcknowledgement({ rid: 7 }, 7), true);
+  assert.equal(isBotConfigAcknowledgement({ rid: 8 }, 7), false);
+  assert.equal(isBotConfigAcknowledgement({}, 7), false);
+  assert.equal(isBotConfigAcknowledgement({ rid: 7 }, null), false);
 });
 
 test('shot tracer is visible for firearms and uses a separate launcher effect', () => {

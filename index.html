@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a1220" />
+  <link rel="preload" href="sounds/ar.wav" as="audio" type="audio/wav" />
+  <link rel="preload" href="sounds/smg.wav" as="audio" type="audio/wav" />
+  <link rel="preload" href="sounds/shotgun.wav" as="audio" type="audio/wav" />
+  <link rel="preload" href="sounds/sniper.wav" as="audio" type="audio/wav" />
   <title>PIUM PIUM PIUM</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
@@ -21,13 +26,13 @@
     }
 
     /* crosshair */
-    #crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
-    #crosshair .line { position: absolute; background: #fff; box-shadow: 0 0 2px rgba(0,0,0,.8); }
+    #crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: scale(var(--crosshair-scale)); transform-origin: center; }
+    #crosshair .line { position: absolute; background: var(--crosshair-color); box-shadow: 0 0 2px rgba(0,0,0,.8); }
     #crosshair .t { width: 2px; height: 9px; left: -1px; top: calc(-9px - var(--gap)); }
     #crosshair .b { width: 2px; height: 9px; left: -1px; top: var(--gap); }
     #crosshair .l { width: 9px; height: 2px; top: -1px; left: calc(-9px - var(--gap)); }
     #crosshair .r { width: 9px; height: 2px; top: -1px; left: var(--gap); }
-    #crosshair { --gap: 6px; }
+    #crosshair { --gap: 6px; --crosshair-color: #fff; --crosshair-scale: 1; }
 
     /* hitmarker */
     #hitmarker {
@@ -174,7 +179,7 @@
       position: absolute; left: 50%; top: 7%; transform: translateX(-50%);
       width: min(820px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; text-align: center;
       background: linear-gradient(145deg, rgba(15,20,30,.98), rgba(7,10,17,.98)); border: 1px solid rgba(255,210,77,.45);
-      border-radius: 16px; padding: 34px 42px 28px; box-shadow: 0 22px 70px rgba(0,0,0,.65);
+      border-radius: 16px; padding: 34px 42px 28px; box-shadow: 0 22px 70px rgba(0,0,0,.65); pointer-events: auto;
     }
     #podium h2 { color: #fff; font-style: italic; font-size: clamp(30px, 4vw, 44px); letter-spacing: 1px; }
     #podium-winner { color: #ffd24d; font-size: clamp(24px, 3vw, 32px); font-weight: 900; font-style: italic; margin-top: 10px; }
@@ -389,8 +394,10 @@
     #death p { color: #ffd7d0; margin-top: 10px; font-size: 18px; font-weight: 700; font-style: italic; }
     #death .respawn { margin-top: 26px; color: #fff; font-size: 15px; font-family: Arial; }
     /* ---------- AAA-LITE MENU SYSTEM ---------- */
-    #menu { padding: 0; background: radial-gradient(circle at 70% 16%, rgba(42,112,190,.28), transparent 34%), radial-gradient(circle at 15% 80%, rgba(255,166,50,.1), transparent 32%), linear-gradient(135deg, rgba(8,13,24,.98), rgba(13,20,34,.96)); }
+    #menu { padding: 0; isolation: isolate; background: radial-gradient(circle at 70% 16%, rgba(42,112,190,.28), transparent 34%), radial-gradient(circle at 15% 80%, rgba(255,166,50,.1), transparent 32%), linear-gradient(135deg, rgba(8,13,24,.98), rgba(13,20,34,.96)); }
     #menu::before { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .2; background-image: linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px); background-size: 42px 42px; mask-image: linear-gradient(to bottom, #000, transparent 85%); }
+    #menu::after { content: ''; position: absolute; z-index: -1; right: 4%; top: 18%; width: min(48vw, 680px); aspect-ratio: 1; pointer-events: none; border-radius: 50%; background: radial-gradient(circle, rgba(61,136,218,.15), transparent 67%); filter: blur(20px); animation: menu-ambient 8s ease-in-out infinite alternate; }
+    @keyframes menu-ambient { to { transform: translate3d(-5%, 4%, 0) scale(1.08); opacity: .72; } }
     #menu-content { position: relative; width: min(1240px, calc(100% - 56px)); min-height: 100%; margin: 0 auto; text-align: left; display: flex; flex-direction: column; }
     #menu-topbar { display: flex; align-items: center; gap: 34px; min-height: 92px; border-bottom: 1px solid rgba(255,255,255,.1); }
     .menu-brand { position: relative; color: #fff; font: 900 23px 'Arial Black', Arial, sans-serif; font-style: italic; letter-spacing: 1px; white-space: nowrap; }
@@ -400,6 +407,17 @@
     .menu-profile span { color: #6d86a9; font: 700 9px Arial, sans-serif; letter-spacing: 2px; }
     .menu-profile strong { color: #fff; font: 900 14px Arial, sans-serif; }
     .menu-profile em { margin: 0; padding: 0; background: none !important; font: 700 10px Arial, sans-serif; font-style: normal; }
+    #quick-mute {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      min-width: 112px; min-height: 44px; padding: 8px 12px; pointer-events: auto; cursor: pointer;
+      border: 1px solid rgba(130,223,154,.4); border-radius: 7px;
+      background: rgba(70,150,92,.13); color: #dff8e5;
+      font: 900 10px Arial, sans-serif; letter-spacing: .8px;
+      transition: border-color .15s, background .15s, color .15s, transform .15s;
+    }
+    #quick-mute:hover, #quick-mute:focus-visible { border-color: #ffc34d; color: #fff; outline: 2px solid rgba(255,195,77,.3); outline-offset: 2px; transform: translateY(-1px); }
+    #quick-mute.muted { border-color: rgba(255,123,105,.55); background: rgba(180,62,48,.18); color: #ffb2a6; }
+    #quick-mute-icon { font-size: 18px; line-height: 1; }
     #menu-nav { display: flex; align-self: stretch; align-items: stretch; gap: 6px; margin-left: auto; pointer-events: auto; }
     .menu-nav-btn { position: relative; padding: 0 18px; border: 0; background: transparent; color: #7d91b0; cursor: pointer; font: 900 12px Arial, sans-serif; letter-spacing: 1px; transition: color .15s, background .15s; }
     .menu-nav-btn:hover, .menu-nav-btn.active { color: #fff; background: rgba(255,255,255,.05); }
@@ -408,11 +426,14 @@
     .menu-screen { display: none; animation: menu-in .22s ease-out; }
     .menu-screen.active { display: block; }
     @keyframes menu-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-    #menu-screen-play { display: none; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 40px; align-items: center; }
+    #menu-screen-play { display: none; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 28px 40px; align-items: center; }
     #menu-screen-play.active { display: grid; }
+    .hero-copy { min-width: 0; }
     #menu-screen-play h1 { margin: 0; color: #fff; font: 900 clamp(45px, 6vw, 82px) 'Arial Black', Arial, sans-serif; font-style: italic; letter-spacing: -2px; line-height: .95; text-shadow: 0 8px 0 rgba(0,0,0,.35), 0 0 36px rgba(130,190,255,.25); transform: skewX(-7deg); }
     #menu-screen-play h1 .io { color: #ffc34d; }
     #menu-screen-play .subtitle { margin-top: 16px; color: #a9bbd5; font: 400 15px Arial, sans-serif; }
+    .hero-kicker { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px; color: #90a8c9; font: 900 9px Arial, sans-serif; letter-spacing: 2px; }
+    .hero-kicker i { width: 7px; height: 7px; border-radius: 50%; background: #82df9a; box-shadow: 0 0 13px #82df9a; }
     .eyebrow { color: #ffc34d; font: 900 10px Arial, sans-serif; letter-spacing: 2px; }
     .eyebrow span { display: inline-block; width: 28px; height: 1px; margin: 0 9px 3px; background: #6e84a4; }
     #menu-screen-play .eyebrow { margin-bottom: 20px; }
@@ -430,7 +451,8 @@
     .menu-hero-side::after { content: ''; position: absolute; right: -50px; bottom: -85px; width: 230px; height: 230px; border: 1px solid rgba(255,195,77,.18); border-radius: 50%; box-shadow: 0 0 0 25px rgba(255,195,77,.03), 0 0 0 50px rgba(255,195,77,.02); }
     .menu-hero-side .eyebrow { position: relative; z-index: 1; }
     .mini-operator-art { position: relative; height: 170px; margin: 8px 0 0; background: radial-gradient(circle at 50% 60%, rgba(255,195,77,.2), transparent 42%); }
-    .operator-avatar { position: absolute; left: 50%; top: 42px; width: 92px; height: 132px; transform: translateX(-50%); }
+    .operator-avatar { position: absolute; left: 50%; top: 42px; width: 92px; height: 132px; transform: translateX(-50%); animation: operator-idle 2.8s ease-in-out infinite; }
+    @keyframes operator-idle { 50% { transform: translateX(-50%) translateY(-4px) rotate(.7deg); } }
     .operator-avatar.large { transform: translateX(-50%) scale(1.12); transform-origin: center bottom; }
     .operator-avatar .avatar-head { display: block; width: 48px; height: 48px; margin: 0 auto; border-radius: 50%; background: #d19768; border: 5px solid #17263d; }
     .operator-avatar .avatar-body { display: block; width: 80px; height: 80px; margin: 4px auto 0; border-radius: 25px 25px 8px 8px; background: linear-gradient(90deg, #526f8f, #1c2e47); border: 5px solid #17263d; }
@@ -440,8 +462,10 @@
     .ghost-action, .text-action { position: relative; z-index: 1; margin-top: 18px; padding: 0; border: 0; background: transparent; color: #ffc34d; cursor: pointer; font: 900 10px Arial, sans-serif; letter-spacing: .8px; }
     .ghost-action span { padding-left: 10px; font-size: 16px; }
     .menu-footer { display: flex; justify-content: space-between; padding: 18px 0; border-top: 1px solid rgba(255,255,255,.08); color: #596d8b; font: 10px Arial, sans-serif; letter-spacing: 1px; }
-    .menu-info-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 34px; }
-    .info-card { min-height: 130px; padding: 18px; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; background: rgba(255,255,255,.035); }
+    .menu-info-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 4px; }
+    .info-card { position: relative; overflow: hidden; min-height: 118px; padding: 17px 18px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: linear-gradient(145deg, rgba(255,255,255,.045), rgba(255,255,255,.018)); transition: transform .16s, border-color .16s, background .16s; }
+    .info-card::after { content: ''; position: absolute; inset: auto -30px -55px auto; width: 120px; height: 120px; border: 1px solid rgba(116,169,226,.09); border-radius: 50%; }
+    .info-card:hover { transform: translateY(-2px); border-color: rgba(123,173,229,.32); background: rgba(45,73,106,.22); }
     .info-card.accent-card { border-color: rgba(255,195,77,.28); background: linear-gradient(145deg, rgba(255,195,77,.12), rgba(255,255,255,.025)); }
     .card-label, .options-group-title { display: block; color: #7d91b0; font: 900 9px Arial, sans-serif; letter-spacing: 1.8px; }
     .info-card strong { display: block; margin-top: 14px; color: #fff; font: 900 16px Arial, sans-serif; }
@@ -453,46 +477,112 @@
     .screen-heading h2 { margin: 8px 0 0; color: #fff; font: 900 42px 'Arial Black', Arial, sans-serif; font-style: italic; }
     .screen-heading p { margin: 6px 0 0; color: #8498b7; font: 13px Arial, sans-serif; }
     .credit-display { color: #82df9a; font: 900 22px Arial, sans-serif; }
+    .menu-arsenal-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: -8px 0 18px; }
+    .menu-arsenal-filter { min-height: 36px; padding: 0 13px; border: 1px solid rgba(255,255,255,.11); border-radius: 5px; background: rgba(255,255,255,.035); color: #7790b2; cursor: pointer; font: 900 9px Arial, sans-serif; letter-spacing: 1px; transition: color .14s, border-color .14s, background .14s; }
+    .menu-arsenal-filter:hover { color: #fff; border-color: rgba(255,195,77,.48); }
+    .menu-arsenal-filter[aria-pressed="true"] { border-color: #ffc34d; background: rgba(255,195,77,.13); color: #ffd471; }
     .menu-arsenal-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; }
-    .menu-weapon-card { min-height: 194px; padding: 16px; border: 1px solid rgba(255,255,255,.11); border-radius: 7px; background: linear-gradient(145deg, rgba(31,45,65,.75), rgba(12,18,30,.85)); color: #fff; cursor: pointer; text-align: left; transition: transform .14s, border-color .14s, background .14s; }
+    .menu-weapon-card { position: relative; overflow: hidden; min-height: 244px; padding: 16px; border: 1px solid rgba(255,255,255,.11); border-radius: 7px; background: linear-gradient(145deg, rgba(31,45,65,.75), rgba(12,18,30,.85)); color: #fff; cursor: pointer; text-align: left; transition: transform .14s, border-color .14s, background .14s, box-shadow .14s; }
+    .menu-weapon-card::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(110deg, transparent 20%, rgba(255,255,255,.055) 48%, transparent 75%); transform: translateX(-120%); transition: transform .45s ease; }
+    .menu-weapon-card:hover::after { transform: translateX(120%); }
     .menu-weapon-card:hover { transform: translateY(-3px); border-color: rgba(255,195,77,.7); background: rgba(255,195,77,.09); }
     .menu-weapon-card.equipped { border-color: #ffc34d; box-shadow: inset 0 0 0 1px rgba(255,195,77,.25); }
     .menu-weapon-card.locked { opacity: .58; cursor: not-allowed; }
     .menu-weapon-card .weapon-index { color: #7690b5; font: 900 11px Arial, sans-serif; }
-    .menu-weapon-card .weapon-icon { height: 64px; margin-top: 8px; position: relative; }
-    .menu-weapon-card .weapon-icon::before { content: ''; position: absolute; left: 10px; top: 25px; width: 110px; height: 10px; border-radius: 2px; background: linear-gradient(90deg, #171b25, #717d90, #1e2530); box-shadow: 26px 11px 0 -2px #161b24; transform: skewX(-18deg); }
+    .menu-weapon-card .weapon-icon { display: block; height: 64px; margin-top: 8px; position: relative; }
+    .menu-weapon-card .weapon-icon::before { content: ''; position: absolute; left: 10px; top: 25px; width: var(--weapon-length, 110px); height: var(--weapon-height, 10px); border-radius: 2px; background: linear-gradient(90deg, #171b25, #8b98aa 45%, #1e2530); box-shadow: var(--weapon-stock, 26px 11px 0 -2px #161b24); transform: skewX(var(--weapon-skew, -18deg)); }
+    .menu-weapon-card[data-kind="pistol"] { --weapon-length: 72px; --weapon-height: 13px; --weapon-stock: 18px 12px 0 -3px #161b24; }
+    .menu-weapon-card[data-kind="shotgun"] { --weapon-length: 138px; --weapon-height: 8px; --weapon-stock: 20px 12px 0 -1px #4a3525; }
+    .menu-weapon-card[data-kind="smg"] { --weapon-length: 92px; --weapon-height: 14px; --weapon-stock: 28px 14px 0 -3px #161b24; }
+    .menu-weapon-card[data-kind="ar"] { --weapon-length: 132px; --weapon-height: 11px; --weapon-stock: 36px 13px 0 -2px #161b24; }
+    .menu-weapon-card[data-kind="sniper"] { --weapon-length: 150px; --weapon-height: 7px; --weapon-stock: 34px 13px 0 -1px #2c2018; }
+    .menu-weapon-card[data-kind="revolver"] { --weapon-length: 76px; --weapon-height: 14px; --weapon-stock: 22px 14px 0 -3px #3a251c; }
+    .menu-weapon-card[data-kind="launcher"] { --weapon-length: 118px; --weapon-height: 18px; --weapon-stock: 28px 15px 0 -3px #273422; --weapon-skew: -8deg; }
     .menu-weapon-card .weapon-name { display: block; color: #fff; font: 900 15px Arial, sans-serif; }
     .menu-weapon-card .weapon-info { display: block; margin-top: 6px; color: #8da0bc; font: 11px Arial, sans-serif; }
+    .weapon-stats { display: grid; gap: 5px; margin-top: 13px; }
+    .weapon-stat { display: grid; grid-template-columns: 54px 1fr; align-items: center; gap: 8px; color: #657b9b; font: 800 8px Arial, sans-serif; letter-spacing: .7px; }
+    .weapon-stat i { display: block; overflow: hidden; height: 3px; border-radius: 3px; background: rgba(255,255,255,.08); }
+    .weapon-stat i::before { content: ''; display: block; width: var(--stat); height: 100%; border-radius: inherit; background: linear-gradient(90deg, #527eae, #ffc34d); }
     .menu-weapon-card .weapon-action { display: block; margin-top: 13px; color: #82df9a; font: 900 10px Arial, sans-serif; }
     .menu-weapon-card.equipped .weapon-action { color: #ffc34d; }
     .menu-weapon-card.locked .weapon-action { color: #ff9c8d; }
     .screen-footer { margin-top: 22px; color: #627797; font: 11px Arial, sans-serif; }
     .screen-footer b { color: #ffc34d; }
-    .secondary-action { padding: 10px 14px; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: rgba(255,255,255,.06); color: #c8d4ea; cursor: pointer; font: 900 10px Arial, sans-serif; letter-spacing: 1px; }
-    .options-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-    .options-group { padding: 20px; border: 1px solid rgba(255,255,255,.11); border-radius: 7px; background: rgba(255,255,255,.035); }
+    .secondary-action { min-height: 42px; padding: 10px 14px; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: rgba(255,255,255,.06); color: #c8d4ea; cursor: pointer; font: 900 10px Arial, sans-serif; letter-spacing: 1px; }
+    #menu-screen-options { max-width: 1180px; margin: 0 auto; }
+    .settings-heading-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .settings-shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; align-items: start; }
+    .settings-tabs { position: sticky; top: 12px; display: grid; gap: 6px; padding: 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 9px; background: rgba(5,10,18,.52); }
+    .settings-tab { min-height: 48px; padding: 0 14px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #7188a9; cursor: pointer; text-align: left; font: 900 11px Arial, sans-serif; letter-spacing: 1px; }
+    .settings-tab:hover { color: #dce8f7; background: rgba(255,255,255,.045); }
+    .settings-tab[aria-selected="true"] { color: #17130b; border-color: #ffc34d; background: linear-gradient(135deg, #ffd66f, #e89b2b); box-shadow: 0 5px 18px rgba(0,0,0,.22); }
+    .settings-tab:focus-visible, .secondary-action:focus-visible, .settings-action:focus-visible, .keybind-button:focus-visible { outline: 2px solid #ffc34d; outline-offset: 2px; }
+    .settings-content { min-width: 0; }
+    .settings-panel[hidden] { display: none; }
+    .settings-panel:focus-visible { outline: 2px solid rgba(255,195,77,.65); outline-offset: 5px; }
+    .settings-panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 13px; padding: 2px 2px 13px; border-bottom: 1px solid rgba(255,255,255,.09); }
+    .settings-panel-heading h3 { color: #fff; font: 900 22px 'Arial Black', Arial, sans-serif; font-style: italic; }
+    .settings-panel-heading p { margin-top: 5px; color: #758baa; font: 12px Arial, sans-serif; }
+    .settings-panel-badge { flex: 0 0 auto; color: #82df9a; font: 900 10px Arial, sans-serif; letter-spacing: .8px; }
+    .options-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+    .options-group { padding: 18px 20px; border: 1px solid rgba(255,255,255,.11); border-radius: 8px; background: linear-gradient(145deg, rgba(255,255,255,.045), rgba(255,255,255,.022)); }
+    .options-group.full-width { grid-column: 1 / -1; }
     .options-group-title { padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,.08); color: #ffc34d; }
     .option-row, .option-toggle { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 74px; padding: 13px 0; border-bottom: 1px solid rgba(255,255,255,.07); color: #fff; cursor: pointer; }
     .option-row:last-child, .option-toggle:last-child { border-bottom: 0; }
     .option-row b, .option-toggle b { display: block; font: 700 13px Arial, sans-serif; }
     .option-row small, .option-toggle small { display: block; max-width: 280px; margin-top: 5px; color: #7185a3; font: 11px Arial, sans-serif; }
-    .option-control { min-width: 170px; text-align: right; }
+    .option-control { min-width: 180px; text-align: right; }
     .option-control output { display: block; margin-bottom: 6px; color: #ffc34d; font: 900 12px Arial, sans-serif; }
-    .option-control input { width: 170px; accent-color: #ffc34d; }
-    .option-toggle input { width: 18px; height: 18px; accent-color: #ffc34d; }
-    @media (max-width: 900px) { #menu-content { width: min(100% - 30px, 700px); } #menu-topbar { flex-wrap: wrap; gap: 14px; padding: 14px 0; } #menu-nav { order: 3; width: 100%; min-height: 48px; } .menu-nav-btn { flex: 1; padding: 0 6px; } #menu-screen-play.active { display: block; } .menu-hero-side { margin-top: 28px; } .menu-info-grid, .options-layout { grid-template-columns: 1fr; } .menu-arsenal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 520px) { #menu-content { width: calc(100% - 22px); } #menu-main { padding-top: 28px; } #menu-screen-play h1 { font-size: 42px; } .hero-actions { align-items: stretch; flex-direction: column; } #name-input, #play-btn { width: 100%; } .menu-arsenal-grid { grid-template-columns: 1fr; } .screen-heading { align-items: start; flex-direction: column; } .option-row, .option-toggle { align-items: start; flex-direction: column; gap: 10px; } .option-control { width: 100%; text-align: left; } .option-control input { width: 100%; } .menu-footer { font-size: 8px; } }
-    .reduced-motion *, .reduced-motion *::before, .reduced-motion *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    .option-control input[type="range"] { width: 180px; accent-color: #ffc34d; }
+    .option-control select { width: 180px; min-height: 40px; padding: 0 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: #152033; color: #e8eefb; font: 800 11px Arial, sans-serif; }
+    .option-toggle input[type="checkbox"] { position: relative; width: 48px; height: 27px; flex: 0 0 auto; appearance: none; border: 1px solid rgba(255,255,255,.2); border-radius: 20px; background: #202c3c; cursor: pointer; transition: background .15s, border-color .15s; }
+    .option-toggle input[type="checkbox"]::before { content: ''; position: absolute; left: 3px; top: 3px; width: 19px; height: 19px; border-radius: 50%; background: #8292a8; box-shadow: 0 2px 6px rgba(0,0,0,.4); transition: transform .15s, background .15s; }
+    .option-toggle input[type="checkbox"]:checked { border-color: rgba(130,223,154,.65); background: rgba(58,157,87,.48); }
+    .option-toggle input[type="checkbox"]:checked::before { transform: translateX(21px); background: #9be8ad; }
+    .option-toggle input[type="checkbox"]:focus-visible { outline: 2px solid #ffc34d; outline-offset: 3px; }
+    .option-row.is-muted { opacity: .62; }
+    .option-row.is-muted .option-control output { color: #ffb36b; }
+    .option-row.is-disabled { opacity: .48; cursor: not-allowed; }
+    .option-row.is-disabled .option-control output { color: #91a0b5; }
+    .option-row input:disabled { cursor: not-allowed; }
+    .settings-action { min-height: 44px; padding: 10px 15px; border: 1px solid rgba(255,195,77,.48); border-radius: 6px; background: rgba(255,195,77,.1); color: #ffd471; cursor: pointer; font: 900 11px Arial, sans-serif; letter-spacing: .7px; }
+    .settings-action.primary { border-color: #ffc34d; background: linear-gradient(135deg, #ffd66f, #e89b2b); color: #17130b; }
+    .settings-action.muted { border-color: #ff7865; background: rgba(178,58,43,.2); color: #ffb3a7; }
+    .audio-hero { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; min-height: 118px; padding: 18px; border: 1px solid rgba(130,223,154,.2); border-radius: 8px; background: radial-gradient(circle at 90% 20%, rgba(79,170,104,.16), transparent 38%), rgba(4,10,17,.3); }
+    .audio-hero strong { display: block; color: #fff; font: 900 20px Arial, sans-serif; }
+    .audio-hero p { margin-top: 6px; color: #8297b6; font: 12px/1.5 Arial, sans-serif; }
+    #settings-audio-state { display: block; margin-top: 9px; color: #82df9a; font: 900 10px Arial, sans-serif; letter-spacing: 1px; }
+    .settings-note { margin-top: 13px; padding: 11px 13px; border-left: 3px solid #50769f; border-radius: 4px; background: rgba(71,107,151,.09); color: #7d94b4; font: 11px/1.55 Arial, sans-serif; }
+    .settings-note kbd, .fixed-binding kbd { padding: 2px 6px; border: 1px solid rgba(255,255,255,.16); border-radius: 4px; background: rgba(255,255,255,.06); color: #ffc34d; font: 900 10px Arial, sans-serif; }
+    .keybinding-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+    .keybinding-toolbar p { color: #7890af; font: 11px/1.45 Arial, sans-serif; }
+    #keybinding-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; }
+    .keybind-group-title { grid-column: 1 / -1; margin-top: 10px; padding: 9px 0 4px; border-bottom: 1px solid rgba(255,255,255,.08); color: #ffc34d; font: 900 9px Arial, sans-serif; letter-spacing: 1.5px; text-transform: uppercase; }
+    .keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 7px 9px 7px 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 6px; background: rgba(7,13,23,.38); }
+    .keybind-row > span { color: #cbd7e8; font: 700 11px Arial, sans-serif; }
+    .keybind-button { min-width: 112px; min-height: 38px; padding: 7px 9px; border: 1px solid rgba(126,166,211,.3); border-radius: 5px; background: rgba(40,62,89,.42); color: #9fc7f4; cursor: pointer; font: 900 10px Arial, sans-serif; letter-spacing: .5px; }
+    .keybind-button:hover { border-color: #ffc34d; color: #ffc34d; }
+    .keybind-button.listening { min-width: 145px; border-color: #ffc34d; background: rgba(255,195,77,.13); color: #ffd471; animation: keybind-pulse .8s infinite alternate; }
+    @keyframes keybind-pulse { to { box-shadow: 0 0 0 3px rgba(255,195,77,.12); } }
+    .fixed-bindings { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+    .fixed-binding { flex: 1; min-width: 145px; padding: 11px; border: 1px solid rgba(255,255,255,.08); border-radius: 6px; color: #8196b5; font: 11px Arial, sans-serif; }
+    .fixed-binding strong { display: block; margin-bottom: 7px; color: #cbd7e8; }
+    .settings-status { min-height: 18px; margin-top: 15px; color: #82df9a; font: 800 11px Arial, sans-serif; }
+    .settings-status[data-tone="warning"] { color: #ffb36b; }
+    .settings-status[data-tone="listening"] { color: #ffd471; }
+    #keybinding-status { margin-top: 8px; padding: 8px 10px; border-left: 3px solid currentColor; border-radius: 3px; background: rgba(255,255,255,.035); }
+    .high-contrast #menu { background: #050914; }
+    .high-contrast .options-group, .high-contrast .settings-tabs, .high-contrast .keybind-row { border-color: rgba(255,255,255,.35); background: rgba(0,0,0,.72); }
+    .high-contrast .hud-text { text-shadow: 0 2px 0 #000, 0 0 5px #000, 1px 1px 0 #000; }
+    @media (max-width: 900px) { #menu-content { width: min(100% - 30px, 700px); } #menu-topbar { flex-wrap: wrap; gap: 14px; padding: 14px 0; } #menu-nav { order: 3; width: 100%; min-height: 48px; } .menu-nav-btn { flex: 1; padding: 0 6px; } #menu-screen-play.active { display: block; } .menu-hero-side { margin-top: 28px; } .menu-info-grid, .options-layout { grid-template-columns: 1fr; } .options-group.full-width { grid-column: auto; } .menu-arsenal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .settings-shell { grid-template-columns: 1fr; } .settings-tabs { position: sticky; top: 0; z-index: 2; display: flex; overflow-x: auto; padding: 7px; backdrop-filter: blur(10px); scrollbar-width: thin; scrollbar-color: #ffc34d rgba(255,255,255,.07); } .settings-tabs::-webkit-scrollbar { display: block; height: 5px; } .settings-tabs::-webkit-scrollbar-track { background: rgba(255,255,255,.07); } .settings-tabs::-webkit-scrollbar-thumb { border-radius: 5px; background: #ffc34d; } .settings-tab { flex: 0 0 auto; min-height: 44px; } }
+    @media (max-width: 520px) { #menu-content { width: calc(100% - 22px); } #menu-main { padding-top: 28px; } #menu-screen-play h1 { font-size: 42px; } .hero-actions { align-items: stretch; flex-direction: column; } #name-input, #play-btn { width: 100%; } .menu-arsenal-grid { grid-template-columns: 1fr; } .screen-heading { align-items: start; flex-direction: column; } .settings-heading-actions { width: 100%; justify-content: stretch; } .settings-heading-actions button { flex: 1; } .settings-tabs { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; } .settings-tab { width: 100%; padding: 0 9px; font-size: 9px; } .settings-tab:last-child { grid-column: 1 / -1; } .option-row { align-items: start; flex-direction: column; gap: 10px; } .option-toggle { min-height: 66px; } .option-control { width: 100%; text-align: left; } .option-control input[type="range"], .option-control select { width: 100%; } .menu-footer { font-size: 8px; } #quick-mute { min-width: 48px; padding: 8px; margin-left: auto; } #quick-mute-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); } .audio-hero { grid-template-columns: 1fr; } .keybinding-toolbar { align-items: stretch; flex-direction: column; } .keybinding-toolbar .secondary-action { width: 100%; } #keybinding-list { grid-template-columns: 1fr; } .keybind-group-title { grid-column: auto; } .keybind-button { min-width: 102px; } }
+    .reduced-motion *, .reduced-motion *::before, .reduced-motion *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
     #menu-topbar #net-status { margin-top: 0; padding: 0; }
-    #menu-screen-play { grid-template-rows: auto auto auto auto auto; }
-    #menu-screen-play h1 { grid-column: 1; grid-row: 1; }
-    #menu-screen-play .subtitle { grid-column: 1; grid-row: 2; }
-    #menu-screen-play #name-input { grid-column: 1; grid-row: 3; align-self: center; }
-    #menu-screen-play #play-btn { grid-column: 1; grid-row: 3; justify-self: start; margin-left: 204px; }
-    #menu-screen-play .controls { grid-column: 1; grid-row: 4; }
-    #menu-screen-play #menu-stats { grid-column: 1; grid-row: 5; }
-    #menu-screen-play .menu-hero-side { grid-column: 2; grid-row: 1 / span 5; }
-    @media (max-width: 900px) { #menu-screen-play { grid-template-rows: none; } #menu-screen-play h1, #menu-screen-play .subtitle, #menu-screen-play #name-input, #menu-screen-play #play-btn, #menu-screen-play .controls, #menu-screen-play #menu-stats, #menu-screen-play .menu-hero-side { grid-column: auto; grid-row: auto; } #menu-screen-play #play-btn { margin-left: 0; } }
+    #menu-screen-play .hero-copy { grid-column: 1; }
+    #menu-screen-play .menu-hero-side { grid-column: 2; }
+    @media (max-width: 900px) { #menu-screen-play .hero-copy, #menu-screen-play .menu-hero-side { grid-column: auto; } }
     #menu-screen-operator { max-width: 1080px; margin: 0 auto; }
     #menu-screen-operator #menu-loadout { width: 100%; margin: 0; grid-template-columns: 370px minmax(0, 1fr); gap: 24px; padding: 0; border: 0; background: transparent; box-shadow: none; }
     #menu-screen-operator .operator-card { min-height: 390px; border: 1px solid rgba(141,190,244,.28); border-radius: 12px; background: radial-gradient(circle at 50% 36%, rgba(80,151,221,.22), transparent 38%), linear-gradient(145deg, #203a59, #0c1422); box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), 0 24px 55px rgba(0,0,0,.3); }
@@ -507,6 +597,7 @@
     .operator-preview-footer strong { color: #ffc34d; font: 900 10px Arial, sans-serif; letter-spacing: .7px; }
     #menu-screen-operator > #custom-panel { margin-top: 24px; }
     @media (max-width: 760px) { #menu-screen-operator #menu-loadout { grid-template-columns: 1fr; } #menu-screen-operator .operator-card { min-height: 340px; } }
+    @media (max-width: 600px) { #menu-screen-operator, #menu-screen-operator > #custom-panel, #custom-panel .cp-col { min-width: 0; max-width: 100%; } #menu-screen-operator > #custom-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 14px; } }
     #buy-menu { background: radial-gradient(circle at 50% 0%, rgba(48,92,145,.22), rgba(4,8,15,.88) 54%), rgba(4,8,15,.82); backdrop-filter: blur(13px); }
     .buy-window { width: min(1180px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; padding: 26px 30px 18px; border: 1px solid rgba(142,190,245,.28); border-radius: 12px; background: linear-gradient(145deg, rgba(18,31,49,.98), rgba(7,12,21,.99)); box-shadow: 0 28px 90px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.05); }
     .buy-header { align-items: center; padding-bottom: 22px; border-bottom: 1px solid rgba(255,255,255,.1); }
@@ -561,6 +652,88 @@
     .buy-footer { display: flex; justify-content: space-between; margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); color: #617b9e; font: 10px Arial, sans-serif; letter-spacing: .4px; }
     @media (max-width: 920px) { .buy-layout { grid-template-columns: 1fr; } .buy-categories { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 0 12px; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.1); } .buy-categories-title, .buy-help { display: none; } .buy-category { width: auto; flex: 1; min-width: 130px; } }
     @media (max-width: 640px) { .buy-window { width: calc(100vw - 20px); padding: 18px 14px 14px; } .buy-header { align-items: start; flex-direction: column; } .buy-header h2 { font-size: 29px; } .buy-header-actions { width: 100%; justify-content: space-between; } #buy-grid { grid-template-columns: repeat(2, minmax(130px, 1fr)); } .buy-footer { align-items: start; flex-direction: column; gap: 5px; } }
+
+    /* ---------- control de bots en partida ---------- */
+    #bot-panel {
+      display: none; position: fixed; inset: 0; z-index: 14;
+      align-items: center; justify-content: center; padding: 20px;
+      background: radial-gradient(circle at 50% 4%, rgba(45,107,172,.27), transparent 48%), rgba(3,7,13,.88);
+      backdrop-filter: blur(13px); pointer-events: auto;
+    }
+    .bot-panel-window {
+      width: min(620px, 100%); max-height: calc(100vh - 40px); overflow: auto;
+      padding: 25px 28px 20px; color: #e8eefb;
+      background: radial-gradient(circle at 100% 0%, rgba(48,95,151,.24), transparent 38%), linear-gradient(145deg, rgba(22,31,46,.99), rgba(8,13,22,.99));
+      border: 1px solid rgba(126,177,235,.34); border-radius: 12px;
+      box-shadow: 0 26px 90px rgba(0,0,0,.72), inset 0 1px 0 rgba(255,255,255,.05);
+    }
+    .bot-panel-header { display: flex; align-items: start; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid rgba(255,255,255,.09); }
+    .bot-panel-kicker { color: #7692b7; font: 900 9px Arial, sans-serif; letter-spacing: 2.2px; }
+    .bot-panel-header h2 { margin-top: 6px; color: #fff; font: 900 clamp(22px, 4vw, 30px) 'Arial Black', Arial, sans-serif; font-style: italic; letter-spacing: .3px; }
+    .bot-panel-header h2 span { color: #ffc34d; }
+    .bot-panel-subtitle { margin-top: 6px; color: #8fa5c4; font: 12px/1.5 Arial, sans-serif; }
+    #bot-close {
+      flex: 0 0 auto; width: 38px; height: 38px; border: 1px solid rgba(255,255,255,.16); border-radius: 6px;
+      background: rgba(255,255,255,.045); color: #aebdd1; cursor: pointer; font: 400 25px/1 Arial, sans-serif;
+      transition: color .15s, border-color .15s, background .15s;
+    }
+    #bot-close:hover, #bot-close:focus-visible { color: #ffc34d; border-color: #ffc34d; background: rgba(255,195,77,.08); outline: none; }
+    .bot-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; }
+    .bot-metric { padding: 13px 14px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08); border-radius: 7px; }
+    .bot-metric span { display: block; color: #6f88aa; font: 900 9px Arial, sans-serif; letter-spacing: 1.3px; text-transform: uppercase; }
+    .bot-metric strong { display: block; margin-top: 5px; color: #fff; font: 900 23px 'Arial Black', Arial, sans-serif; }
+    .bot-metric:first-child strong { color: #8fd0ff; }
+    .bot-panel-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, .9fr); gap: 12px; margin-top: 12px; }
+    .bot-control-card { min-height: 112px; padding: 15px 16px; background: rgba(8,14,24,.52); border: 1px solid rgba(255,255,255,.09); border-radius: 8px; }
+    .bot-control-label { display: block; color: #7d95b6; font: 900 9px Arial, sans-serif; letter-spacing: 1.4px; text-transform: uppercase; }
+    .bot-toggle { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; cursor: pointer; }
+    .bot-toggle-copy strong { display: block; color: #fff; font: 900 14px Arial, sans-serif; }
+    .bot-toggle-copy small { display: block; margin-top: 4px; color: #7189aa; font: 11px Arial, sans-serif; }
+    .bot-toggle input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    .bot-toggle-track { position: relative; flex: 0 0 auto; width: 48px; height: 26px; border: 1px solid rgba(255,255,255,.18); border-radius: 20px; background: #202c3c; transition: background .16s, border-color .16s; }
+    .bot-toggle-track::after { content: ''; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #8292a8; box-shadow: 0 2px 5px rgba(0,0,0,.4); transition: transform .16s, background .16s; }
+    .bot-toggle input:checked + .bot-toggle-track { border-color: rgba(130,223,154,.6); background: rgba(71,155,94,.44); }
+    .bot-toggle input:checked + .bot-toggle-track::after { transform: translateX(22px); background: #8ce7a4; }
+    .bot-toggle input:focus-visible + .bot-toggle-track { outline: 2px solid #ffc34d; outline-offset: 3px; }
+    .bot-stepper { display: grid; grid-template-columns: 42px minmax(62px, 1fr) 42px; gap: 7px; margin-top: 14px; }
+    .bot-stepper button, #bot-count {
+      height: 42px; border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
+      background: rgba(255,255,255,.055); color: #fff; text-align: center;
+    }
+    .bot-stepper button { cursor: pointer; font: 900 22px Arial, sans-serif; transition: color .15s, border-color .15s, background .15s; }
+    .bot-stepper button:hover, .bot-stepper button:focus-visible { color: #ffc34d; border-color: #ffc34d; background: rgba(255,195,77,.08); outline: none; }
+    #bot-count { width: 100%; padding: 0 5px; outline: none; font: 900 19px 'Arial Black', Arial, sans-serif; user-select: text; appearance: textfield; }
+    #bot-count::-webkit-inner-spin-button, #bot-count::-webkit-outer-spin-button { appearance: none; margin: 0; }
+    #bot-count:focus { border-color: #8fd0ff; box-shadow: 0 0 0 2px rgba(143,208,255,.12); }
+    .bot-panel-action-row { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
+    #bot-apply {
+      flex: 0 0 auto; min-width: 178px; padding: 12px 20px; border: 1px solid #ffc34d; border-radius: 6px;
+      background: linear-gradient(180deg, #ffd36d, #ed9e2d); color: #19130a; cursor: pointer;
+      box-shadow: 0 5px 0 #965b13, 0 10px 22px rgba(0,0,0,.25); font: 900 12px Arial, sans-serif; letter-spacing: 1.1px;
+      transition: transform .1s, box-shadow .1s, filter .1s;
+    }
+    #bot-apply:hover, #bot-apply:focus-visible { filter: brightness(1.07); transform: translateY(1px); box-shadow: 0 4px 0 #965b13, 0 8px 18px rgba(0,0,0,.25); outline: none; }
+    #bot-apply:disabled, .bot-stepper button:disabled, #bot-count:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+    #bot-panel-status { min-height: 18px; color: #8ce7a4; font: 700 12px/1.45 Arial, sans-serif; }
+    #bot-panel-note { margin-top: 15px; padding: 11px 13px; color: #7890b1; background: rgba(75,109,154,.08); border-left: 3px solid #567ca9; border-radius: 3px; font: 11px/1.55 Arial, sans-serif; }
+    #bot-panel[data-locked="true"] .bot-toggle { opacity: .45; cursor: not-allowed; }
+    #bot-panel[data-locked="true"] #bot-panel-note { color: #c9ad72; border-left-color: #ffc34d; background: rgba(255,195,77,.07); }
+    #bot-panel[data-pending="true"] .bot-panel-controls { opacity: .62; }
+    #bot-panel[data-pending="true"] #bot-panel-status { color: #ffd36d; }
+    .bot-panel-footer { display: flex; justify-content: space-between; gap: 14px; margin-top: 16px; padding-top: 13px; border-top: 1px solid rgba(255,255,255,.08); color: #617a9c; font: 900 9px Arial, sans-serif; letter-spacing: 1.2px; }
+    .bot-panel-footer kbd { padding: 2px 6px; border: 1px solid rgba(255,255,255,.18); border-radius: 3px; background: rgba(255,255,255,.06); color: #c9d8eb; font: inherit; }
+    @media (max-width: 600px) {
+      #bot-panel { padding: 10px; }
+      .bot-panel-window { max-height: calc(100vh - 20px); padding: 20px 16px 16px; }
+      .bot-panel-header { gap: 12px; }
+      .bot-metrics { gap: 6px; }
+      .bot-metric { padding: 11px 9px; }
+      .bot-metric span { font-size: 8px; letter-spacing: .7px; }
+      .bot-panel-controls { grid-template-columns: 1fr; }
+      .bot-panel-action-row { align-items: stretch; flex-direction: column; }
+      #bot-apply { width: 100%; }
+      .bot-panel-footer { align-items: start; flex-direction: column; }
+    }
     </style>
 </head>
 <body>
@@ -586,9 +759,9 @@
     <div id="money" class="hud-text">$ 0</div>
     <div id="match-banner" class="hud-text"></div>
 
-    <div id="podium" data-stage="mode">
+    <div id="podium" data-stage="mode" role="dialog" aria-modal="true" aria-labelledby="podium-title">
       <div class="podium-topline"><span>POST-MATCH // VOTACIÓN</span><b id="podium-phase">FASE 1 / 2</b></div>
-      <h2>FIN DE LA PARTIDA</h2>
+      <h2 id="podium-title">FIN DE LA PARTIDA</h2>
       <div id="podium-winner"></div>
       <div id="podium-rows"></div>
       <div id="podium-stage-kicker">SIGUIENTE PARTIDA</div>
@@ -607,17 +780,17 @@
       </section>
       <div id="podium-votes"></div>
       <div id="podium-count"></div>
-      <div class="podium-footer"><span>VOTA CON CLICK</span><span>1–4 MODO · 5–6 MAPA</span></div>
+      <div class="podium-footer"><span>VOTA CON CLICK</span><span id="podium-key-hint">1–4 MODO · 5–6 MAPA</span></div>
     </div>
 
     <div id="team-picker">
       <h2>ELIGE EQUIPO</h2>
       <div class="tp-options">
-        <span class="tp-r"><b>[1]</b> ROJO</span>
-        <span class="tp-b"><b>[2]</b> AZUL</span>
-        <span class="tp-a"><b>[3]</b> Automático</span>
+        <span class="tp-r"><b>[<span id="team-key-red">1</span>]</b> ROJO</span>
+        <span class="tp-b"><b>[<span id="team-key-blue">2</span>]</b> AZUL</span>
+        <span class="tp-a"><b>[<span id="team-key-auto">3</span>]</b> Automático</span>
       </div>
-      <div class="tp-hint">(en partida: tecla M para cambiar de equipo)</div>
+      <div class="tp-hint">(en partida: tecla <b id="team-action-shortcut">M</b> para cambiar de equipo)</div>
     </div>
     <div id="killfeed"></div>
     <div id="announce" class="hud-text"></div>
@@ -661,6 +834,7 @@
       <header id="menu-topbar">
         <div class="menu-brand">PIUM <span>PIUM</span><small>ONLINE COMBAT</small></div>
         <div class="menu-profile"><span>OPERADOR</span><strong id="menu-player-label">INVITADO</strong><em id="net-status" class="offline">conectando...</em></div>
+        <button id="quick-mute" type="button" aria-pressed="false" aria-label="Silenciar juego"><span id="quick-mute-icon" aria-hidden="true">🔊</span><span id="quick-mute-label">AUDIO</span></button>
         <nav id="menu-nav" aria-label="Navegación principal">
           <button type="button" class="menu-nav-btn active" data-menu-screen="play">JUGAR</button>
           <button type="button" class="menu-nav-btn" data-menu-screen="arsenal">ARSENAL</button>
@@ -670,18 +844,18 @@
       </header>
       <main id="menu-main">
       <section id="menu-screen-play" class="menu-screen active">
-    <h1>PIUM PIUM <span class="io">PIUM</span></h1>
-    <div class="subtitle">shooter multijugador en primera persona</div>
-    <input id="name-input" type="text" maxlength="14" placeholder="Tu nombre" autocomplete="off" spellcheck="false" />
-    <button id="play-btn">JUGAR</button>
-    <div class="controls">
-      <div class="menu-buy-tip"><b>B</b> abrir arsenal y comprar armas durante la partida</div>
-      <b>WASD</b> moverse &nbsp;·&nbsp; <b>ESPACIO</b> saltar (mantén para bunny-hop) &nbsp;·&nbsp; <b>SHIFT</b> deslizarse<br/>
-      <b>CLIC IZQ</b> disparar &nbsp;·&nbsp; <b>CLIC DER</b> apuntar &nbsp;·&nbsp; <b>R</b> recargar &nbsp;·&nbsp; <b>1-5</b> armas &nbsp;·&nbsp; <b>G</b> granada &nbsp;·&nbsp; <b>V</b> cuchillo<br/>
-      <b>TAB</b> marcador &nbsp;·&nbsp; <b>M</b> cambiar equipo &nbsp;·&nbsp; <b>ESC</b> menú &nbsp;·&nbsp; cada baja da <b>$100</b> para comprar armas<br/>
-      Modos: todos contra todos · equipos · búsqueda del arma · zombis — se vota al final de cada partida
+    <div class="hero-copy">
+      <div class="hero-kicker"><i></i> COMBATE ONLINE · SALAS CON BOTS CONFIGURABLES</div>
+      <h1>PIUM PIUM <span class="io">PIUM</span></h1>
+      <div class="subtitle">shooter multijugador rápido, preciso y con identidad propia</div>
+      <p class="hero-description">Entra a la arena, personaliza tu operador y domina siete clases de armas. Cada impacto, movimiento y decisión cuenta.</p>
+      <div class="hero-actions">
+        <input id="name-input" type="text" maxlength="14" placeholder="Tu nombre" autocomplete="off" spellcheck="false" aria-label="Nombre del operador" />
+        <button id="play-btn">JUGAR <span aria-hidden="true">→</span></button>
+      </div>
+      <div id="menu-control-summary" class="controls" aria-label="Controles principales"></div>
+      <div id="menu-stats"></div>
     </div>
-    <div id="menu-stats"></div>
 
     <div class="menu-hero-side">
       <div class="eyebrow">LOADOUT ACTIVO</div>
@@ -689,6 +863,11 @@
       <strong id="menu-quick-weapon">PISTOLA</strong>
       <span id="menu-quick-detail">12 / 72 · 2 granadas</span>
       <button type="button" class="ghost-action" data-menu-screen="operator">PERSONALIZAR EQUIPAMIENTO <span>→</span></button>
+    </div>
+    <div class="menu-info-grid">
+      <article class="info-card accent-card"><span class="card-label">SALA ACTUAL</span><strong id="menu-room-state">LISTA PARA COMBATIR</strong><p id="menu-room-detail">Bots ajustables y partida instantánea.</p><div class="card-status"><i></i><span id="menu-room-status">SERVIDOR DISPONIBLE</span></div></article>
+      <article class="info-card"><span class="card-label">CONTROL TÁCTICO</span><strong>AJUSTA TU EXPERIENCIA</strong><p>Audio, video, mira, accesibilidad y 22 acciones reasignables.</p><button type="button" class="text-action" data-menu-screen="options">ABRIR OPCIONES →</button></article>
+      <article class="info-card"><span class="card-label">ARSENAL</span><strong>7 CLASES DE ARMAS</strong><p>Perfiles únicos de daño, cadencia, control y alcance.</p><button type="button" class="text-action" data-menu-screen="arsenal">VER EQUIPAMIENTO →</button></article>
     </div>
     </section>
 
@@ -731,30 +910,124 @@
 
     <section id="menu-screen-arsenal" class="menu-screen">
       <div class="screen-heading"><div><div class="eyebrow">EQUIPAMIENTO</div><h2>ARSENAL</h2><p>Compra y equipa armas para la próxima partida.</p></div><div id="menu-arsenal-money" class="credit-display">$ 0</div></div>
+      <div class="menu-arsenal-toolbar" role="group" aria-label="Filtrar arsenal">
+        <button type="button" class="menu-arsenal-filter" data-menu-arsenal-filter="all" aria-pressed="true">TODAS</button>
+        <button type="button" class="menu-arsenal-filter" data-menu-arsenal-filter="pistols" aria-pressed="false">SECUNDARIAS</button>
+        <button type="button" class="menu-arsenal-filter" data-menu-arsenal-filter="primary" aria-pressed="false">PRINCIPALES</button>
+        <button type="button" class="menu-arsenal-filter" data-menu-arsenal-filter="special" aria-pressed="false">ESPECIAL</button>
+      </div>
       <div id="menu-arsenal-grid" class="menu-arsenal-grid"></div>
-      <div class="screen-footer">Las compras se guardan en este navegador · En partida puedes abrirlo con <b>B</b>.</div>
+      <div class="screen-footer">Las compras se guardan en este navegador · En partida puedes abrirlo con <b id="menu-arsenal-shortcut">B</b>.</div>
     </section>
 
     <section id="menu-screen-options" class="menu-screen">
-      <div class="screen-heading"><div><div class="eyebrow">CONFIGURACIÓN DEL SISTEMA</div><h2>OPCIONES</h2><p>Ajusta la experiencia a tu forma de jugar.</p></div><button id="reset-settings" type="button" class="secondary-action">RESTAURAR</button></div>
-      <div class="options-layout">
-        <div class="options-group"><div class="options-group-title">CÁMARA Y CONTROL</div><label class="option-row"><span><b>Campo de visión</b><small>Mayor FOV muestra más del combate.</small></span><span class="option-control"><output id="option-fov-value">78°</output><input id="option-fov" type="range" min="70" max="110" step="1" /></span></label><label class="option-row"><span><b>Sensibilidad del mouse</b><small>Velocidad de giro de la cámara.</small></span><span class="option-control"><output id="option-sensitivity-value">100%</output><input id="option-sensitivity" type="range" min="0.001" max="0.006" step="0.0001" /></span></label><label class="option-toggle"><span><b>Invertir eje Y</b><small>Invierte el movimiento vertical de la cámara.</small></span><input id="option-invert" type="checkbox" /></label></div>
-        <div class="options-group"><div class="options-group-title">AUDIO Y VISIBILIDAD</div><label class="option-row"><span><b>Volumen principal</b><small>Disparos, impactos y señales del combate.</small></span><span class="option-control"><output id="option-volume-value">45%</output><input id="option-volume" type="range" min="0" max="1" step="0.01" /></span></label><label class="option-toggle"><span><b>Mostrar FPS</b><small>Activa el contador de rendimiento en partida.</small></span><input id="option-show-fps" type="checkbox" /></label><label class="option-toggle"><span><b>Reducir movimiento</b><small>Reduce animaciones decorativas del menú.</small></span><input id="option-reduced-motion" type="checkbox" /></label></div>
+      <div class="screen-heading">
+        <div><div class="eyebrow">CENTRO DE CONFIGURACIÓN</div><h2>OPCIONES</h2><p>Audio, video, controles y accesibilidad en un solo lugar.</p></div>
+        <div class="settings-heading-actions"><button type="button" class="secondary-action" data-fullscreen-action aria-pressed="false">PANTALLA COMPLETA</button><button id="reset-settings" type="button" class="secondary-action">RESTAURAR TODO</button></div>
       </div>
-      <div class="screen-footer">Los cambios se guardan automáticamente en este navegador.</div>
+      <div class="settings-shell">
+        <div class="settings-tabs" role="tablist" aria-label="Categorías de configuración">
+          <button id="settings-tab-audio" type="button" class="settings-tab" role="tab" data-settings-tab="audio" aria-controls="settings-panel-audio" aria-selected="true">🔊 AUDIO</button>
+          <button id="settings-tab-video" type="button" class="settings-tab" role="tab" data-settings-tab="video" aria-controls="settings-panel-video" aria-selected="false" tabindex="-1">▣ VIDEO</button>
+          <button id="settings-tab-controls" type="button" class="settings-tab" role="tab" data-settings-tab="controls" aria-controls="settings-panel-controls" aria-selected="false" tabindex="-1">⌨ CONTROLES</button>
+          <button id="settings-tab-gameplay" type="button" class="settings-tab" role="tab" data-settings-tab="gameplay" aria-controls="settings-panel-gameplay" aria-selected="false" tabindex="-1">🎯 JUGABILIDAD</button>
+          <button id="settings-tab-accessibility" type="button" class="settings-tab" role="tab" data-settings-tab="accessibility" aria-controls="settings-panel-accessibility" aria-selected="false" tabindex="-1">◉ ACCESIBILIDAD</button>
+        </div>
+        <div class="settings-content">
+          <section id="settings-panel-audio" class="settings-panel" role="tabpanel" data-settings-panel="audio" aria-labelledby="settings-tab-audio" tabindex="0">
+            <header class="settings-panel-heading"><div><h3>AUDIO</h3><p>Control completo de los sonidos de combate e interfaz.</p></div><span class="settings-panel-badge">CAMBIOS INMEDIATOS</span></header>
+            <div class="options-layout">
+              <div class="options-group full-width">
+                <div class="audio-hero">
+                  <div><strong>Sonido del juego</strong><p>Silencia disparos, impactos, avisos y todos los efectos. El volumen elegido no se pierde.</p><span id="settings-audio-state">ACTIVO · 45%</span></div>
+                  <button id="settings-mute-action" type="button" class="settings-action primary">🔇 SILENCIAR AHORA</button>
+                </div>
+                <label class="option-toggle"><span><b>Activar sonido</b><small>También puedes usar el botón de la barra superior.</small></span><input id="option-sound-enabled" type="checkbox" /></label>
+                <label class="option-row"><span><b>Volumen principal</b><small>Controla todo el audio del juego.</small></span><span class="option-control"><output id="option-volume-value" aria-live="polite">45%</output><input id="option-volume" type="range" min="0" max="1" step="0.01" /></span></label>
+                <div class="settings-note">Atajo para silenciar: <kbd id="mute-shortcut-label">P</kbd>. Puedes cambiarlo en la sección <b>Controles</b>. Este juego no utiliza música ni chat de voz, por eso no se muestran controles que no tendrían efecto.</div>
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-panel-video" class="settings-panel" role="tabpanel" data-settings-panel="video" aria-labelledby="settings-tab-video" tabindex="0" hidden>
+            <header class="settings-panel-heading"><div><h3>VIDEO</h3><p>Equilibra nitidez, rendimiento y visibilidad.</p></div><span class="settings-panel-badge">RENDER REAL</span></header>
+            <div class="options-layout">
+              <div class="options-group"><div class="options-group-title">IMAGEN</div>
+                <label class="option-row"><span><b>Escala de resolución</b><small>Reduce la carga gráfica manteniendo el tamaño de pantalla.</small></span><span class="option-control"><output id="option-render-scale-value">100%</output><input id="option-render-scale" type="range" min="0.5" max="1" step="0.05" /></span></label>
+                <label class="option-toggle"><span><b>Sombras dinámicas</b><small>Desactívalas para ganar rendimiento.</small></span><input id="option-shadows" type="checkbox" /></label>
+                <label class="option-row"><span><b>Calidad de sombras</b><small>Ajusta la definición y el coste de las sombras.</small></span><span class="option-control"><select id="option-shadow-quality"><option value="low">BAJA · 512</option><option value="medium">MEDIA · 1024</option><option value="high">ALTA · 2048</option></select></span></label>
+                <label class="option-toggle"><span><b>Mostrar FPS</b><small>Activa el contador de rendimiento durante la partida.</small></span><input id="option-show-fps" type="checkbox" /></label>
+              </div>
+              <div class="options-group"><div class="options-group-title">PANTALLA Y CÁMARA</div>
+                <label class="option-row"><span><b>Campo de visión</b><small>Mayor FOV muestra más del combate.</small></span><span class="option-control"><output id="option-fov-value">78°</output><input id="option-fov" type="range" min="70" max="110" step="1" /></span></label>
+                <label class="option-row"><span><b>Calidad de efectos</b><small>Controla humo, casquillos, impactos y partículas.</small></span><span class="option-control"><select id="option-effects-quality"><option value="low">RENDIMIENTO</option><option value="balanced">EQUILIBRADA</option><option value="high">ALTA</option></select></span></label>
+                <div class="option-row"><span><b>Pantalla completa</b><small>El navegador pedirá permiso al activarla.</small></span><button type="button" class="settings-action" data-fullscreen-action aria-pressed="false">PANTALLA COMPLETA</button></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-panel-controls" class="settings-panel" role="tabpanel" data-settings-panel="controls" aria-labelledby="settings-tab-controls" tabindex="0" hidden>
+            <header class="settings-panel-heading"><div><h3>CONTROLES</h3><p>Cambia el ratón y reasigna cada tecla jugable.</p></div><span class="settings-panel-badge">GUARDADO LOCAL</span></header>
+            <div class="options-layout">
+              <div class="options-group"><div class="options-group-title">RATÓN</div>
+                <label class="option-row"><span><b>Sensibilidad</b><small>Velocidad de giro de la cámara.</small></span><span class="option-control"><output id="option-sensitivity-value">100%</output><input id="option-sensitivity" type="range" min="0.001" max="0.006" step="0.0001" /></span></label>
+                <label class="option-toggle"><span><b>Invertir eje Y</b><small>Invierte el movimiento vertical de la cámara.</small></span><input id="option-invert" type="checkbox" /></label>
+              </div>
+              <div class="options-group"><div class="options-group-title">APUNTADO</div>
+                <label class="option-row"><span><b>Modo de apuntado</b><small>Mantener el botón o alternar con cada clic.</small></span><span class="option-control"><select id="option-aim-mode"><option value="hold">MANTENER</option><option value="toggle">ALTERNAR</option></select></span></label>
+                <div class="fixed-bindings"><div class="fixed-binding"><strong>Disparar</strong><kbd>MOUSE 1</kbd></div><div class="fixed-binding"><strong>Apuntar</strong><kbd>MOUSE 2</kbd></div><div class="fixed-binding"><strong>Menú / salida segura</strong><kbd>ESC</kbd></div></div>
+              </div>
+              <div class="options-group full-width"><div class="keybinding-toolbar"><div><div class="options-group-title">ASIGNACIÓN DE TECLAS</div><p>Selecciona una acción y pulsa la nueva tecla. Si está ocupada, ambas funciones intercambian sus teclas. TAB tiene protección especial para no romper la navegación.</p><div id="keybinding-status" class="settings-status">Cambios guardados automáticamente.</div></div><button id="reset-bindings" type="button" class="secondary-action">RESTAURAR TECLAS</button></div><div id="keybinding-list" aria-describedby="keybinding-status"></div></div>
+            </div>
+          </section>
+
+          <section id="settings-panel-gameplay" class="settings-panel" role="tabpanel" data-settings-panel="gameplay" aria-labelledby="settings-tab-gameplay" tabindex="0" hidden>
+            <header class="settings-panel-heading"><div><h3>JUGABILIDAD</h3><p>Ajusta respuesta, información y presentación del combate.</p></div><span class="settings-panel-badge">EN TIEMPO REAL</span></header>
+            <div class="options-layout">
+              <div class="options-group"><div class="options-group-title">MOVIMIENTO Y ARMA</div>
+                <label class="option-toggle"><span><b>Bunny-hop al mantener</b><small>Permite saltar continuamente manteniendo la tecla.</small></span><input id="option-bunny-hop" type="checkbox" /></label>
+                <label class="option-row"><span><b>Balanceo del arma</b><small>Intensidad del movimiento del arma al caminar.</small></span><span class="option-control"><output id="option-weapon-bob-value">100%</output><input id="option-weapon-bob" type="range" min="0" max="1" step="0.05" /></span></label>
+                <label class="option-row"><span><b>Sacudida de cámara</b><small>Intensidad al recibir daño.</small></span><span class="option-control"><output id="option-screen-shake-value">100%</output><input id="option-screen-shake" type="range" min="0" max="1" step="0.05" /></span></label>
+              </div>
+              <div class="options-group"><div class="options-group-title">HUD</div>
+                <label class="option-toggle"><span><b>Mostrar latencia</b><small>Muestra el ping de la conexión durante la partida.</small></span><input id="option-show-ping" type="checkbox" /></label>
+                <label class="option-toggle"><span><b>Mostrar mira</b><small>Oculta o muestra la mira central.</small></span><input id="option-crosshair-visible" type="checkbox" /></label>
+                <label class="option-row"><span><b>Tamaño de la mira</b><small>Ajusta la escala sin alterar la precisión.</small></span><span class="option-control"><output id="option-crosshair-scale-value">100%</output><input id="option-crosshair-scale" type="range" min="0.6" max="1.8" step="0.1" /></span></label>
+                <label class="option-row"><span><b>Color de la mira</b><small>Elige un color visible sobre el mapa.</small></span><span class="option-control"><select id="option-crosshair-color"><option value="#ffffff">BLANCO</option><option value="#ffc34d">AMARILLO</option><option value="#66e5ff">CIAN</option><option value="#ff6464">ROJO</option><option value="#79ef8d">VERDE</option></select></span></label>
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-panel-accessibility" class="settings-panel" role="tabpanel" data-settings-panel="accessibility" aria-labelledby="settings-tab-accessibility" tabindex="0" hidden>
+            <header class="settings-panel-heading"><div><h3>ACCESIBILIDAD</h3><p>Reduce estímulos y mejora la lectura de la interfaz.</p></div><span class="settings-panel-badge">CONFORT VISUAL</span></header>
+            <div class="options-layout">
+              <div class="options-group"><div class="options-group-title">MOVIMIENTO Y DAÑO</div>
+                <label class="option-toggle"><span><b>Reducir movimiento</b><small>Elimina animaciones decorativas, balanceo y sacudidas.</small></span><input id="option-reduced-motion" type="checkbox" /></label>
+                <label class="option-toggle"><span><b>Destello de daño</b><small>Muestra el borde rojo al recibir daño.</small></span><input id="option-damage-flash" type="checkbox" /></label>
+              </div>
+              <div class="options-group"><div class="options-group-title">LEGIBILIDAD</div>
+                <label class="option-toggle"><span><b>Contraste alto</b><small>Oscurece paneles y refuerza bordes y texto del HUD.</small></span><input id="option-high-contrast" type="checkbox" /></label>
+                <div class="settings-note">Los cambios se aplican al momento. <b>ESC</b> siempre permanece disponible como salida segura y no puede reasignarse.</div>
+              </div>
+            </div>
+          </section>
+          <div id="settings-save-status" class="settings-status" role="status" aria-live="polite">Cambios guardados automáticamente.</div>
+        </div>
+      </div>
+      <div class="screen-footer">Configuración guardada automáticamente en este navegador · Las opciones mostradas modifican funciones reales del juego.</div>
     </section>
     </main>
-    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v0.9 // ONLINE</span></footer>
+    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v1.1 // COMBAT UPDATE</span></footer>
     </div>
   </div>
 
-  <div id="buy-menu">
-    <section class="buy-window">
+  <div id="buy-menu" aria-hidden="true">
+    <section class="buy-window" role="dialog" aria-modal="true" aria-labelledby="buy-menu-title" aria-describedby="buy-menu-subtitle">
       <div class="buy-header">
         <div>
           <div class="buy-kicker">ARMORY // BUY PHASE</div>
-          <h2>ARSENAL TÁCTICO</h2>
-          <div class="buy-subtitle">Compra y equipa tu arma durante la partida</div>
+          <h2 id="buy-menu-title">ARSENAL TÁCTICO</h2>
+          <div id="buy-menu-subtitle" class="buy-subtitle">Compra y equipa tu arma durante la partida</div>
         </div>
         <div class="buy-header-actions">
           <div class="buy-balance"><span>SALDO</span><strong id="buy-money">$ 0</strong></div>
@@ -768,18 +1041,63 @@
           <button type="button" data-buy-category="pistols" class="buy-category">PISTOLAS <span>2</span></button>
           <button type="button" data-buy-category="smgs" class="buy-category">SMG / ESCOPETA <span>2</span></button>
           <button type="button" data-buy-category="rifles" class="buy-category">RIFLES / PESADAS <span>3</span></button>
-          <div class="buy-help"><b>CLICK</b> seleccionar<br/><b>B / ESC</b> cerrar<br/><b>1–7</b> acceso rápido</div>
+          <div class="buy-help"><b>CLICK</b> seleccionar<br/><b id="buy-help-close">B / ESC</b> cerrar<br/><b id="buy-help-slots">1 / 2 / 3 / 4 / 5 / 6 / 7</b> acceso rápido</div>
         </aside>
         <div class="buy-content">
           <div class="buy-grid-heading"><span>ARMAS DISPONIBLES</span><span>ESTADO · PRECIO</span></div>
           <div id="buy-grid"></div>
         </div>
       </div>
-      <div class="buy-footer">Pulsa B para cerrar · también puedes usar las teclas 1–7</div>
+      <div class="buy-footer">Pulsa <b id="buy-menu-shortcut">B</b> para cerrar · también puedes usar las teclas asignadas a las ranuras</div>
     </section>
   </div>
 
-  <div id="death">
+  <div id="bot-panel" aria-hidden="true">
+    <section class="bot-panel-window" role="dialog" aria-modal="true" aria-labelledby="bot-panel-title" aria-describedby="bot-panel-note">
+      <header class="bot-panel-header">
+        <div>
+          <div class="bot-panel-kicker">MATCH CONTROL // AI ROSTER</div>
+          <h2 id="bot-panel-title">CONTROL DE BOTS <span>· SALA ACTUAL</span></h2>
+          <p class="bot-panel-subtitle">Ajusta los combatientes controlados por IA sin salir de la partida.</p>
+        </div>
+        <button id="bot-close" type="button" aria-label="Cerrar control de bots">×</button>
+      </header>
+
+      <div class="bot-metrics" aria-label="Estado de la sala">
+        <div class="bot-metric"><span>Bots activos</span><strong id="bot-active">0</strong></div>
+        <div class="bot-metric"><span>Humanos</span><strong id="bot-humans">0</strong></div>
+        <div class="bot-metric"><span>Plazas totales</span><strong id="bot-slots">10</strong></div>
+      </div>
+
+      <div class="bot-panel-controls">
+        <div class="bot-control-card">
+          <span class="bot-control-label">Disponibilidad</span>
+          <label class="bot-toggle" for="bot-enabled">
+            <span class="bot-toggle-copy"><strong>Permitir bots</strong><small>Activa o retira la IA de esta sala.</small></span>
+            <input id="bot-enabled" type="checkbox" checked />
+            <span class="bot-toggle-track" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div class="bot-control-card">
+          <label class="bot-control-label" for="bot-count">Cantidad deseada</label>
+          <div class="bot-stepper">
+            <button id="bot-minus" type="button" aria-label="Quitar un bot">−</button>
+            <input id="bot-count" type="number" min="0" max="5" step="1" value="5" inputmode="numeric" aria-describedby="bot-panel-note" />
+            <button id="bot-plus" type="button" aria-label="Añadir un bot">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bot-panel-action-row">
+        <button id="bot-apply" type="button">APLICAR CAMBIOS</button>
+        <div id="bot-panel-status" role="status" aria-live="polite"></div>
+      </div>
+      <p id="bot-panel-note">El servidor ajustará la cantidad si faltan plazas. En el modo Zombis, las oleadas administran sus enemigos automáticamente.</p>
+      <footer class="bot-panel-footer"><span><kbd id="bot-panel-shortcut">H</kbd> ABRIR / CERRAR</span><span><kbd>ESC</kbd> CERRAR Y VOLVER AL COMBATE</span></footer>
+    </section>
+  </div>
+
+  <div id="death" role="alert" aria-live="assertive" aria-atomic="true">
     <h2>HAS MUERTO</h2>
     <p id="death-killer"></p>
     <div class="respawn">Reapareciendo<span id="respawn-dots">...</span></div>

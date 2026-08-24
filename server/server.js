@@ -7,18 +7,27 @@ import {
   buildMap, buildColliders, TOTAL_SLOTS, MAX_BOTS, BOT_NAMES, BOT_COLORS,
   MAPS, HATS, QUICK_CHAT, badgeFor,
 } from '../src/shared/mapdata.js';
+import {
+  DEFAULT_BOT_CONFIG, effectiveBotCount, sanitizeBotConfigUpdate,
+} from '../src/shared/bot-config.js';
 import { ServerBot, setBotMap } from './botai.js';
 import * as ranking from './ranking.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — servidor: sirve el cliente por HTTP y lleva la partida por
-// WebSocket. Los bots corren aquí y rellenan hasta TOTAL_SLOTS (10):
-// 1 humano → 9 bots, 7 humanos → 3 bots, 10+ humanos → 0 bots.
+// WebSocket. En modos normales, los bots configurables rellenan plazas sin
+// superar TOTAL_SLOTS ni MAX_BOTS. Las oleadas zombis se gestionan aparte.
 // ---------------------------------------------------------------------------
 
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
+const GAME_VERSION = '1.1.0';
+
+function isFiniteVectorPayload(value, maxAbs = 10000) {
+  return Array.isArray(value) && value.length === 3 &&
+    value.every((component) => Number.isFinite(component) && Math.abs(component) <= maxAbs);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -33,10 +42,17 @@ const MIME = {
 };
 
 const server = http.createServer((req, res) => {
-  const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  let urlPath;
+  try {
+    urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('URL malformada');
+    return;
+  }
   if (urlPath === '/salud') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('ok');
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ ok: true, version: GAME_VERSION }));
     return;
   }
   if (urlPath === '/ranking') {
@@ -59,9 +75,20 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
-  let rel = urlPath === '/' ? 'index.html' : urlPath.slice(1);
-  const file = path.normalize(path.join(ROOT, rel));
-  if (!file.startsWith(ROOT) || rel.startsWith('server') || rel.startsWith('.')) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { Allow: 'GET, HEAD' });
+    res.end('método no permitido');
+    return;
+  }
+  const requested = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
+  const normalized = path.normalize(requested);
+  const allowedRoots = ['src', 'assets', 'sounds', 'vendor'];
+  const allowed = normalized === 'index.html' ||
+    allowedRoots.some((directory) => normalized.startsWith(`${directory}${path.sep}`));
+  const file = path.resolve(ROOT, normalized);
+  const relative = path.relative(ROOT, file);
+  const outsideRoot = relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+  if (!allowed || outsideRoot) {
     res.writeHead(403); res.end(); return;
   }
   fs.readFile(file, (err, data) => {
@@ -69,12 +96,14 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
       'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'same-origin',
     });
-    res.end(data);
+    res.end(req.method === 'HEAD' ? undefined : data);
   });
 });
 
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
 // --- estado de la partida ---
 const colliders = [];
@@ -86,6 +115,7 @@ const kits = []; // loot del suelo: {id, x, y, z, k, a, expireAt}
 let nextId = 1;
 let botSerial = 0;
 let kitSerial = 0;
+let botConfig = { ...DEFAULT_BOT_CONFIG };
 
 function loadMap(mapId) {
   mapData = buildMap(mapId);
@@ -137,6 +167,26 @@ const match = {
   waveBreakAt: 0,
 };
 
+function botConfigData(reason = null) {
+  const data = {
+    enabled: botConfig.enabled,
+    count: botConfig.count,
+    actual: bots.length,
+    max: MAX_BOTS,
+    humans: players.size,
+    slots: TOTAL_SLOTS,
+    locked: match.mode === 'zombies',
+  };
+  if (reason) data.reason = reason;
+  return data;
+}
+
+function botConfigMsg(reason = null, requestId = null) {
+  const msg = { t: 'botcfg', ...botConfigData(reason) };
+  if (Number.isSafeInteger(requestId) && requestId >= 0) msg.rid = requestId;
+  return msg;
+}
+
 function matchMsg() {
   return {
     t: 'match', mode: match.mode, map: match.map, st: match.state,
@@ -145,6 +195,7 @@ function matchMsg() {
     ts: match.teamScores,
     wv: match.wave,
     zl: bots.filter((b) => b.zombie && !b.dead).length,
+    bc: botConfigData(),
   };
 }
 
@@ -188,6 +239,7 @@ function startMatch(mode, mapId = match.map) {
   }
   rebalanceBots();
   broadcast(matchMsg());
+  broadcast(botConfigMsg());
   broadcast({ t: 'aviso', txt: `▶ Nuevo modo: ${MODE_NAMES[mode]}` });
   console.log(`modo: ${mode}`);
 }
@@ -259,6 +311,7 @@ function spawnWave(n) {
   }
   broadcast({ t: 'aviso', txt: `🧟 Oleada ${n}: ${count} zombis` });
   broadcast(matchMsg());
+  broadcast(botConfigMsg());
 }
 
 function modeTick(t) {
@@ -327,6 +380,18 @@ function hitAllowed(p) {
   return p._hitCount <= 16;
 }
 
+function eventAllowed(player, event, limit) {
+  const time = now();
+  const windowKey = `_${event}Win`;
+  const countKey = `_${event}Count`;
+  if (!player[windowKey] || time - player[windowKey] > 1) {
+    player[windowKey] = time;
+    player[countKey] = 0;
+  }
+  player[countKey]++;
+  return player[countKey] <= limit;
+}
+
 function distOk(a, b, max = 130) {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= max;
 }
@@ -342,11 +407,11 @@ function broadcast(msg, exceptId = null) {
   }
 }
 
-// bots = hueco libre hasta TOTAL_SLOTS, con tope de MAX_BOTS.
+// bots = cantidad configurada que cabe hasta TOTAL_SLOTS, con tope de MAX_BOTS.
 // En zombis no aplica (las oleadas gestionan los bots).
 function rebalanceBots() {
   if (match.mode === 'zombies') return;
-  const target = Math.max(0, Math.min(MAX_BOTS, TOTAL_SLOTS - players.size));
+  const target = effectiveBotCount(botConfig, players.size, match.mode);
   while (bots.length > target) {
     const b = bots.pop();
     broadcast({ t: 'botbye', id: b.id });
@@ -428,6 +493,7 @@ wss.on('connection', (ws) => {
   ws.on('message', (raw) => {
     let m;
     try { m = JSON.parse(raw); } catch { return; }
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return;
 
     if (m.t === 'hola' && !me) {
       const sp = pickSpawn();
@@ -449,8 +515,12 @@ wss.on('connection', (ws) => {
         if (players.has(id)) players.get(id).badge = badgeFor(total);
       });
       rebalanceBots();
-      send(me, { t: 'hi', id, name: me.name, spawn: [sp.x, sp.y, sp.z], slots: TOTAL_SLOTS });
+      send(me, {
+        t: 'hi', id, name: me.name, spawn: [sp.x, sp.y, sp.z], slots: TOTAL_SLOTS,
+        bc: botConfigData(),
+      });
       send(me, matchMsg());
+      broadcast(botConfigMsg());
       if (match.mode === 'gun') send(me, { t: 'gun', gi: 0 });
       broadcast({ t: 'aviso', txt: `${me.name} entró a la partida` }, id);
       console.log(`+ ${me.name} (${players.size} jugadores, ${bots.length} bots)`);
@@ -460,19 +530,23 @@ wss.on('connection', (ws) => {
 
     if (m.t === 'st') {
       // estado del jugador: posición, orientación, velocidad
-      if (Array.isArray(m.p) && m.p.length === 3) {
-        me.pos = { x: +m.p[0] || 0, y: +m.p[1] || 0, z: +m.p[2] || 0 };
+      if (isFiniteVectorPayload(m.p, 1000)) {
+        me.pos = { x: m.p[0], y: m.p[1], z: m.p[2] };
       }
-      me.ry = +m.ry || 0;
-      me.rx = +m.rx || 0;
-      me.speed = Math.min(20, +m.s || 0);
+      if (Number.isFinite(m.ry)) me.ry = Math.atan2(Math.sin(m.ry), Math.cos(m.ry));
+      if (Number.isFinite(m.rx)) me.rx = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, m.rx));
+      if (Number.isFinite(m.s)) me.speed = Math.max(0, Math.min(20, m.s));
       me.sliding = !!m.sl;
     } else if (m.t === 'fire') {
-      if (Array.isArray(m.a) && Array.isArray(m.b)) {
+      const origin = isFiniteVectorPayload(m.a) ? { x: m.a[0], y: m.a[1], z: m.a[2] } : null;
+      if (me.alive && match.state === 'playing' && origin && isFiniteVectorPayload(m.b) &&
+          distOk(me.pos, origin, 6) && eventAllowed(me, 'fire', 30)) {
         broadcast({ t: 'fire', id, a: m.a, b: m.b, k: String(m.k || 'ar').slice(0, 8) }, id);
       }
     } else if (m.t === 'nade') {
-      if (Array.isArray(m.p) && m.p.length === 3 && Array.isArray(m.v) && m.v.length === 3) {
+      const origin = isFiniteVectorPayload(m.p) ? { x: m.p[0], y: m.p[1], z: m.p[2] } : null;
+      if (me.alive && match.state === 'playing' && origin && isFiniteVectorPayload(m.v, 80) &&
+          distOk(me.pos, origin, 6) && eventAllowed(me, 'nade', 6)) {
         broadcast({ t: 'nade', id, p: m.p, v: m.v, im: m.im ? 1 : 0 }, id);
       }
     } else if (m.t === 'hit') {
@@ -538,6 +612,34 @@ wss.on('connection', (ws) => {
         broadcast({ t: 'aviso', txt: `${me.name} cambió el modo` });
         startMatch(m.m);
       }
+    } else if (m.t === 'botcfg') {
+      const t = now();
+      const requestId = Number.isSafeInteger(m.rid) && m.rid >= 0 ? m.rid : null;
+      if (match.mode === 'zombies') {
+        send(me, botConfigMsg('zombies', requestId));
+        return;
+      }
+      if (me._lastBotConfig && t - me._lastBotConfig < 0.15) {
+        send(me, botConfigMsg('rate', requestId));
+        return;
+      }
+      me._lastBotConfig = t;
+      const nextConfig = sanitizeBotConfigUpdate(m);
+      if (!nextConfig) {
+        send(me, botConfigMsg('invalid', requestId));
+        return;
+      }
+      const changed = nextConfig.enabled !== botConfig.enabled || nextConfig.count !== botConfig.count;
+      if (!changed) {
+        send(me, botConfigMsg(null, requestId));
+        return;
+      }
+      botConfig = nextConfig;
+      rebalanceBots();
+      broadcast(botConfigMsg());
+      send(me, botConfigMsg(null, requestId));
+      const description = botConfig.enabled ? `${botConfig.count} bots` : 'bots desactivados';
+      broadcast({ t: 'aviso', txt: `${me.name}: ${description}` });
     } else if (m.t === 'vote') {
       if (match.state === 'podium') {
         if (match.podiumStage === 'mode' && MODES.includes(m.m)) match.votes.set(me.id, m.m);
@@ -557,6 +659,7 @@ wss.on('connection', (ws) => {
       broadcast({ t: 'aviso', txt: `${me.name} salió de la partida` });
       console.log(`- ${me.name} (${players.size} jugadores)`);
       rebalanceBots();
+      broadcast(botConfigMsg());
     }
   });
   ws.on('error', () => {});

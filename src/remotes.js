@@ -1,11 +1,30 @@
 import * as THREE from 'three';
-import { makeHumanoid, animateHumanoid } from './humanoid.js';
+import {
+  animateHumanoid,
+  animateHumanoidDeath,
+  disposeHumanoid,
+  makeHumanoid,
+  resetHumanoidPose,
+  triggerHumanoidHit,
+  triggerHumanoidShot,
+} from './humanoid.js';
+import { stablePoseSide } from './character-motion.js';
 
 // ---------------------------------------------------------------------------
 // Entidades remotas (otros jugadores y bots del servidor): marionetas que
 // interpolan hacia el último snapshot recibido. Sus mallas son golpeables
 // por el raycast de las armas (userData.net = {kind, id}).
 // ---------------------------------------------------------------------------
+
+export function sanitizeRemoteHealth(value, fallback = 100) {
+  const health = Number(value);
+  return Number.isFinite(health) ? Math.min(10000, Math.max(0, health)) : fallback;
+}
+
+export function normalizeRemoteYaw(value, fallback = 0) {
+  const yaw = Number(value);
+  return Number.isFinite(yaw) ? Math.atan2(Math.sin(yaw), Math.cos(yaw)) : fallback;
+}
 
 class RemoteEnt {
   constructor(scene, kind, id, name, color, hat, badge) {
@@ -18,33 +37,63 @@ class RemoteEnt {
     this.badge = badge || '';
     this.alive = true;
     this.deathAnim = 0;
+    this.deathSide = stablePoseSide(`${kind}:${id}`);
     this.speed = 0;
     this.aimPitch = 0;
     this.aiming = kind === 'pl';
+    this.health = 100;
+    this.hasState = false;
+    this.hitSerial = 0;
     this.walkRef = { t: Math.random() * 10 };
     this.target = new THREE.Vector3();
     this.targetYaw = 0;
 
     const displayName = (badge ? badge + ' ' : '') + name;
-    this.rig = makeHumanoid(color, displayName, (part) => ({ net: { kind, id }, part }), undefined, hat);
+    this.rig = makeHumanoid(color, displayName, (part) => ({
+      net: { kind, id },
+      part,
+      react: (intensity = 1) => this.reactToHit(intensity),
+    }), undefined, hat);
     scene.add(this.rig.group);
   }
 
-  applyState(p, ry, rx, s, al) {
-    this.target.set(p[0], p[1], p[2]);
-    this.targetYaw = ry;
-    this.aimPitch = rx || 0;
-    this.speed = s;
+  applyState(p, ry, rx, s, al, hp = this.health) {
+    if (Array.isArray(p) && p.length === 3 && p.every((value) => Number.isFinite(value) && Math.abs(value) <= 10000)) {
+      this.target.set(p[0], p[1], p[2]);
+    }
+    this.targetYaw = normalizeRemoteYaw(ry, this.targetYaw);
+    this.aimPitch = Number.isFinite(rx) ? Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rx)) : 0;
+    this.speed = Number.isFinite(s) ? Math.max(0, Math.min(20, s)) : 0;
+    // El protocolo no envia un flag ADS para jugadores. A velocidad de sprint
+    // bajamos el arma; al caminar o detenerse conserva la postura preparada.
+    if (this.kind === 'pl') this.aiming = this.speed < 6.1;
+    const nextHealth = sanitizeRemoteHealth(hp, this.health);
+    if (this.hasState && al && this.alive && nextHealth < this.health) {
+      this.hitSerial++;
+      this.reactToHit(Math.min(1, (this.health - nextHealth) / 45));
+    }
+    this.health = nextHealth;
+    this.hasState = true;
     if (!al && this.alive) {
       this.alive = false;
       this.deathAnim = 0.001; // arranca la animación de muerte
+      this.deathSide = this.rig.motion?.hitSide || stablePoseSide(`${this.kind}:${this.id}`);
     } else if (al && !this.alive) {
       this.alive = true;
       this.deathAnim = 0;
       this.rig.group.position.copy(this.target); // reaparecer: teletransporte
-      this.rig.group.rotation.x = 0;
+      resetHumanoidPose(this.rig);
       this.rig.group.visible = true;
     }
+  }
+
+  reactToHit(intensity = 1) {
+    const fallbackSide = (this.hitSerial + (this.deathSide > 0 ? 0 : 1)) % 2 === 0 ? 1 : -1;
+    triggerHumanoidHit(this.rig, intensity, fallbackSide);
+  }
+
+  triggerShot(intensity = 0.8) {
+    if (this.alive) triggerHumanoidShot(this.rig, intensity);
   }
 
   update(dt) {
@@ -52,8 +101,9 @@ class RemoteEnt {
     if (!this.alive) {
       if (this.deathAnim > 0 && this.deathAnim < 1) {
         this.deathAnim = Math.min(1, this.deathAnim + dt * 3.5);
-        g.rotation.x = -this.deathAnim * Math.PI / 2;
+        animateHumanoidDeath(this.rig, this.deathAnim, this.deathSide);
       } else if (this.deathAnim >= 1) {
+        animateHumanoidDeath(this.rig, 1, this.deathSide);
         g.position.y -= dt * 1.5;
         if (g.position.y < this.target.y - 2.5) g.visible = false;
       }
@@ -65,9 +115,7 @@ class RemoteEnt {
     } else {
       g.position.lerp(this.target, Math.min(1, dt * 12));
     }
-    let dy = this.targetYaw - g.rotation.y;
-    while (dy > Math.PI) dy -= Math.PI * 2;
-    while (dy < -Math.PI) dy += Math.PI * 2;
+    const dy = normalizeRemoteYaw(this.targetYaw - g.rotation.y, 0);
     g.rotation.y += dy * Math.min(1, dt * 12);
 
     animateHumanoid(this.rig, dt, this.speed, this.walkRef, this.aiming, this.aimPitch);
@@ -83,6 +131,7 @@ class RemoteEnt {
 
   dispose() {
     this.scene.remove(this.rig.group);
+    disposeHumanoid(this.rig);
   }
 }
 
@@ -109,7 +158,7 @@ export class Remotes {
         ent = new RemoteEnt(this.scene, 'pl', p.id, p.n, p.c, hat, badge);
         this.players.set(p.id, ent);
       }
-      ent.applyState(p.p, p.ry, p.rx, p.s, !!p.al);
+      ent.applyState(p.p, p.ry, p.rx, p.s, !!p.al, p.hp);
     }
     for (const b of snap.bots) {
       seenBot.add(b.id);
@@ -124,7 +173,7 @@ export class Remotes {
         this.bots.set(b.id, ent);
       }
       ent.aiming = !!b.en;
-      ent.applyState(b.p, b.ry, 0, b.s, !!b.al);
+      ent.applyState(b.p, b.ry, 0, b.s, !!b.al, b.hp);
     }
     for (const [id, ent] of this.players) {
       if (!seenPl.has(id)) { ent.dispose(); this.players.delete(id); }
@@ -153,5 +202,13 @@ export class Remotes {
 
   find(kind, id) {
     return kind === 'pl' ? this.players.get(id) : this.bots.get(id);
+  }
+
+  triggerShot(kind, id, intensity = 0.8) {
+    this.find(kind, id)?.triggerShot(intensity);
+  }
+
+  triggerHit(kind, id, intensity = 1) {
+    this.find(kind, id)?.reactToHit(intensity);
   }
 }

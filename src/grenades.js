@@ -11,6 +11,21 @@ const RADIUS = 6;
 const MAX_DMG = 90;
 const GRAVITY = 22;
 const PER_LIFE = 2;
+export const MAX_REMOTE_GRENADES = 48;
+
+export function validRemoteGrenadePayload(position, velocity) {
+  const validVector = (value, maxAbs) => Array.isArray(value) && value.length === 3 &&
+    value.every((component) => Number.isFinite(component) && Math.abs(component) <= maxAbs);
+  return validVector(position, 10000) && validVector(velocity, 80);
+}
+
+function disposeGrenadeMesh(mesh) {
+  mesh.traverse((object) => {
+    if (object.geometry) object.geometry.dispose();
+    const materials = object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : [];
+    for (const material of materials) material.dispose();
+  });
+}
 
 function buildGrenadeMesh() {
   const g = new THREE.Group();
@@ -88,6 +103,15 @@ export class GrenadeManager {
 
   // granada de otro jugador (visual)
   spawnRemote(p, v, impact = false) {
+    if (!validRemoteGrenadePayload(p, v)) return false;
+    const remoteIndices = this.grenades
+      .map((grenade, index) => (!grenade.mine ? index : -1))
+      .filter((index) => index >= 0);
+    if (remoteIndices.length >= MAX_REMOTE_GRENADES) {
+      const [oldest] = this.grenades.splice(remoteIndices[0], 1);
+      this.scene.remove(oldest.mesh);
+      disposeGrenadeMesh(oldest.mesh);
+    }
     this.grenades.push(new Grenade(
       this.scene,
       new THREE.Vector3(p[0], p[1], p[2]),
@@ -95,6 +119,7 @@ export class GrenadeManager {
       false,
       impact,
     ));
+    return true;
   }
 
   _collides(p) {
@@ -146,6 +171,7 @@ export class GrenadeManager {
 
   _explode(g, playerEye) {
     this.scene.remove(g.mesh);
+    disposeGrenadeMesh(g.mesh);
     this.effects.explosion(g.pos);
     const dist = playerEye ? g.pos.distanceTo(playerEye) : 99;
     this.audio.boom(Math.max(0.15, Math.min(1, 1 - dist / 55)));

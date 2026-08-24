@@ -13,6 +13,19 @@ const LIFETIMES = {
   trail: 0.2,
 };
 
+const SURFACE_PROFILES = Object.freeze({
+  concrete: Object.freeze({ color: 0xd8d0b8, texture: 'smoke', speed: [0.3, 1.6], size: [0.045, 0.13], life: [0.16, 0.38], additive: false }),
+  metal: Object.freeze({ color: 0xffc45e, texture: 'impact', speed: [1.4, 4.2], size: [0.025, 0.075], life: [0.1, 0.28], additive: true }),
+  wood: Object.freeze({ color: 0xc79352, texture: 'impact', speed: [0.65, 2.5], size: [0.04, 0.12], life: [0.18, 0.42], additive: false }),
+  flesh: Object.freeze({ color: 0xb63b37, texture: 'smoke', speed: [0.25, 1.25], size: [0.05, 0.15], life: [0.12, 0.3], additive: false }),
+});
+
+const QUALITY = Object.freeze({
+  low: Object.freeze({ active: 32, particles: 0.48, smoke: false }),
+  balanced: Object.freeze({ active: 52, particles: 0.76, smoke: true }),
+  high: Object.freeze({ active: 72, particles: 1, smoke: true }),
+});
+
 export function effectProfile(kind) {
   if (kind === 'explosion') return { layers: ['flash', 'fire', 'shockwave', 'smoke', 'embers'] };
   if (kind === 'muzzle') return { layers: ['flash', 'sparks'] };
@@ -27,6 +40,10 @@ export function effectLifetime(kind) {
   return LIFETIMES[kind] || 0.35;
 }
 
+export function impactSurfaceProfile(surface = 'concrete') {
+  return SURFACE_PROFILES[surface] || SURFACE_PROFILES.concrete;
+}
+
 export class QuarksEffects {
   constructor(scene, THREE, quarks) {
     this.scene = scene;
@@ -34,6 +51,8 @@ export class QuarksEffects {
     this.quarks = quarks;
     this.batch = new quarks.BatchedRenderer();
     this.active = new Set();
+    this.quality = 'balanced';
+    this.qualityProfile = QUALITY.balanced;
     this.texture = this.createTexture();
     this.textures = {
       default: this.loadTexture('/assets/effects/particle_default.png'),
@@ -72,9 +91,21 @@ export class QuarksEffects {
     this.batch.update(dt);
   }
 
+  setQuality(value = 'balanced') {
+    this.quality = Object.hasOwn(QUALITY, value) ? value : 'balanced';
+    this.qualityProfile = QUALITY[this.quality];
+  }
+
   burst(position, kind, options) {
     const { THREE, quarks } = this;
-    const count = clampParticleCount(options.count, 1, options.maxCount || 24);
+    // Bajo fuego automático es preferible omitir una partícula secundaria que
+    // dejar cientos de sistemas vivos y provocar tirones en el frame principal.
+    if (this.active.size >= this.qualityProfile.active) return null;
+    const count = clampParticleCount(
+      Number(options.count) * this.qualityProfile.particles,
+      1,
+      options.maxCount || 24,
+    );
     const duration = options.duration || 0.06;
     const material = new THREE.MeshBasicMaterial({
       color: options.color,
@@ -124,7 +155,7 @@ export class QuarksEffects {
 
   muzzle(position, kind = 'pistol') {
     const color = kind === 'launcher' ? 0xff7b35 : kind === 'sniper' ? 0x9bd4ff : 0xffd66b;
-    this.burst(position, 'muzzle', {
+    if (this.qualityProfile.smoke) this.burst(position, 'muzzle', {
       color,
       texture: 'default',
       count: kind === 'shotgun' ? 2 : 1,
@@ -146,21 +177,47 @@ export class QuarksEffects {
       size: [0.04, kind === 'shotgun' ? 0.13 : 0.09],
       opacity: 0.9,
     });
+    this.burst(position, 'muzzle', {
+      color: 0x77716c,
+      texture: 'smoke',
+      count: kind === 'shotgun' || kind === 'launcher' ? 3 : 1,
+      maxCount: 3,
+      duration: 0.025,
+      life: [0.22, 0.48],
+      speed: [0.08, 0.42],
+      size: [0.08, kind === 'shotgun' ? 0.24 : 0.17],
+      opacity: 0.28,
+      additive: false,
+    });
   }
 
-  impact(position, color = 0xd8d0b8, count = 5) {
+  impact(position, color = 0xd8d0b8, count = 5, surface = 'concrete') {
+    const profile = impactSurfaceProfile(surface);
     this.burst(position, 'impact', {
-      color,
-      texture: 'impact',
+      color: surface === 'concrete' ? color : profile.color,
+      texture: profile.texture,
       count,
       maxCount: 24,
       duration: 0.04,
-      life: [0.12, 0.3],
-      speed: [0.35, 1.8],
-      size: [0.035, 0.11],
+      life: profile.life,
+      speed: profile.speed,
+      size: profile.size,
       opacity: 0.85,
-      additive: false,
+      additive: profile.additive,
     });
+    if (surface === 'metal') {
+      this.burst(position, 'impact', {
+        color: 0xfff1b0,
+        texture: 'trail',
+        count: Math.min(5, Math.ceil(count / 2)),
+        maxCount: 5,
+        duration: 0.025,
+        life: [0.12, 0.24],
+        speed: [2.1, 5.2],
+        size: [0.02, 0.055],
+        opacity: 0.95,
+      });
+    }
   }
 
   explosion(position) {
