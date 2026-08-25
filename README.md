@@ -16,6 +16,8 @@ La actualización **Online Rooms 1.5.0** lleva la elección al menú previo: ant
 
 La actualización **Real Grip 1.6.0** sustituye la pose genérica de manos por agarres anatómicos específicos para las siete armas y el cuchillo. Índice, medio, anular, meñique y pulgar poseen articulaciones MCP/PIP/DIP independientes; el índice descansa sobre un gatillo visible y los otros dedos envuelven la empuñadura. La mano de apoyo cruza cada guardamanos, acompaña la bomba de la escopeta y alcanza cargador, tambor o cierre durante la recarga. Los brazos usan una cadena de dos huesos con proporciones constantes y hombros anclados durante el cuchillazo, mientras los nuevos materiales del guante conservan la lectura de nudillos, paneles y puntas de los dedos.
 
+El parche **Stable Arsenal 1.6.1** elimina los saltos al cambiar de categoría tanto en el arsenal principal como en el depósito de partida. Ambos conservan exactamente el mismo marco, usan catálogos internos desplazables y tarjetas compactas de proporción casi cuadrada; los filtros reinician su propio scroll y el diseño mantiene ancho, alto y alineación en escritorio, tablet y móvil.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.

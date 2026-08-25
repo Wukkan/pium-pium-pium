@@ -1008,6 +1008,7 @@ function renderMenuArsenal() {
   money.textContent = `$ ${weapons.money}`;
   clearWeaponPreviewHandles(menuWeaponPreviewHandles);
   grid.textContent = '';
+  grid.scrollTop = 0;
   document.querySelectorAll('[data-menu-arsenal-filter]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.menuArsenalFilter === menuArsenalFilter));
   });
@@ -2193,6 +2194,7 @@ function renderBuyMenu() {
   });
   clearWeaponPreviewHandles(buyWeaponPreviewHandles);
   grid.textContent = '';
+  grid.scrollTop = 0;
   const visibleSlots = weapons.slots.filter((key) => {
     if (buyCategory === 'all') return true;
     const kind = WEAPON_DEFS[key].kind;
