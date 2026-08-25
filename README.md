@@ -22,6 +22,8 @@ El parche **Tactical Knife 1.6.2** reconstruye la presentación del cuchillo en 
 
 El parche **Solid Cover 1.6.3** corrige las juntas abiertas que produjo el redondeado independiente de cada bloque. Arena y Ciudad vuelven a llenar exactamente el mismo volumen que sus colliders y suavizan las aristas mediante iluminación, sin recortar cobertura. El suelo continúa bajo los muros, el alero suroeste y el mástil de Arena quedan apoyados, y el puente de Ciudad se une a la azotea con sus dos barandas asentadas. Nuevas regresiones comprueban esquinas con raycast, continuidad estructural, respawns y presupuesto geométrico.
 
+El parche **Pium Signature 1.6.4** reemplaza las grabaciones genéricas de disparo por una identidad procedural original. Cada bala articula un ataque corto, un barrido descendente "piu" y una cola grave "m"; las armas automáticas forman naturalmente el nombre **PIUM PIUM PIUM**. Las siete clases conservan peso, duración y tono propios, mientras disparos remotos y bots mantienen distancia, orientación y filtrado espacial. El sintetizador usa como máximo dos voces breves por bala y el silencio evita trabajo de audio innecesario.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.

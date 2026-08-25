@@ -1,9 +1,53 @@
 // ---------------------------------------------------------------------------
-// Mezcla de combate con WebAudio: usa muestras locales para armas y síntesis
-// ligera como respaldo y para impactos, interfaz, recarga y movimiento.
+// Mezcla de combate con WebAudio. Los disparos usan una firma procedural
+// original: ataque consonante, barrido tonal "piu" y cola grave "m".
 // ---------------------------------------------------------------------------
 
 export const MAX_AUDIO_VOICES = 28;
+
+const freezePiumProfile = (profile) => Object.freeze(profile);
+
+export const PIUM_SHOT_PROFILES = Object.freeze({
+  pistol: freezePiumProfile({
+    startHz: 1850, midHz: 760, endHz: 170, duration: 0.115, knee: 0.34,
+    gain: 0.38, noiseDuration: 0.018, noiseHz: 3400, noiseQ: 1.2, noiseGain: 0.14,
+    filterStartHz: 7200, filterEndHz: 1500, wave: 'triangle', variation: 0.024,
+  }),
+  shotgun: freezePiumProfile({
+    startHz: 1050, midHz: 420, endHz: 65, duration: 0.16, knee: 0.32,
+    gain: 0.5, noiseDuration: 0.055, noiseHz: 900, noiseQ: 0.75, noiseGain: 0.38,
+    filterStartHz: 4200, filterEndHz: 850, wave: 'triangle', variation: 0.018,
+  }),
+  smg: freezePiumProfile({
+    startHz: 2100, midHz: 1050, endHz: 260, duration: 0.058, knee: 0.32,
+    gain: 0.25, noiseDuration: 0.012, noiseHz: 4200, noiseQ: 1.4, noiseGain: 0.1,
+    filterStartHz: 9000, filterEndHz: 2500, wave: 'triangle', variation: 0.026,
+  }),
+  ar: freezePiumProfile({
+    startHz: 1650, midHz: 680, endHz: 135, duration: 0.1, knee: 0.34,
+    gain: 0.34, noiseDuration: 0.022, noiseHz: 2600, noiseQ: 1, noiseGain: 0.18,
+    filterStartHz: 7600, filterEndHz: 1300, wave: 'triangle', variation: 0.022,
+  }),
+  sniper: freezePiumProfile({
+    startHz: 1400, midHz: 460, endHz: 48, duration: 0.22, knee: 0.28,
+    gain: 0.55, noiseDuration: 0.06, noiseHz: 650, noiseQ: 0.65, noiseGain: 0.42,
+    filterStartHz: 6000, filterEndHz: 700, wave: 'triangle', variation: 0.014,
+  }),
+  revolver: freezePiumProfile({
+    startHz: 1550, midHz: 540, endHz: 80, duration: 0.16, knee: 0.3,
+    gain: 0.47, noiseDuration: 0.045, noiseHz: 1500, noiseQ: 0.85, noiseGain: 0.28,
+    filterStartHz: 8200, filterEndHz: 1200, wave: 'triangle', variation: 0.018,
+  }),
+  launcher: freezePiumProfile({
+    startHz: 780, midHz: 260, endHz: 42, duration: 0.24, knee: 0.3,
+    gain: 0.56, noiseDuration: 0.07, noiseHz: 420, noiseQ: 0.6, noiseGain: 0.45,
+    filterStartHz: 3200, filterEndHz: 600, wave: 'sine', variation: 0.012,
+  }),
+});
+
+export function piumShotProfile(kind = 'ar') {
+  return PIUM_SHOT_PROFILES[kind] || PIUM_SHOT_PROFILES.ar;
+}
 
 export function spatialShotMix(source, listener, forward = { x: 0, z: -1 }, maxDistance = 80) {
   const dx = Number(source?.x || 0) - Number(listener?.x || 0);
@@ -37,7 +81,6 @@ export class AudioSys {
     this.master = null;
     this.masterVolume = 0.45;
     this.noiseBuffer = null;
-    this.samples = null; // grabaciones reales (CC0); si fallan, sintetizado
     this.compressor = null;
     this.buses = null;
     this.activeVoices = new Set();
@@ -79,7 +122,6 @@ export class AudioSys {
     const data = this.noiseBuffer.getChannelData(0);
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
 
-    this._loadSamples();
   }
 
   setMasterVolume(value) {
@@ -132,35 +174,6 @@ export class AudioSys {
     return filter;
   }
 
-  async _loadSamples() {
-    if (this.samples) return;
-    this.samples = {};
-    const files = {
-      ar: 'sounds/ar.wav',
-      smg: 'sounds/smg.wav',
-      sniper: 'sounds/sniper.wav',
-      shotgun: 'sounds/shotgun.wav',
-      pistol: 'sounds/smg.wav',     // misma CZ-52 real; el subfusil la acelera
-      revolver: 'sounds/sniper.wav', // Mosin agudizado = revólver potente
-      launcher: 'sounds/shotgun.wav', // escopeta grave = tubo del lanzagranadas
-    };
-    const decoded = await Promise.all([...new Set(Object.values(files))].map(async (url) => {
-      try {
-        const res = await fetch(url);
-        if (!res.ok) return null;
-        const buf = await res.arrayBuffer();
-        return [url, await this.ctx.decodeAudioData(buf)];
-      } catch {
-        return null; // se queda el sonido sintetizado
-      }
-    }));
-    const byUrl = new Map(decoded.filter(Boolean));
-    for (const [kind, url] of Object.entries(files)) {
-      const sample = byUrl.get(url);
-      if (sample) this.samples[kind] = sample;
-    }
-  }
-
   _noise(duration, filterFreq, filterQ, gain, decay, options = {}) {
     const t = this.ctx.currentTime + Math.max(0, options.delay || 0);
     const src = this.ctx.createBufferSource();
@@ -193,38 +206,65 @@ export class AudioSys {
     osc.stop(t + duration);
   }
 
+  _piumTone(profile, volume, spatial = null) {
+    const safeGain = Math.max(0, Number(profile?.gain) || 0) * volume;
+    if (safeGain <= 0) return false;
+    const t = this.ctx.currentTime;
+    const duration = Math.max(0.04, Number(profile.duration) || 0.1);
+    const knee = Math.max(0.18, Math.min(0.6, Number(profile.knee) || 0.34));
+    const variation = Math.max(0, Math.min(0.03, Number(profile.variation) || 0));
+    const pitchScale = 1 + (Math.random() * 2 - 1) * variation;
+    const startHz = Math.max(1, profile.startHz * pitchScale);
+    const midHz = Math.max(1, profile.midHz * pitchScale);
+    const endHz = Math.max(1, profile.endHz * pitchScale);
+    const attack = Math.min(0.006, duration * 0.08);
+    const osc = this.ctx.createOscillator();
+    if (!this._track(osc, 3)) return false;
+
+    osc.type = profile.wave || 'triangle';
+    osc.frequency.setValueAtTime(startHz, t);
+    osc.frequency.exponentialRampToValueAtTime(midHz, t + duration * knee);
+    osc.frequency.exponentialRampToValueAtTime(endHz, t + duration);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, safeGain), t + attack);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, safeGain * 0.2), t + duration * 0.68);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    const vowelFilter = this.ctx.createBiquadFilter();
+    vowelFilter.type = 'lowpass';
+    vowelFilter.Q.value = 0.72;
+    vowelFilter.frequency.setValueAtTime(Math.max(1, profile.filterStartHz), t);
+    vowelFilter.frequency.exponentialRampToValueAtTime(
+      Math.max(1, profile.filterEndHz),
+      t + duration,
+    );
+    osc.connect(gain).connect(vowelFilter).connect(this._route('weapons', spatial));
+    osc.start(t);
+    osc.stop(t + duration + 0.005);
+    return true;
+  }
+
   shot(kind = 'ar', volume = 1, spatial = null) {
     if (!this.ctx) return;
-    const safeVolume = Math.max(0, Math.min(1.2, Number(volume) || 0));
+    const numericVolume = Number(volume);
+    const safeVolume = Number.isFinite(numericVolume)
+      ? Math.max(0, Math.min(1.2, numericVolume))
+      : 0;
+    if (safeVolume <= 0 || this.masterVolume <= 0) return;
     const distanceSpatial = spatial || (safeVolume < 0.98
       ? { pan: 0, cutoff: 1800 + safeVolume * 12000 }
       : null);
-    // grabación real si está cargada (con variación de tono para no sonar robótico)
-    const sample = this.samples && this.samples[kind];
-    if (sample) {
-      const src = this.ctx.createBufferSource();
-      if (!this._track(src, 3)) return;
-      src.buffer = sample;
-      const rates = { smg: 1.22, revolver: 1.4, launcher: 0.62 };
-      src.playbackRate.value = (rates[kind] || 0.94) + Math.random() * 0.12;
-      const g = this.ctx.createGain();
-      const bases = { sniper: 0.95, shotgun: 0.85, smg: 0.5, pistol: 0.55, revolver: 0.8, launcher: 0.9 };
-      const base = bases[kind] || 0.65;
-      g.gain.value = base * safeVolume;
-      src.connect(g).connect(this._route('weapons', distanceSpatial));
-      src.start();
-      return;
-    }
-    if (kind === 'sniper') {
-      this._noise(0.4, 400, 0.7, 0.9 * safeVolume, 0.35, { bus: 'weapons', spatial: distanceSpatial, priority: 3 });
-      this._tone(160, 40, 0.3, 0.5 * safeVolume, 'triangle', { bus: 'weapons', spatial: distanceSpatial, priority: 3 });
-    } else if (kind === 'smg') {
-      this._noise(0.12, 1800, 1.2, 0.4 * safeVolume, 0.09, { bus: 'weapons', spatial: distanceSpatial, priority: 3 });
-      this._tone(220, 70, 0.07, 0.25 * safeVolume, 'square', { bus: 'weapons', spatial: distanceSpatial, priority: 3 });
-    } else {
-      this._noise(0.18, 1100, 1, 0.55 * safeVolume, 0.13, { bus: 'weapons', spatial: distanceSpatial, priority: 3 });
-      this._tone(190, 55, 0.1, 0.3 * safeVolume, 'triangle', { bus: 'weapons', spatial: distanceSpatial, priority: 3 });
-    }
+    const profile = piumShotProfile(kind);
+    this._piumTone(profile, safeVolume, distanceSpatial);
+    this._noise(
+      profile.noiseDuration,
+      profile.noiseHz,
+      profile.noiseQ,
+      profile.noiseGain * safeVolume,
+      Math.min(profile.noiseDuration * 0.82, profile.duration * 0.38),
+      { bus: 'weapons', spatial: distanceSpatial, priority: 3 },
+    );
   }
 
   shotAt(kind, source, listener, forward = { x: 0, z: -1 }, volume = 1) {
