@@ -4,43 +4,56 @@
 // ---------------------------------------------------------------------------
 
 export const MAX_AUDIO_VOICES = 28;
+export const AUDIO_FLOOR = 0.00001;
+export const AUDIO_MIX_PROFILE = Object.freeze({
+  headroom: 0.72,
+  compressorThreshold: -10,
+  compressorKnee: 10,
+  compressorRatio: 4,
+  compressorAttack: 0.004,
+  compressorRelease: 0.12,
+  limiterThreshold: -2,
+  limiterRatio: 20,
+  limiterAttack: 0.001,
+  limiterRelease: 0.055,
+});
 
 const freezePiumProfile = (profile) => Object.freeze(profile);
 
 export const PIUM_SHOT_PROFILES = Object.freeze({
   pistol: freezePiumProfile({
     startHz: 1850, midHz: 760, endHz: 170, duration: 0.115, knee: 0.34,
-    gain: 0.38, noiseDuration: 0.018, noiseHz: 3400, noiseQ: 1.2, noiseGain: 0.14,
+    gain: 0.38, noiseDuration: 0.014, noiseHz: 3400, noiseQ: 1, noiseGain: 0.1,
     filterStartHz: 7200, filterEndHz: 1500, wave: 'triangle', variation: 0.024,
   }),
   shotgun: freezePiumProfile({
     startHz: 1050, midHz: 420, endHz: 65, duration: 0.16, knee: 0.32,
-    gain: 0.5, noiseDuration: 0.055, noiseHz: 900, noiseQ: 0.75, noiseGain: 0.38,
+    gain: 0.5, noiseDuration: 0.042, noiseHz: 900, noiseQ: 0.8, noiseGain: 0.24,
     filterStartHz: 4200, filterEndHz: 850, wave: 'triangle', variation: 0.018,
   }),
   smg: freezePiumProfile({
     startHz: 2100, midHz: 1050, endHz: 260, duration: 0.058, knee: 0.32,
-    gain: 0.25, noiseDuration: 0.012, noiseHz: 4200, noiseQ: 1.4, noiseGain: 0.1,
+    gain: 0.25, noiseDuration: 0.009, noiseHz: 4200, noiseQ: 1.15, noiseGain: 0.065,
     filterStartHz: 9000, filterEndHz: 2500, wave: 'triangle', variation: 0.026,
   }),
   ar: freezePiumProfile({
     startHz: 1650, midHz: 680, endHz: 135, duration: 0.1, knee: 0.34,
-    gain: 0.34, noiseDuration: 0.022, noiseHz: 2600, noiseQ: 1, noiseGain: 0.18,
+    gain: 0.34, noiseDuration: 0.016, noiseHz: 2600, noiseQ: 0.9, noiseGain: 0.12,
     filterStartHz: 7600, filterEndHz: 1300, wave: 'triangle', variation: 0.022,
   }),
   sniper: freezePiumProfile({
     startHz: 1400, midHz: 460, endHz: 48, duration: 0.22, knee: 0.28,
-    gain: 0.55, noiseDuration: 0.06, noiseHz: 650, noiseQ: 0.65, noiseGain: 0.42,
+    gain: 0.55, noiseDuration: 0.045, noiseHz: 650, noiseQ: 0.7, noiseGain: 0.27,
     filterStartHz: 6000, filterEndHz: 700, wave: 'triangle', variation: 0.014,
   }),
   revolver: freezePiumProfile({
     startHz: 1550, midHz: 540, endHz: 80, duration: 0.16, knee: 0.3,
-    gain: 0.47, noiseDuration: 0.045, noiseHz: 1500, noiseQ: 0.85, noiseGain: 0.28,
+    gain: 0.47, noiseDuration: 0.032, noiseHz: 1500, noiseQ: 0.8, noiseGain: 0.19,
     filterStartHz: 8200, filterEndHz: 1200, wave: 'triangle', variation: 0.018,
   }),
   launcher: freezePiumProfile({
     startHz: 780, midHz: 260, endHz: 42, duration: 0.24, knee: 0.3,
-    gain: 0.56, noiseDuration: 0.07, noiseHz: 420, noiseQ: 0.6, noiseGain: 0.45,
+    gain: 0.56, noiseDuration: 0.052, noiseHz: 420, noiseQ: 0.65, noiseGain: 0.3,
     filterStartHz: 3200, filterEndHz: 600, wave: 'sine', variation: 0.012,
   }),
 });
@@ -55,7 +68,8 @@ export function spatialShotMix(source, listener, forward = { x: 0, z: -1 }, maxD
   const dz = Number(source?.z || 0) - Number(listener?.z || 0);
   const distance = Math.hypot(dx, dy, dz);
   const normalized = Math.min(1, Math.max(0, distance / Math.max(1, maxDistance)));
-  const gain = Math.max(0.035, 1 / (1 + (distance / 18) ** 1.65));
+  const baseGain = 1 / (1 + (distance / 18) ** 1.65);
+  const gain = distance >= maxDistance ? 0 : baseGain * Math.max(0, 1 - normalized ** 4);
   const fx = Number(forward?.x || 0);
   const fz = Number(forward?.z ?? -1);
   const fLength = Math.hypot(fx, fz) || 1;
@@ -65,7 +79,7 @@ export function spatialShotMix(source, listener, forward = { x: 0, z: -1 }, maxD
   const pan = Math.max(-1, Math.min(1, (dx / horizontal) * rightX + (dz / horizontal) * rightZ));
   return {
     distance,
-    gain: distance >= maxDistance ? 0.035 : gain,
+    gain,
     pan,
     cutoff: Math.max(1500, 15000 - normalized * 12800),
   };
@@ -81,12 +95,17 @@ export class AudioSys {
     this.master = null;
     this.masterVolume = 0.45;
     this.noiseBuffer = null;
+    this.mix = null;
     this.compressor = null;
+    this.limiter = null;
     this.buses = null;
     this.activeVoices = new Set();
     this.maxVoices = MAX_AUDIO_VOICES;
     this.voiceSerial = 0;
     this.lastImpactAt = Number.NEGATIVE_INFINITY;
+    this.lastHitAt = Number.NEGATIVE_INFINITY;
+    this.lastKillAt = Number.NEGATIVE_INFINITY;
+    this.lastDryAt = Number.NEGATIVE_INFINITY;
   }
 
   ensure() {
@@ -97,13 +116,21 @@ export class AudioSys {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.master = this.ctx.createGain();
     this.master.gain.value = this.masterVolume;
+    this.mix = this.ctx.createGain();
+    this.mix.gain.value = AUDIO_MIX_PROFILE.headroom;
     this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -12;
-    this.compressor.knee.value = 12;
-    this.compressor.ratio.value = 8;
-    this.compressor.attack.value = 0.003;
-    this.compressor.release.value = 0.16;
-    this.master.connect(this.compressor).connect(this.ctx.destination);
+    this.compressor.threshold.value = AUDIO_MIX_PROFILE.compressorThreshold;
+    this.compressor.knee.value = AUDIO_MIX_PROFILE.compressorKnee;
+    this.compressor.ratio.value = AUDIO_MIX_PROFILE.compressorRatio;
+    this.compressor.attack.value = AUDIO_MIX_PROFILE.compressorAttack;
+    this.compressor.release.value = AUDIO_MIX_PROFILE.compressorRelease;
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = AUDIO_MIX_PROFILE.limiterThreshold;
+    this.limiter.knee.value = 0;
+    this.limiter.ratio.value = AUDIO_MIX_PROFILE.limiterRatio;
+    this.limiter.attack.value = AUDIO_MIX_PROFILE.limiterAttack;
+    this.limiter.release.value = AUDIO_MIX_PROFILE.limiterRelease;
+    this.mix.connect(this.compressor).connect(this.limiter).connect(this.master).connect(this.ctx.destination);
 
     this.buses = {
       weapons: this.ctx.createGain(),
@@ -115,9 +142,9 @@ export class AudioSys {
     this.buses.impacts.gain.value = 0.82;
     this.buses.movement.gain.value = 0.72;
     this.buses.ui.gain.value = 0.78;
-    for (const bus of Object.values(this.buses)) bus.connect(this.master);
+    for (const bus of Object.values(this.buses)) bus.connect(this.mix);
 
-    const len = this.ctx.sampleRate * 0.5;
+    const len = Math.ceil(this.ctx.sampleRate * 1.25);
     this.noiseBuffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const data = this.noiseBuffer.getChannelData(0);
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
@@ -130,6 +157,10 @@ export class AudioSys {
       const t = this.ctx.currentTime;
       this.master.gain.cancelScheduledValues(t);
       this.master.gain.setTargetAtTime(this.masterVolume, t, 0.012);
+      if (this.masterVolume === 0) {
+        for (const voice of this.activeVoices) this._releaseVoice(voice, 0.012);
+        this.activeVoices.clear();
+      }
     }
   }
 
@@ -137,7 +168,48 @@ export class AudioSys {
     this.maxVoices = clampVoiceLimit(value);
   }
 
-  _track(source, priority = 1) {
+  stopCombat(fade = 0.01) {
+    for (const voice of [...this.activeVoices]) {
+      if (voice.bus === 'ui') continue;
+      this._releaseVoice(voice, fade);
+      this.activeVoices.delete(voice);
+    }
+  }
+
+  _releaseVoice(voice, fade = 0.006) {
+    if (!voice?.source) return;
+    const now = Number(this.ctx?.currentTime) || 0;
+    const release = Math.max(0.003, Number(fade) || 0.006);
+    try {
+      const param = voice.envelope?.gain;
+      if (param && voice.startAt <= now + 0.001) {
+        if (typeof param.cancelAndHoldAtTime === 'function') {
+          param.cancelAndHoldAtTime(now);
+        } else {
+          if (typeof param.cancelScheduledValues === 'function') param.cancelScheduledValues(now);
+          if (typeof param.setValueAtTime === 'function') {
+            const current = Math.max(
+              AUDIO_FLOOR,
+              Math.min(1.2, Number.isFinite(Number(param.value)) ? Number(param.value) : AUDIO_FLOOR),
+            );
+            param.setValueAtTime(current, now);
+          }
+        }
+        if (typeof param.linearRampToValueAtTime === 'function') {
+          param.linearRampToValueAtTime(AUDIO_FLOOR, now + release);
+        } else if (typeof param.setTargetAtTime === 'function') {
+          param.setTargetAtTime(AUDIO_FLOOR, now, release / 3);
+        }
+        voice.source.stop(now + release + 0.002);
+      } else {
+        voice.source.stop(now);
+      }
+    } catch {
+      try { voice.source.stop(); } catch { /* ya finalizó */ }
+    }
+  }
+
+  _track(source, priority = 1, options = {}) {
     if (this.activeVoices.size >= this.maxVoices) {
       let oldest = null;
       for (const voice of this.activeVoices) {
@@ -145,10 +217,19 @@ export class AudioSys {
           || (voice.priority === oldest.priority && voice.serial < oldest.serial)) oldest = voice;
       }
       if (!oldest || oldest.priority > priority) return false;
-      try { oldest.source.stop(); } catch { /* ya finalizó */ }
+      this._releaseVoice(oldest);
       this.activeVoices.delete(oldest);
     }
-    const voice = { source, priority, serial: this.voiceSerial++ };
+    const voice = {
+      source,
+      priority,
+      serial: this.voiceSerial++,
+      envelope: options.envelope || null,
+      bus: options.bus || 'ui',
+      startAt: Number.isFinite(Number(options.startAt))
+        ? Number(options.startAt)
+        : (Number(this.ctx?.currentTime) || 0),
+    };
     this.activeVoices.add(voice);
     const priorEnded = source.onended;
     source.onended = (...args) => {
@@ -163,7 +244,8 @@ export class AudioSys {
     if (!spatial) return bus;
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = Math.max(1200, Math.min(18000, spatial.cutoff || 18000));
+    const safeNyquist = Math.max(1200, (Number(this.ctx.sampleRate) || 48000) * 0.45);
+    filter.frequency.value = Math.max(1200, Math.min(safeNyquist, Number(spatial.cutoff) || safeNyquist));
     if (this.ctx.createStereoPanner) {
       const panner = this.ctx.createStereoPanner();
       panner.pan.value = Math.max(-1, Math.min(1, spatial.pan || 0));
@@ -175,38 +257,70 @@ export class AudioSys {
   }
 
   _noise(duration, filterFreq, filterQ, gain, decay, options = {}) {
-    const t = this.ctx.currentTime + Math.max(0, options.delay || 0);
+    if (!this.ctx || !this.noiseBuffer || this.masterVolume <= 0) return false;
+    const safeDuration = Math.max(
+      0.006,
+      Math.min(Number(this.noiseBuffer.duration) || 1.25, Number(duration) || 0.01),
+    );
+    const safeGain = Math.max(0, Math.min(1.2, Number(gain) || 0));
+    if (safeGain <= 0) return false;
+    const t = this.ctx.currentTime + Math.max(0, Number(options.delay) || 0);
     const src = this.ctx.createBufferSource();
-    if (!this._track(src, options.priority ?? 1)) return;
-    src.buffer = this.noiseBuffer;
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
-    filter.frequency.value = filterFreq;
-    filter.Q.value = filterQ;
+    const maxFrequency = Math.max(1200, (Number(this.ctx.sampleRate) || 48000) * 0.45);
+    filter.frequency.value = Math.max(20, Math.min(maxFrequency, Number(filterFreq) || 1000));
+    filter.Q.value = Math.max(0.1, Math.min(30, Number(filterQ) || 1));
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(gain, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + decay);
+    if (!this._track(src, options.priority ?? 1, {
+      envelope: g, startAt: t, bus: options.bus || 'ui',
+    })) return false;
+    src.buffer = this.noiseBuffer;
+    const attack = Math.max(0.001, Math.min(0.003, safeDuration * 0.18));
+    const requestedDecay = Math.max(attack + 0.001, Number(decay) || safeDuration * 0.8);
+    const releaseAt = Math.min(safeDuration - 0.002, requestedDecay);
+    g.gain.setValueAtTime(AUDIO_FLOOR, t);
+    g.gain.linearRampToValueAtTime(safeGain, t + attack);
+    g.gain.exponentialRampToValueAtTime(AUDIO_FLOOR, t + Math.max(attack + 0.001, releaseAt));
     src.connect(filter).connect(g).connect(this._route(options.bus || 'ui', options.spatial));
-    src.start(t);
-    src.stop(t + duration);
+    const tail = 0.003;
+    const maxOffset = Math.max(0, (Number(this.noiseBuffer.duration) || safeDuration) - safeDuration - tail);
+    const offset = Math.random() * maxOffset;
+    src.start(t, offset);
+    src.stop(t + safeDuration + tail);
+    return true;
   }
 
   _tone(freq, endFreq, duration, gain, type = 'square', options = {}) {
-    const t = this.ctx.currentTime + Math.max(0, options.delay || 0);
+    if (!this.ctx || this.masterVolume <= 0) return false;
+    const safeDuration = Math.max(0.008, Math.min(2, Number(duration) || 0.04));
+    const safeGain = Math.max(0, Math.min(1.2, Number(gain) || 0));
+    if (safeGain <= 0) return false;
+    const t = this.ctx.currentTime + Math.max(0, Number(options.delay) || 0);
     const osc = this.ctx.createOscillator();
-    if (!this._track(osc, options.priority ?? 1)) return;
     osc.type = type;
-    osc.frequency.setValueAtTime(freq, t);
-    if (endFreq !== freq) osc.frequency.exponentialRampToValueAtTime(Math.max(endFreq, 1), t + duration);
+    const startFrequency = Math.max(1, Math.min(20000, Number(freq) || 440));
+    const finishFrequency = Math.max(1, Math.min(20000, Number(endFreq) || startFrequency));
+    osc.frequency.setValueAtTime(startFrequency, t);
+    if (finishFrequency !== startFrequency) {
+      osc.frequency.exponentialRampToValueAtTime(finishFrequency, t + safeDuration);
+    }
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(gain, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    if (!this._track(osc, options.priority ?? 1, {
+      envelope: g, startAt: t, bus: options.bus || 'ui',
+    })) return false;
+    const attack = Math.max(0.002, Math.min(0.004, safeDuration * 0.16));
+    g.gain.setValueAtTime(AUDIO_FLOOR, t);
+    g.gain.linearRampToValueAtTime(safeGain, t + attack);
+    g.gain.exponentialRampToValueAtTime(AUDIO_FLOOR, t + safeDuration);
     osc.connect(g).connect(this._route(options.bus || 'ui', options.spatial));
     osc.start(t);
-    osc.stop(t + duration);
+    osc.stop(t + safeDuration + 0.003);
+    return true;
   }
 
-  _piumTone(profile, volume, spatial = null) {
+  _piumTone(profile, volume, spatial = null, priority = 3) {
+    if (!this.ctx || this.masterVolume <= 0) return false;
     const safeGain = Math.max(0, Number(profile?.gain) || 0) * volume;
     if (safeGain <= 0) return false;
     const t = this.ctx.currentTime;
@@ -219,24 +333,25 @@ export class AudioSys {
     const endHz = Math.max(1, profile.endHz * pitchScale);
     const attack = Math.min(0.006, duration * 0.08);
     const osc = this.ctx.createOscillator();
-    if (!this._track(osc, 3)) return false;
+    const gain = this.ctx.createGain();
+    if (!this._track(osc, priority, { envelope: gain, startAt: t, bus: 'weapons' })) return false;
 
     osc.type = profile.wave || 'triangle';
     osc.frequency.setValueAtTime(startHz, t);
     osc.frequency.exponentialRampToValueAtTime(midHz, t + duration * knee);
     osc.frequency.exponentialRampToValueAtTime(endHz, t + duration);
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, safeGain), t + attack);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, safeGain * 0.2), t + duration * 0.68);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    gain.gain.setValueAtTime(AUDIO_FLOOR, t);
+    gain.gain.exponentialRampToValueAtTime(Math.max(AUDIO_FLOOR, safeGain), t + attack);
+    gain.gain.exponentialRampToValueAtTime(Math.max(AUDIO_FLOOR, safeGain * 0.2), t + duration * 0.68);
+    gain.gain.exponentialRampToValueAtTime(AUDIO_FLOOR, t + duration);
     const vowelFilter = this.ctx.createBiquadFilter();
     vowelFilter.type = 'lowpass';
     vowelFilter.Q.value = 0.72;
-    vowelFilter.frequency.setValueAtTime(Math.max(1, profile.filterStartHz), t);
+    const maxFrequency = Math.max(1200, (Number(this.ctx.sampleRate) || 48000) * 0.45);
+    vowelFilter.frequency.setValueAtTime(Math.max(1, Math.min(maxFrequency, profile.filterStartHz)), t);
     vowelFilter.frequency.exponentialRampToValueAtTime(
-      Math.max(1, profile.filterEndHz),
+      Math.max(1, Math.min(maxFrequency, profile.filterEndHz)),
       t + duration,
     );
     osc.connect(gain).connect(vowelFilter).connect(this._route('weapons', spatial));
@@ -245,7 +360,7 @@ export class AudioSys {
     return true;
   }
 
-  shot(kind = 'ar', volume = 1, spatial = null) {
+  shot(kind = 'ar', volume = 1, spatial = null, priority = 3) {
     if (!this.ctx) return;
     const numericVolume = Number(volume);
     const safeVolume = Number.isFinite(numericVolume)
@@ -256,32 +371,41 @@ export class AudioSys {
       ? { pan: 0, cutoff: 1800 + safeVolume * 12000 }
       : null);
     const profile = piumShotProfile(kind);
-    this._piumTone(profile, safeVolume, distanceSpatial);
+    const safePriority = Math.max(1, Math.min(5, Math.round(Number(priority) || 3)));
+    this._piumTone(profile, safeVolume, distanceSpatial, safePriority);
     this._noise(
       profile.noiseDuration,
       profile.noiseHz,
       profile.noiseQ,
       profile.noiseGain * safeVolume,
       Math.min(profile.noiseDuration * 0.82, profile.duration * 0.38),
-      { bus: 'weapons', spatial: distanceSpatial, priority: 3 },
+      { bus: 'weapons', spatial: distanceSpatial, priority: safePriority },
     );
   }
 
   shotAt(kind, source, listener, forward = { x: 0, z: -1 }, volume = 1) {
     const mix = spatialShotMix(source, listener, forward);
-    this.shot(kind, mix.gain * Math.max(0, Number(volume) || 0), mix);
+    if (mix.gain > 0.001) {
+      this.shot(kind, mix.gain * Math.max(0, Number(volume) || 0), mix, 2);
+    }
     return mix;
   }
 
   hit(critical = false) {
-    if (!this.ctx) return;
+    if (!this.ctx || this.masterVolume <= 0) return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastHitAt < 0.025) return;
+    this.lastHitAt = now;
     const pitch = critical ? 1760 : 1420;
     this._tone(pitch, critical ? 1320 : 1080, 0.055, critical ? 0.3 : 0.22, 'sine', { bus: 'impacts', priority: 4 });
     this._noise(0.035, critical ? 2600 : 2100, 2.4, 0.075, 0.028, { bus: 'impacts', priority: 4 });
   }
 
   kill() {
-    if (!this.ctx) return;
+    if (!this.ctx || this.masterVolume <= 0) return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastKillAt < 0.045) return;
+    this.lastKillAt = now;
     this._tone(760, 760, 0.065, 0.26, 'sine', { bus: 'impacts', priority: 5 });
     this._tone(1140, 1140, 0.075, 0.3, 'sine', { bus: 'impacts', delay: 0.06, priority: 5 });
     this._tone(1520, 1240, 0.11, 0.24, 'triangle', { bus: 'impacts', delay: 0.125, priority: 5 });
@@ -333,7 +457,10 @@ export class AudioSys {
   }
 
   dry() {
-    if (!this.ctx) return;
+    if (!this.ctx || this.masterVolume <= 0) return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastDryAt < 0.12) return;
+    this.lastDryAt = now;
     this._tone(900, 700, 0.04, 0.15, 'square', { bus: 'weapons', priority: 2 });
   }
 
@@ -361,10 +488,25 @@ export class AudioSys {
     });
   }
 
-  boom(volume = 1) {
-    if (!this.ctx) return;
-    this._noise(0.7, 180, 0.5, 0.9 * volume, 0.55, { bus: 'impacts', priority: 5 });
-    this._tone(90, 30, 0.5, 0.6 * volume, 'sine', { bus: 'impacts', priority: 5 });
+  boom(volume = 1, spatial = null) {
+    if (!this.ctx || this.masterVolume <= 0) return false;
+    const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
+    if (safeVolume <= 0) return false;
+    this._noise(0.7, 180, 0.5, 0.62 * safeVolume, 0.55, {
+      bus: 'impacts', spatial, priority: 5,
+    });
+    this._tone(90, 30, 0.5, 0.42 * safeVolume, 'sine', {
+      bus: 'impacts', spatial, priority: 5,
+    });
+    return true;
+  }
+
+  boomAt(source, listener, forward = { x: 0, z: -1 }, volume = 1) {
+    const mix = spatialShotMix(source, listener, forward, 90);
+    if (mix.gain > 0.001) {
+      this.boom(mix.gain * Math.max(0, Number(volume) || 0), mix);
+    }
+    return mix;
   }
 
   nadeThrow() {

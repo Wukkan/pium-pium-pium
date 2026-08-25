@@ -1447,6 +1447,9 @@ export class WeaponSystem {
         this.reloading || now - this.lastShot < 60 / def.rpm) return;
     if (st.ammo <= 0) {
       this.lastShot = now;
+      // Un clic vacío produce una sola respuesta. Sin esto, mantener el botón
+      // repite el sonido seco a la cadencia completa del arma cuando no queda reserva.
+      this.triggerDown = false;
       this.audio.dry();
       this.reload();
       return;

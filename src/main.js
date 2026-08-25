@@ -10,7 +10,12 @@ import { applyCrosshairElement, HUD } from './hud.js';
 import { Net } from './net.js';
 import { Remotes } from './remotes.js';
 import { KitManager } from './kits.js';
-import { GrenadeManager, explosionDamage } from './grenades.js';
+import {
+  combatAudioAllowed,
+  GrenadeManager,
+  explosionDamage,
+  playSpatialBoom,
+} from './grenades.js';
 import { Missions } from './missions.js';
 import { HATS, MAPS, MAX_BOTS, QUICK_CHAT, TOTAL_SLOTS } from './shared/mapdata.js';
 import {
@@ -102,7 +107,9 @@ const player = new Player(camera, world);
 const weapons = new WeaponSystem(camera, scene, player, effects, audio, hud);
 const net = new Net();
 const kitsMgr = new KitManager(scene);
-const grenades = new GrenadeManager(scene, world.colliders, effects, audio);
+const grenades = new GrenadeManager(scene, world.colliders, effects, audio, {
+  shouldPlayAudio: () => combatAudioIsActive(),
+});
 grenades.onCount = (n) => hud.updateGrenades(n);
 
 function safePlayerSpawn(preferred = null, occupants = []) {
@@ -210,7 +217,7 @@ weapons.onCrateHit = (id, dmg, kind) => {
     const pos = world.setCrate(id, false);
     if (pos) {
       effects.impact(pos, 0xc09858, 14);
-      audio.boom(0.3);
+      playCombatBoom(pos, 0.3);
     }
     setTimeout(() => restoreLocalCrateWhenClear(id), 45000);
   }
@@ -1185,7 +1192,7 @@ function onMyKill(isHead, victimName) {
   if ([3, 5, 8, 10, 15, 20].includes(streak)) {
     bonus = streak * 25;
     hud.announce(`🔥 ¡RACHA x${streak}! (+$${bonus})`);
-    audio.streak(streak);
+    playCombatSound('streak', streak);
   }
   weapons.addMoney(earned + bonus);
   // misiones
@@ -1203,7 +1210,7 @@ function resetStreak() { streak = 0; }
 addEventListener('keydown', (e) => {
   if (!isAction(e, 'grenade') || e.repeat || !hasGameplayControl()) return;
   if (state !== 'playing' || player.dead || weapons.inputBlocked || weapons.meleeActive) return;
-  if (grenades.throwFrom(camera)) audio.nadeThrow();
+  if (grenades.throwFrom(camera)) playCombatSound('nadeThrow');
 });
 
 // --- cuchillo (V): cambio temporal de viewmodel, 100 de daño por la espalda ---
@@ -1237,7 +1244,7 @@ function doKnife() {
           const dmg = calcDmg(ent.rig.group.rotation.y);
           effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
           hud.hitmarker(false);
-          audio.hit(dmg >= 100);
+          playCombatSound('hit', dmg >= 100);
           lastKnifeHitAt = performance.now();
           net.sendHit(kind, ent.id, dmg, dmg >= 100, 'knife');
           return;
@@ -1250,7 +1257,7 @@ function doKnife() {
         const killed = bot.takeDamage(dmg, player.pos);
         effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
         hud.hitmarker(killed);
-        audio.hit(dmg >= 100);
+        playCombatSound('hit', dmg >= 100);
         if (killed) {
           missions.event('knifekill');
           if (offlineBotKilled) offlineBotKilled(bot, false);
@@ -1260,7 +1267,7 @@ function doKnife() {
     }
   };
   if (!weapons.beginMelee(strike)) return;
-  audio.knife();
+  playCombatSound('knife');
 }
 
 let remotes = null;      // modo online
@@ -1276,6 +1283,34 @@ let fallbackControlHintShown = false;
 
 const playerEye = new THREE.Vector3();
 const remoteAudioForward = new THREE.Vector3();
+
+function combatAudioIsActive() {
+  return combatAudioAllowed({
+    state,
+    dead: player.dead,
+    overlayOpen: chatOpen || buyOpen || botPanelOpen || podiumOpen || teamPickerOpen,
+    hidden: document.hidden,
+  });
+}
+
+function playCombatSound(method, ...args) {
+  if (!combatAudioIsActive()) return null;
+  const sound = audio[method];
+  return typeof sound === 'function' ? sound.apply(audio, args) : null;
+}
+
+function playCombatBoom(pos, volume = 1) {
+  player.eyePosition(playerEye);
+  camera.getWorldDirection(remoteAudioForward);
+  return playSpatialBoom(
+    audio,
+    pos,
+    playerEye,
+    remoteAudioForward,
+    volume,
+    combatAudioIsActive(),
+  );
+}
 
 // --- interfaz del menú ---
 const playBtn = document.getElementById('play-btn');
@@ -1466,7 +1501,10 @@ function localBotStatus(count) {
 
 function setupOffline() {
   online = false;
-  botsLocal = new BotManager(scene, world, player, effects, audio, 5);
+  const botAudio = {
+    shotAt: (...args) => playCombatSound('shotAt', ...args),
+  };
+  botsLocal = new BotManager(scene, world, player, effects, botAudio, 5);
   receiveBotConfig({
     enabled: true,
     count: botsLocal.bots.length,
@@ -1492,7 +1530,7 @@ function setupOffline() {
     hud.updateScore(kills, deaths);
     hud.killfeed('Tú', bot.name, true);
     hud.announce(isHead ? `☠ HEADSHOT — ${bot.name}` : `☠ Eliminaste a ${bot.name}`);
-    audio.kill();
+    playCombatSound('kill');
     onMyKill(isHead, bot.name);
   };
 
@@ -1502,7 +1540,7 @@ function setupOffline() {
     effects.popup(point, String(dmg), isHead);
     effects.impact(point, 0xcc4444, 4, 'flesh');
     hud.hitmarker(killed);
-    audio.hit(isHead);
+    playCombatSound('hit', isHead);
     if (killed) localBotKilled(data.bot, isHead);
   };
   weapons.onShot = (a, b, kind) => {
@@ -1572,7 +1610,7 @@ function setupOnline() {
     effects.popup(point, String(dmg), isHead);
     effects.impact(point, 0xcc4444, 4, 'flesh');
     hud.hitmarker(false);
-    audio.hit(isHead);
+    playCombatSound('hit', isHead);
     net.sendHit(data.net.kind, data.net.id, dmg, isHead, weapons.def.kind);
   };
   weapons.onShot = (a, b, kind) => {
@@ -1699,7 +1737,7 @@ function setupOnline() {
     const pos = syncOnlineCrate(m.id, !!m.al);
     if (pos && !m.al) {
       effects.impact(pos, 0xc09858, 14);
-      audio.boom(0.3);
+      playCombatBoom(pos, 0.3);
     }
   });
 
@@ -1721,7 +1759,7 @@ function setupOnline() {
     else if (m.id != null) remotes?.triggerShot('pl', m.id);
     player.eyePosition(playerEye);
     camera.getWorldDirection(remoteAudioForward);
-    audio.shotAt(m.k, a, playerEye, remoteAudioForward, 0.7);
+    playCombatSound('shotAt', m.k, a, playerEye, remoteAudioForward, 0.7);
   });
 
   net.on('kill', (m) => {
@@ -1730,7 +1768,7 @@ function setupOnline() {
     if (soyYo) {
       hud.hitmarker(true);
       hud.announce(m.h ? `☠ HEADSHOT — ${m.vn}` : `☠ Eliminaste a ${m.vn}`);
-      audio.kill();
+      playCombatSound('kill');
       onMyKill(!!m.h, m.vn);
     }
     if (m.vid === net.id) {
@@ -1769,7 +1807,7 @@ function setupOnline() {
     player.health = m.hp;
     player.shakeTime = 0.25;
     hud.damageFlash(Math.min(0.8, 0.25 + m.d / 40));
-    audio.damaged();
+    playCombatSound('damaged');
   });
 
   net.on('spawn', (m) => {
@@ -1914,6 +1952,7 @@ function openMainMenuFromGame() {
   setFallbackControls(false);
   if (state !== 'playing') return;
   state = 'menu';
+  audio.stopCombat();
   hud.showMenu(true);
   showMenuScreen('play');
   hud.setMenuStats(kills, deaths);
@@ -2448,11 +2487,11 @@ player.onHardLand = (speed) => {
   else if (!player.dead) player.damage(dmg, 'la caída');
 };
 
-player.onJump = () => audio.jump();
-player.onLand = () => audio.land();
+player.onJump = () => playCombatSound('jump');
+player.onLand = () => playCombatSound('land');
 player.onDamaged = (amount) => {
   hud.damageFlash(Math.min(0.8, 0.25 + amount / 40));
-  audio.damaged();
+  playCombatSound('damaged');
 };
 
 // posición inicial de la cámara para el fondo del menú
@@ -2470,9 +2509,13 @@ showMenuScreen('play');
 // --- bucle de juego ---
 let lastTime = performance.now();
 let fpsCount = 0, fpsTimer = 0;
+let combatAudioWasActive = false;
 document.addEventListener('visibilitychange', () => {
   lastTime = performance.now();
-  if (document.hidden) weapons.clearInput();
+  if (document.hidden) {
+    weapons.clearInput();
+    audio.stopCombat();
+  }
 });
 
 function tick(now) {
@@ -2482,6 +2525,9 @@ function tick(now) {
   lastTime = now;
 
   const playing = state === 'playing';
+  const combatAudioActive = combatAudioIsActive();
+  if (combatAudioWasActive && !combatAudioActive) audio.stopCombat();
+  combatAudioWasActive = combatAudioActive;
   const inputEnabled = playing && hasGameplayControl() && !connecting && !player.dead &&
     !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;
 
@@ -2494,7 +2540,7 @@ function tick(now) {
         if (dx * dx + dz * dz < 1.3 && Math.abs(player.pos.y - pad.y) < 0.8) {
           player.vel.y = pad.power;
           player.onGround = false;
-          audio.jump();
+          playCombatSound('jump');
           break;
         }
       }
@@ -2507,7 +2553,8 @@ function tick(now) {
   if (remotes) remotes.update(dt);
   if (online && joined && state === 'playing' && !podiumOpen && !player.dead) net.tickState(dt, player);
   kitsMgr.update(dt);
-  grenades.update(dt, player.eyePosition(playerEye));
+  camera.getWorldDirection(remoteAudioForward);
+  grenades.update(dt, player.eyePosition(playerEye), remoteAudioForward);
   effects.update(dt);
 
   hud.update(dt);

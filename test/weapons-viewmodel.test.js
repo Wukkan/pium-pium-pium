@@ -430,6 +430,37 @@ test('fire and reload stay blocked until the equip animation is complete', () =>
   assert.deepEqual(calls.reloading, [true]);
 });
 
+test('an empty weapon emits one dry click per physical trigger press', () => {
+  let dryClicks = 0;
+  const weapon = Object.create(WeaponSystem.prototype);
+  Object.assign(weapon, {
+    current: 'smg',
+    state: { smg: { ammo: 0, reserve: 0 } },
+    meleeActive: false,
+    equipProgress: 1,
+    player: { dead: false },
+    reloading: false,
+    lastShot: -Infinity,
+    triggerDown: true,
+    audio: { dry() { dryClicks++; } },
+  });
+
+  weapon.fire();
+  assert.equal(dryClicks, 1);
+  assert.equal(weapon.triggerDown, false);
+
+  for (let frame = 0; frame < 20; frame++) {
+    if (weapon.triggerDown) weapon.fire();
+  }
+  assert.equal(dryClicks, 1, 'holding the empty trigger must stay silent');
+
+  weapon.triggerDown = true;
+  weapon.lastShot = -Infinity;
+  weapon.fire();
+  assert.equal(dryClicks, 2, 'a new press may provide one new dry click');
+  assert.equal(weapon.triggerDown, false);
+});
+
 test('refill clears held fire and ADS before restoring ammunition', () => {
   const { weapon, calls } = actionHarness(1);
   weapon.refill();

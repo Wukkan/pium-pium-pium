@@ -20,6 +20,42 @@ export function validRemoteGrenadePayload(position, velocity) {
   return validVector(position, 10000) && validVector(velocity, 80);
 }
 
+export function combatAudioAllowed({
+  state = 'menu', dead = false, overlayOpen = false, hidden = false,
+} = {}) {
+  return state === 'playing' && !dead && !overlayOpen && !hidden;
+}
+
+export function playSpatialBoom(
+  audio,
+  source,
+  listener,
+  forward = { x: 0, z: -1 },
+  volume = 1,
+  enabled = true,
+) {
+  if (!enabled || !audio) return false;
+  const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
+  if (safeVolume <= 0) return false;
+  if (listener && typeof audio.boomAt === 'function') {
+    audio.boomAt(source, listener, forward, safeVolume);
+    return true;
+  }
+  if (typeof audio.boom !== 'function') return false;
+  const distance = source && listener && typeof source.distanceTo === 'function'
+    ? source.distanceTo(listener)
+    : Math.hypot(
+        Number(source?.x || 0) - Number(listener?.x || 0),
+        Number(source?.y || 0) - Number(listener?.y || 0),
+        Number(source?.z || 0) - Number(listener?.z || 0),
+      );
+  const attenuation = listener
+    ? Math.max(0.15, Math.min(1, 1 - distance / 55))
+    : 1;
+  audio.boom(safeVolume * attenuation);
+  return true;
+}
+
 function disposeGrenadeMesh(mesh) {
   mesh.traverse((object) => {
     if (object.geometry) object.geometry.dispose();
@@ -57,11 +93,14 @@ class Grenade {
 }
 
 export class GrenadeManager {
-  constructor(scene, colliders, effects, audio) {
+  constructor(scene, colliders, effects, audio, options = {}) {
     this.scene = scene;
     this.colliders = colliders;
     this.effects = effects;
     this.audio = audio;
+    this.shouldPlayAudio = typeof options.shouldPlayAudio === 'function'
+      ? options.shouldPlayAudio
+      : () => true;
     this.grenades = [];
     this.count = PER_LIFE;
     this.onThrow = null;   // (pos, vel) → red
@@ -133,12 +172,12 @@ export class GrenadeManager {
     return false;
   }
 
-  update(dt, playerEye) {
+  update(dt, playerEye, listenerForward = { x: 0, z: -1 }) {
     for (let i = this.grenades.length - 1; i >= 0; i--) {
       const g = this.grenades[i];
       g.fuse -= dt;
       if (g.fuse <= 0) {
-        this._explode(g, playerEye);
+        this._explode(g, playerEye, listenerForward);
         this.grenades.splice(i, 1);
         continue;
       }
@@ -160,7 +199,7 @@ export class GrenadeManager {
         }
       }
       if (tocado && g.impact) {
-        this._explode(g, playerEye);
+        this._explode(g, playerEye, listenerForward);
         this.grenades.splice(i, 1);
         continue;
       }
@@ -170,12 +209,18 @@ export class GrenadeManager {
     }
   }
 
-  _explode(g, playerEye) {
+  _explode(g, playerEye, listenerForward) {
     this.scene.remove(g.mesh);
     disposeGrenadeMesh(g.mesh);
     this.effects.explosion(g.pos);
-    const dist = playerEye ? g.pos.distanceTo(playerEye) : 99;
-    this.audio.boom(Math.max(0.15, Math.min(1, 1 - dist / 55)));
+    playSpatialBoom(
+      this.audio,
+      g.pos,
+      playerEye,
+      listenerForward,
+      1,
+      this.shouldPlayAudio(),
+    );
     if (g.mine && this.onExplode) this.onExplode(g.pos);
   }
 }
