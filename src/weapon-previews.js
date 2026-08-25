@@ -157,12 +157,16 @@ function createPreviewScene(kind, options) {
 
     // Luz equivalente al renderer principal: materiales originales, espacio de
     // color sRGB y ACES; no hay suelo ni decorado que altere la silueta.
-    const hemisphere = new THREE.HemisphereLight(0xc7ddff, 0x0b111b, 2.05);
-    const key = new THREE.DirectionalLight(0xffdfb0, 3.15);
-    key.position.set(-3.6, 4.8, 5.5);
-    const rim = new THREE.DirectionalLight(0x5ca8ff, 1.55);
-    rim.position.set(3.5, 1.8, -4.2);
-    scene.add(hemisphere, key, rim);
+    const hemisphere = new THREE.HemisphereLight(0xdceaff, 0x172238, 2.65);
+    // La cámara mira desde +X: la luz principal se mantiene en ese mismo
+    // hemisferio para que los materiales oscuros conserven detalle en tarjeta.
+    const key = new THREE.DirectionalLight(0xffdfb0, 4.8);
+    key.position.set(4.8, 4.6, 3.4);
+    const fill = new THREE.DirectionalLight(0x83bdff, 2.15);
+    fill.position.set(3.2, -1.8, -4.5);
+    const rim = new THREE.DirectionalLight(0x4d8fd8, 1.15);
+    rim.position.set(-3.8, 2.1, -4.2);
+    scene.add(hemisphere, key, fill, rim);
 
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 20);
     const bounds = visibleObjectBounds(presentation);
@@ -229,7 +233,7 @@ function configurePreviewRenderer(renderer) {
   renderer.setClearColor?.(0x000000, 0);
   if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
   if ('toneMapping' in renderer) renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.08;
+  if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.22;
   if (renderer.shadowMap) renderer.shadowMap.enabled = false;
   return renderer;
 }
