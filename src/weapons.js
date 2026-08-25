@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { ammoAfterPickup, weaponSelectionAction, weaponAnimationState } from './ui-models.js';
 import { DEFAULT_BINDINGS, bindingSlotIndex, keyCodeLabel } from './input-bindings.js';
 import { roundedBoxGeometry } from './rounded-geometry.js';
+import { handGripState } from './hand-grip.js';
+
+export { HAND_GRIP_PROFILES, handGripState } from './hand-grip.js';
 
 // ---------------------------------------------------------------------------
 // Armas: definición, modelo en primera persona (cajas), disparo por raycast,
@@ -114,17 +117,6 @@ const EQUIP_DURATIONS = Object.freeze({
   launcher: 0.62,
 });
 
-const HAND_POSES = Object.freeze({
-  pistol:   { right: [0.018, -0.145, 0.085], left: [-0.092, -0.13, 0.025] },
-  revolver: { right: [0.018, -0.14, 0.095], left: [-0.105, -0.105, 0.005] },
-  shotgun:  { right: [0.02, -0.135, 0.09], left: [-0.018, -0.095, -0.31] },
-  smg:      { right: [0.018, -0.14, 0.07], left: [-0.018, -0.082, -0.21] },
-  ar:       { right: [0.018, -0.145, 0.075], left: [-0.018, -0.085, -0.32] },
-  sniper:   { right: [0.018, -0.14, 0.09], left: [-0.018, -0.07, -0.39] },
-  launcher: { right: [0.018, -0.15, 0.105], left: [-0.018, -0.105, -0.22] },
-  knife:    { right: [0.012, -0.135, 0.07], left: [-0.19, -0.175, 0.12] },
-});
-
 const MAGAZINE_WEAPONS = new Set(['pistol', 'smg', 'ar', 'sniper']);
 
 const clamp01 = (value) => Math.min(1, Math.max(0, Number(value) || 0));
@@ -203,6 +195,9 @@ export function firstPersonAnimationState({
     hands: {
       supportReach: reloadArc,
       reloadArc,
+      ads: Boolean(ads),
+      reloading: Boolean(reloading),
+      reloadProgress: reload,
       sway: stride,
       step,
       shot,
@@ -229,14 +224,14 @@ export function meleeAnimationState(progress = 0) {
     visible: p < 1,
     strike,
     position: {
-      x: 0.08 - ready * 0.03 - strike * 0.44,
+      x: 0.08 - ready * 0.03 - strike * 0.32,
       y: -0.24 - (1 - draw) * 0.34 + recover * 0.08,
-      z: -0.08 - ready * 0.03 - strike * 0.24,
+      z: -0.08 - ready * 0.03 - strike * 0.16,
     },
     rotation: {
       x: -0.12 + strike * 0.35,
-      y: -0.38 + strike * 0.92,
-      z: 0.2 + (1 - draw) * 0.78 + strike * 1.18 - recover * 0.2,
+      y: -0.38 + strike * 0.75,
+      z: 0.2 + (1 - draw) * 0.78 + strike * 0.9 - recover * 0.2,
     },
   };
 }
@@ -274,18 +269,20 @@ function makeArmSegment(material, radiusTop, radiusBottom = radiusTop) {
   return mesh;
 }
 
-function setArmSegment(mesh, from, to, delta) {
+function setArmSegment(mesh, from, to, delta, fixedLength = null) {
   delta.subVectors(to, from);
-  const length = Math.max(0.001, delta.length());
-  mesh.position.copy(from).addScaledVector(delta, 0.5);
+  const measuredLength = Math.max(0.001, delta.length());
+  const length = fixedLength ?? measuredLength;
+  delta.multiplyScalar(1 / measuredLength);
+  mesh.position.copy(from).addScaledVector(delta, length * 0.5);
   mesh.scale.set(1, length, 1);
-  mesh.quaternion.setFromUnitVectors(ARM_UP, delta.multiplyScalar(1 / length));
+  mesh.quaternion.setFromUnitVectors(ARM_UP, delta);
 }
 
 function buildFirstPersonArms(kind, materials) {
   const root = new THREE.Group();
   root.name = 'first-person-arms';
-  const pose = HAND_POSES[kind] || HAND_POSES.pistol;
+  const baseGrip = handGripState({ kind });
   const palmGeometry = new THREE.SphereGeometry(0.075, 12, 8);
   const palmPadGeometry = viewmodelBoxGeometry(0.086, 0.018, 0.072, {
     ratio: 0.28, maxRadius: 0.005, segments: 1,
@@ -307,38 +304,47 @@ function buildFirstPersonArms(kind, materials) {
   const elbowGeometry = new THREE.SphereGeometry(0.078, 12, 8);
   const shoulderGeometry = new THREE.SphereGeometry(0.092, 12, 8);
 
-  const makeHand = (side, position) => {
+  const fingerNames = ['index', 'middle', 'ring', 'pinky'];
+  const fingerCurlRadians = [1.12, 1.38, 1.2];
+  const thumbCurlRadians = [0.82, 1.08];
+
+  const makeHand = (side, handPose) => {
     const direction = side === 'left' ? -1 : 1;
     const hand = new THREE.Group();
     hand.name = `${side}-hand`;
-    hand.position.fromArray(position);
+    hand.position.fromArray(handPose.position);
+    hand.rotation.fromArray(handPose.rotation);
 
     const palm = new THREE.Mesh(palmGeometry, materials.glove);
     palm.name = `${side}-glove-palm`;
-    palm.scale.set(0.72, 0.56, 0.94);
+    palm.scale.set(0.7, 0.52, 0.96);
     palm.rotation.x = -0.18;
+    palm.castShadow = true;
     hand.add(palm);
 
     const palmPad = new THREE.Mesh(palmPadGeometry, materials.glovePanel);
     palmPad.name = `${side}-palm-pad`;
-    palmPad.position.set(0, -0.012, -0.038);
+    // La cara interior queda contra la empuñadura o el guardamanos.
+    palmPad.position.set(0, side === 'right' ? -0.032 : 0.032, -0.038);
     palmPad.rotation.x = -0.1;
     hand.add(palmPad);
 
-    const baseCurls = side === 'right'
-      ? (kind === 'knife' ? [0.26, 0.68, 0.78, 0.86] : [0.16, 0.56, 0.66, 0.74])
-      : [0.5, 0.58, 0.66, 0.74];
-    const lengthScales = [0.93, 1.05, 1, 0.84];
+    const lengthScales = [0.96, 1.07, 1, 0.86];
+    const fingers = {};
 
     for (let i = 0; i < 4; i++) {
+      const fingerName = fingerNames[i];
       const finger = new THREE.Group();
       finger.name = `${side}-finger-${i + 1}`;
-      finger.position.set((i - 1.5) * 0.021, -0.018, -0.063);
-      finger.rotation.x = 0.08;
+      // En la mano derecha el índice ocupa el extremo opuesto al meñique.
+      // Al girar la muñeca sobre Z quedan apilados anatómicamente en el grip.
+      const slot = side === 'right' ? 1.5 - i : i - 1.5;
+      finger.position.set(slot * 0.021, -0.018, -0.063);
       const knuckle = new THREE.Mesh(knuckleGeometry, materials.glovePanel);
       knuckle.name = `${side}-finger-${i + 1}-knuckle`;
       knuckle.scale.set(0.88, 0.72, 0.9);
       finger.add(knuckle);
+      const joints = [finger];
       let joint = finger;
       for (let segmentIndex = 0; segmentIndex < fingerGeometries.length; segmentIndex++) {
         const length = fingerLengths[segmentIndex] * lengthScales[i];
@@ -351,9 +357,10 @@ function buildFirstPersonArms(kind, materials) {
         joint.add(segment);
         if (segmentIndex < fingerGeometries.length - 1) {
           const nextJoint = new THREE.Group();
+          nextJoint.name = `${side}-${fingerName}-${segmentIndex === 0 ? 'pip' : 'dip'}-joint`;
           nextJoint.position.z = -length;
-          nextJoint.rotation.x = baseCurls[i] * (segmentIndex === 0 ? 0.7 : 0.9);
           joint.add(nextJoint);
+          joints.push(nextJoint);
           joint = nextJoint;
         } else {
           const tip = new THREE.Mesh(fingertipGeometry, materials.glovePanel);
@@ -363,14 +370,18 @@ function buildFirstPersonArms(kind, materials) {
           joint.add(tip);
         }
       }
+      finger.userData.semantic = fingerName;
+      finger.userData.joints = joints;
+      fingers[fingerName] = finger;
       hand.add(finger);
     }
 
     const thumb = new THREE.Group();
     thumb.name = `${side}-thumb`;
     thumb.position.set(direction * 0.055, -0.018, -0.005);
-    thumb.rotation.z = Math.PI / 2 + direction * 0.22;
+    thumb.rotation.y = direction * 0.78;
     thumb.rotation.x = -0.28;
+    const thumbJoints = [thumb];
     let thumbJoint = thumb;
     for (let index = 0; index < thumbGeometries.length; index++) {
       const segment = new THREE.Mesh(thumbGeometries[index], index === 0 ? materials.glove : materials.glovePanel);
@@ -379,12 +390,14 @@ function buildFirstPersonArms(kind, materials) {
       thumbJoint.add(segment);
       if (index === 0) {
         const next = new THREE.Group();
+        next.name = `${side}-thumb-ip-joint`;
         next.position.z = -thumbLengths[index];
-        next.rotation.x = kind === 'knife' && side === 'right' ? 0.62 : 0.42;
         thumbJoint.add(next);
+        thumbJoints.push(next);
         thumbJoint = next;
       }
     }
+    thumb.userData.joints = thumbJoints;
     hand.add(thumb);
 
     const cuff = new THREE.Mesh(
@@ -405,26 +418,79 @@ function buildFirstPersonArms(kind, materials) {
     wristStrap.rotation.x = Math.PI / 2.7;
     hand.add(wristStrap);
 
-    snapshotTransform(hand);
+    hand.userData.fingers = fingers;
+    hand.userData.thumb = thumb;
     root.add(hand);
     return hand;
   };
 
-  const right = makeHand('right', pose.right);
-  const left = makeHand('left', pose.left);
-  // La mano de apoyo envuelve el guardamanos en vez de copiar la pose del gatillo.
-  left.rotation.z = -0.08;
-  left.rotation.x = -0.12;
+  const right = makeHand('right', baseGrip.right);
+  const left = makeHand('left', baseGrip.left);
+
+  const applyHandGrip = (hand, state) => {
+    hand.position.fromArray(state.position);
+    hand.rotation.fromArray(state.rotation);
+    hand.userData.role = state.role;
+    for (const fingerName of fingerNames) {
+      const finger = hand.userData.fingers[fingerName];
+      const digitState = state.fingers[fingerName];
+      const [mcp, pip, dip] = finger.userData.joints;
+      mcp.rotation.set(
+        digitState.curl[0] * fingerCurlRadians[0],
+        digitState.splay || 0,
+        digitState.twist || 0,
+      );
+      pip.rotation.set(digitState.curl[1] * fingerCurlRadians[1], 0, 0);
+      dip.rotation.set(digitState.curl[2] * fingerCurlRadians[2], 0, 0);
+      finger.userData.contact = digitState.contact;
+    }
+
+    const thumb = hand.userData.thumb;
+    const [thumbMcp, thumbIp] = thumb.userData.joints;
+    const thumbDirection = hand.name.startsWith('left') ? -1 : 1;
+    thumbMcp.rotation.set(
+      -0.28 + state.thumb.curl[0] * thumbCurlRadians[0],
+      thumbDirection * (0.78 + (state.thumb.splay || 0)),
+      state.thumb.twist || 0,
+    );
+    thumbIp.rotation.set(state.thumb.curl[1] * thumbCurlRadians[1], 0, 0);
+    thumb.userData.contact = state.thumb.contact;
+  };
+
+  let gripState = baseGrip;
+  const applyGrip = (state = baseGrip) => {
+    gripState = state;
+    applyHandGrip(right, state.right);
+    applyHandGrip(left, state.left);
+  };
+  applyGrip(baseGrip);
+  snapshotTransform(right);
   snapshotTransform(left);
 
   const chains = {};
+  const inverseParentMatrix = new THREE.Matrix4();
+  const supportArmLengths = {
+    pistol: [0.2, 0.18],
+    revolver: [0.29, 0.27],
+    shotgun: [0.29, 0.27],
+    smg: [0.255, 0.235],
+    ar: [0.3, 0.28],
+    sniper: [0.32, 0.3],
+    launcher: [0.35, 0.33],
+    knife: [0.342, 0.324],
+  };
   for (const [side, hand] of [['right', right], ['left', left]]) {
     const direction = side === 'left' ? -1 : 1;
+    const [upperLength, forearmLength] = kind === 'knife'
+      ? supportArmLengths.knife
+      : side === 'right'
+        ? [0.205, 0.185]
+        : supportArmLengths[kind] || supportArmLengths.pistol;
     const chain = new THREE.Group();
     chain.name = `${side}-arm-chain`;
-    const upperArm = makeArmSegment(materials.sleeveDark, 0.085, 0.103);
+    const upperArm = makeArmSegment(materials.sleeveDark, 0.064, 0.074);
     upperArm.name = `${side}-upper-arm`;
-    const forearm = makeArmSegment(materials.sleeve, 0.068, 0.083);
+    const forearm = makeArmSegment(materials.sleeve, 0.052, 0.064);
     forearm.name = `${side}-forearm`;
     const elbowGuard = new THREE.Mesh(elbowGeometry, materials.sleeveDark);
     elbowGuard.name = `${side}-elbow-guard`;
@@ -436,27 +502,61 @@ function buildFirstPersonArms(kind, materials) {
     root.add(chain);
     chains[side] = {
       hand, direction, upperArm, forearm, elbowGuard, shoulderPad,
-      shoulder: new THREE.Vector3(direction * 0.3, -0.27, 0.2),
+      baseShoulder: new THREE.Vector3(direction * 0.31, -0.28, 0.21),
+      shoulder: new THREE.Vector3(),
       wristOffset: new THREE.Vector3(direction * 0.004, -0.052, 0.083),
+      pole: new THREE.Vector3(direction, -0.58, 0.3),
+      poleDirection: new THREE.Vector3(),
+      directionVector: new THREE.Vector3(),
       wrist: new THREE.Vector3(), elbow: new THREE.Vector3(), delta: new THREE.Vector3(),
+      upperLength,
+      forearmLength,
     };
   }
 
-  const update = () => {
+  const update = (animatedParentMatrix = null) => {
+    if (animatedParentMatrix) inverseParentMatrix.copy(animatedParentMatrix).invert();
     for (const chain of Object.values(chains)) {
       chain.wrist.copy(chain.wristOffset).applyEuler(chain.hand.rotation).add(chain.hand.position);
-      chain.elbow.lerpVectors(chain.shoulder, chain.wrist, 0.53);
-      chain.elbow.x += chain.direction * 0.055;
-      chain.elbow.y -= 0.038;
-      chain.elbow.z += 0.025;
-      setArmSegment(chain.upperArm, chain.shoulder, chain.elbow, chain.delta);
-      setArmSegment(chain.forearm, chain.elbow, chain.wrist, chain.delta);
+      chain.shoulder.copy(chain.baseShoulder);
+      // En golpes amplios el arma y la mano rotan, pero los hombros permanecen
+      // anclados al cuerpo/cámara; se expresan aquí en el espacio local animado.
+      if (animatedParentMatrix) chain.shoulder.applyMatrix4(inverseParentMatrix);
+      chain.directionVector.subVectors(chain.wrist, chain.shoulder);
+      let distance = Math.max(0.001, chain.directionVector.length());
+      chain.directionVector.multiplyScalar(1 / distance);
+      const maximumReach = chain.upperLength + chain.forearmLength - 0.002;
+      if (distance > maximumReach) {
+        chain.shoulder.addScaledVector(chain.directionVector, distance - maximumReach);
+        distance = maximumReach;
+      }
+
+      const along = Math.min(
+        chain.upperLength,
+        (chain.upperLength ** 2 - chain.forearmLength ** 2 + distance ** 2) / (2 * distance),
+      );
+      const bend = Math.sqrt(Math.max(0, chain.upperLength ** 2 - along ** 2));
+      chain.poleDirection.copy(chain.pole)
+        .addScaledVector(chain.directionVector, -chain.pole.dot(chain.directionVector));
+      if (chain.poleDirection.lengthSq() < 0.0001) {
+        chain.poleDirection.set(chain.direction, -0.5, 0);
+      }
+      chain.poleDirection.normalize();
+      chain.elbow.copy(chain.shoulder)
+        .addScaledVector(chain.directionVector, along)
+        .addScaledVector(chain.poleDirection, bend);
+
+      setArmSegment(chain.upperArm, chain.shoulder, chain.elbow, chain.delta, chain.upperLength);
+      setArmSegment(chain.forearm, chain.elbow, chain.wrist, chain.delta, chain.forearmLength);
       chain.elbowGuard.position.copy(chain.elbow);
       chain.shoulderPad.position.copy(chain.shoulder);
     }
   };
   update();
-  return { root, right, left, chains, update };
+  return {
+    root, right, left, chains, update, applyGrip,
+    get gripState() { return gripState; },
+  };
 }
 
 function createViewmodelMaterials() {
@@ -468,12 +568,33 @@ function createViewmodelMaterials() {
     wood: new THREE.MeshStandardMaterial({ color: 0x5c4738, roughness: 0.72 }),
     rubber: new THREE.MeshStandardMaterial({ color: 0x11161d, roughness: 0.92 }),
     accent: new THREE.MeshStandardMaterial({ color: 0xc69b48, metalness: 0.45, roughness: 0.42 }),
-    glove: new THREE.MeshStandardMaterial({ color: 0x394956, roughness: 0.88 }),
-    glovePanel: new THREE.MeshStandardMaterial({ color: 0x718493, roughness: 0.68 }),
+    glove: new THREE.MeshStandardMaterial({
+      color: 0x465d70, roughness: 0.82, emissive: 0x0b1219, emissiveIntensity: 0.14,
+    }),
+    glovePanel: new THREE.MeshStandardMaterial({
+      color: 0x8299aa, roughness: 0.64, emissive: 0x111a22, emissiveIntensity: 0.12,
+    }),
     cuff: new THREE.MeshStandardMaterial({ color: 0x202b36, roughness: 0.9 }),
     sleeve: new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.94 }),
     sleeveDark: new THREE.MeshStandardMaterial({ color: 0x253647, roughness: 0.96 }),
   };
+}
+
+function createGripTargets(model, gripState) {
+  const right = new THREE.Object3D();
+  right.name = 'weapon-primary-grip';
+  right.position.fromArray(gripState.right.position);
+  right.userData.hand = 'right';
+  right.userData.role = gripState.right.role;
+
+  const left = new THREE.Object3D();
+  left.name = 'weapon-support-grip';
+  left.position.fromArray(gripState.left.position);
+  left.userData.hand = 'left';
+  left.userData.role = gripState.left.role;
+
+  model.add(right, left);
+  return { right, left };
 }
 
 export function buildGunModel(kind) {
@@ -541,6 +662,7 @@ export function buildGunModel(kind) {
     part(wood, 0.09, 0.05, 0.18, 0, -0.1, -0.3);
     part(dark, 0.07, 0.09, 0.7, 0, 0.01, -0.25);      // cañón largo
     moving.pump = part(wood, 0.075, 0.09, 0.22, 0, -0.06, -0.32); // bomba
+    part(rubber, 0.075, 0.16, 0.105, 0, -0.12, 0.09); // empuñadura trasera
     part(wood, 0.08, 0.12, 0.3, 0, -0.03, 0.25);      // culata
     part(mid, 0.085, 0.12, 0.2, 0, 0, 0.02);          // recámara
     part(accent, 0.03, 0.03, 0.06, 0, 0.07, -0.55);   // mira
@@ -574,12 +696,30 @@ export function buildGunModel(kind) {
     sight(0, -0.42, 0.06);
     part(wood, 0.09, 0.13, 0.75, 0, 0, -0.05);
     part(dark, 0.05, 0.05, 0.6, 0, 0.02, -0.68);
-    moving.magazine = part(dark, 0.06, 0.12, 0.1, 0, -0.12, 0.08);
+    moving.magazine = part(dark, 0.06, 0.12, 0.1, 0, -0.12, -0.02);
+    part(rubber, 0.078, 0.15, 0.105, 0, -0.12, 0.105); // empuñadura separada
     part(mid, 0.06, 0.08, 0.28, 0, 0.12, -0.12);      // mira telescópica
     part(dark, 0.07, 0.09, 0.03, 0, 0.12, -0.27);
     part(wood, 0.085, 0.12, 0.2, 0, -0.02, 0.32);
     moving.slide = part(steel, 0.018, 0.04, 0.11, 0.05, 0.035, -0.2);
   }
+
+  const triggerZ = ({
+    pistol: -0.04, revolver: -0.015, shotgun: -0.025, smg: -0.055,
+    ar: -0.05, sniper: -0.015, launcher: 0.01,
+  }[kind] ?? -0.04);
+  const trigger = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.007, 0.045, 8), accent);
+  trigger.name = 'weapon-trigger';
+  trigger.position.set(0.006, -0.082, triggerZ);
+  trigger.rotation.x = -0.2;
+  trigger.castShadow = true;
+  const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.0055, 5, 12, Math.PI * 1.35), dark);
+  triggerGuard.name = 'weapon-trigger-guard';
+  triggerGuard.position.set(0, -0.075, triggerZ + 0.006);
+  triggerGuard.rotation.y = Math.PI / 2;
+  triggerGuard.rotation.x = -0.2;
+  triggerGuard.castShadow = true;
+  g.add(trigger, triggerGuard);
 
   for (const [name, object] of Object.entries(moving)) {
     object.name = `weapon-${name}`;
@@ -588,7 +728,8 @@ export function buildGunModel(kind) {
 
   const arms = buildFirstPersonArms(kind, { glove, glovePanel, cuff, sleeve, sleeveDark });
   g.add(arms.root);
-  g.userData.viewmodel = { kind, arms, moving };
+  const gripTargets = createGripTargets(g, arms.gripState);
+  g.userData.viewmodel = { kind, arms, moving, grip: arms.gripState, gripTargets };
 
   // destello del cañón
   const flashMat = new THREE.SpriteMaterial({
@@ -620,10 +761,12 @@ export function buildKnifeModel() {
     steel, rubber, accent, glove, glovePanel, cuff, sleeve, sleeveDark,
   } = createViewmodelMaterials();
 
-  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.041, 0.19, 12), rubber);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.041, 0.235, 12), rubber);
   handle.name = 'knife-handle';
   handle.position.set(0, -0.095, 0.065);
-  handle.rotation.x = Math.PI / 2;
+  // Sigue la diagonal guarda-pomo para que hoja, empuñadura y mano formen una
+  // sola silueta continua (el antiguo giro de 90° dejaba una separación).
+  handle.rotation.x = 2.39;
   const guard = new THREE.Mesh(viewmodelBoxGeometry(0.145, 0.026, 0.045, {
     ratio: 0.25, maxRadius: 0.006, segments: 2,
   }), accent);
@@ -647,7 +790,7 @@ export function buildKnifeModel() {
   const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.036, 0.035, 12), accent);
   pommel.name = 'knife-pommel';
   pommel.position.set(0, -0.205, 0.155);
-  pommel.rotation.x = Math.PI / 2;
+  pommel.rotation.x = 2.39;
   for (const part of [handle, guard, blade, tip, spine, pommel]) {
     part.castShadow = true;
     part.frustumCulled = false;
@@ -655,15 +798,10 @@ export function buildKnifeModel() {
   g.add(handle, guard, blade, tip, spine, pommel);
 
   const arms = buildFirstPersonArms('knife', { glove, glovePanel, cuff, sleeve, sleeveDark });
-  arms.right.rotation.x -= 0.08;
-  arms.right.rotation.z += 0.06;
-  snapshotTransform(arms.right);
-  arms.left.rotation.x = -0.36;
-  arms.left.rotation.z = -0.22;
-  snapshotTransform(arms.left);
   arms.update();
   g.add(arms.root);
-  g.userData.viewmodel = { kind: 'knife', arms, moving: {} };
+  const gripTargets = createGripTargets(g, arms.gripState);
+  g.userData.viewmodel = { kind: 'knife', arms, moving: {}, grip: arms.gripState, gripTargets };
   g.userData.blade = blade;
   g.userData.handle = handle;
   g.visible = false;
@@ -1002,7 +1140,8 @@ export class WeaponSystem {
     const pose = meleeAnimationState(this.meleeProgress);
     this.knifeModel.position.set(pose.position.x, pose.position.y, pose.position.z);
     this.knifeModel.rotation.set(pose.rotation.x, pose.rotation.y, pose.rotation.z);
-    this.knifeModel.userData.viewmodel.arms.update();
+    this.knifeModel.updateMatrix();
+    this.knifeModel.userData.viewmodel.arms.update(this.knifeModel.matrix);
     if (!this.meleeStrikeFired && this.meleeProgress >= 0.43) {
       this.meleeStrikeFired = true;
       const strike = this.meleeStrikeCallback;
@@ -1142,48 +1281,17 @@ export class WeaponSystem {
     const handPose = pose.hands;
     const mechanism = pose.mechanism;
 
-    right.position.copy(right.userData.basePosition);
-    right.rotation.copy(right.userData.baseRotation);
-    left.position.copy(left.userData.basePosition);
-    left.rotation.copy(left.userData.baseRotation);
-
-    // Las dos manos absorben el paso y el disparo de forma ligeramente distinta:
-    // evita que parezcan una única pieza rígida pegada al arma.
-    right.position.y -= handPose.step * 0.003;
-    right.position.z += handPose.shot * 0.025;
-    right.rotation.x += handPose.shot * 0.12;
-    right.rotation.z += handPose.sway * 0.012 - handPose.sprint * 0.055;
-    left.position.y += handPose.step * 0.002;
-    left.position.x -= handPose.sway * 0.004;
-    left.position.z += handPose.shot * 0.018;
-    left.rotation.x += handPose.shot * 0.08;
-    left.rotation.z -= handPose.sway * 0.014 - handPose.sprint * 0.09;
-
-    const reloadArc = handPose.reloadArc;
-    if (MAGAZINE_WEAPONS.has(kind)) {
-      left.position.x += reloadArc * 0.07;
-      left.position.y -= reloadArc * 0.09 + mechanism.magazineDrop * 0.19;
-      left.position.z += reloadArc * 0.085;
-      left.rotation.x -= reloadArc * 0.72;
-      left.rotation.z += reloadArc * 0.38;
-    } else if (kind === 'shotgun') {
-      left.position.z += mechanism.pumpTravel * 0.17;
-      left.position.y -= reloadArc * 0.045;
-      left.rotation.x += mechanism.pumpTravel * 0.2;
-    } else if (kind === 'revolver') {
-      left.position.x += reloadArc * 0.16;
-      left.position.y += reloadArc * 0.025;
-      left.position.z += reloadArc * 0.065;
-      left.rotation.x -= reloadArc * 0.48;
-      left.rotation.z += reloadArc * 0.62;
-      right.rotation.z -= reloadArc * 0.12;
-    } else if (kind === 'launcher') {
-      left.position.x -= reloadArc * 0.035;
-      left.position.y -= reloadArc * 0.15;
-      left.position.z += reloadArc * 0.12;
-      left.rotation.x -= reloadArc * 0.8;
-      right.rotation.z -= reloadArc * 0.1;
-    }
+    // Los dedos permanecen anclados al arma durante movimiento, ADS y recoil.
+    // Solo la mano que manipula el mecanismo abandona temporalmente su agarre.
+    const grip = handGripState({
+      kind,
+      ads: handPose.ads,
+      reloading: handPose.reloading,
+      reloadProgress: handPose.reloadProgress,
+      firePulse: handPose.shot,
+    });
+    arms.applyGrip(grip);
+    viewmodel.grip = grip;
 
     for (const object of Object.values(moving)) {
       object.position.copy(object.userData.basePosition);
@@ -1198,7 +1306,12 @@ export class WeaponSystem {
       moving.magazine.rotation.x += mechanism.magazineDrop * 0.22;
       moving.magazine.rotation.z += mechanism.magazineDrop * 0.12;
     }
-    if (moving.pump) moving.pump.position.z += mechanism.pumpTravel * 0.16;
+    if (moving.pump) {
+      const pumpTravel = mechanism.pumpTravel * 0.16;
+      moving.pump.position.z += pumpTravel;
+      // La mano acompaña exactamente la bomba y conserva todos sus contactos.
+      left.position.z += pumpTravel;
+    }
     if (moving.cylinder) {
       moving.cylinder.position.x += mechanism.cylinderOpen * 0.095;
       moving.cylinder.rotation.z += mechanism.cylinderOpen * 0.55 + mechanism.chamberCycle * 0.18;
