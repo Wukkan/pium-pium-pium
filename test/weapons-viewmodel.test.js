@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 
 import {
   buildGunModel,
+  buildKnifeModel,
   firstPersonAnimationState,
   MAX_ARSENAL_MONEY,
+  meleeAnimationState,
   sanitizeArsenalState,
+  viewmodelVisibilityState,
   WeaponSystem,
 } from '../src/weapons.js';
 
@@ -89,6 +92,51 @@ function economyHarness() {
   return { weapon, calls };
 }
 
+function meleeHarness() {
+  const calls = { reloading: [], scope: [], shots: 0 };
+  const pistol = buildGunModel('pistol');
+  const ar = buildGunModel('ar');
+  const knife = buildKnifeModel();
+  const weapon = Object.create(WeaponSystem.prototype);
+  Object.assign(weapon, {
+    current: 'pistol',
+    forcedKey: null,
+    owned: { pistol: true, ar: true },
+    models: { pistol, ar },
+    knifeModel: knife,
+    rig: { visible: true },
+    player: { dead: false },
+    inputBlocked: false,
+    meleeActive: false,
+    meleeProgress: 0,
+    meleeCooldownUntil: 0,
+    triggerDown: true,
+    ads: true,
+    reloading: true,
+    firePulse: 0.8,
+    equipProgress: 1,
+    equipDuration: 0.3,
+    kickPos: 0,
+    lastShot: -Infinity,
+    state: {
+      pistol: { ammo: 5, reserve: 20 },
+      ar: { ammo: 30, reserve: 120 },
+    },
+    hud: {
+      setReloading(value) { calls.reloading.push(value); },
+      setScope(value) { calls.scope.push(value); },
+      updateAmmo() {},
+      updateSlots() {},
+      announce() {},
+    },
+    audio: { dry() {}, reload() {} },
+    onShot() { calls.shots++; },
+  });
+  pistol.userData.flash.visible = true;
+  pistol.userData.muzzleLight.intensity = 2;
+  return { weapon, calls };
+}
+
 test('every first-person weapon exposes two articulated tactical hands', () => {
   for (const kind of WEAPON_KINDS) {
     const model = buildGunModel(kind);
@@ -101,6 +149,150 @@ test('every first-person weapon exposes two articulated tactical hands', () => {
     assert.ok(viewmodel.arms.left.children.length >= 9, `${kind}: detailed left hand`);
     assert.ok(model.userData.muzzleLight, `${kind}: muzzle light`);
   }
+});
+
+test('firearm and knife viewmodels are mutually exclusive in every visibility mode', () => {
+  const normal = viewmodelVisibilityState();
+  assert.deepEqual(normal, { rig: true, firearm: true, knife: false, scope: false });
+
+  const melee = viewmodelVisibilityState({ meleeActive: true });
+  assert.deepEqual(melee, { rig: true, firearm: false, knife: true, scope: false });
+
+  const scoped = viewmodelVisibilityState({ scoped: true });
+  assert.deepEqual(scoped, { rig: true, firearm: false, knife: false, scope: true });
+
+  const dead = viewmodelVisibilityState({ dead: true, scoped: true, meleeActive: true });
+  assert.deepEqual(dead, { rig: false, firearm: false, knife: false, scope: false });
+
+  for (const state of [normal, melee, scoped, dead]) {
+    assert.equal(state.firearm && state.knife, false, 'gun and knife must never render together');
+  }
+});
+
+test('melee animation is clamped, strikes once in the middle and finishes hidden', () => {
+  const start = meleeAnimationState(-10);
+  const strike = meleeAnimationState(0.43);
+  const finish = meleeAnimationState(1);
+  const clampedFinish = meleeAnimationState(10);
+
+  assert.equal(start.visible, true);
+  assert.equal(start.strike, 0);
+  assert.ok(strike.strike > 0.99);
+  assert.ok(strike.position.x < start.position.x - 0.3);
+  assert.equal(finish.visible, false);
+  assert.equal(finish.strike, 0);
+  assert.deepEqual(clampedFinish, finish);
+
+  for (const pose of [start, strike, finish]) {
+    for (const value of [...Object.values(pose.position), ...Object.values(pose.rotation)]) {
+      assert.equal(Number.isFinite(value), true);
+    }
+  }
+});
+
+test('gun and knife models expose articulated fingers, thumbs and arm chains', () => {
+  const models = [
+    ...WEAPON_KINDS.map((kind) => [kind, buildGunModel(kind)]),
+    ['knife', buildKnifeModel()],
+  ];
+
+  for (const [kind, model] of models) {
+    const arms = model.userData.viewmodel.arms;
+    for (const side of ['right', 'left']) {
+      const hand = arms[side];
+      assert.ok(hand, `${kind}: ${side} hand`);
+      assert.ok(arms.chains[side], `${kind}: ${side} arm chain`);
+      assert.ok(arms.root.getObjectByName(`${side}-upper-arm`), `${kind}: ${side} upper arm`);
+      assert.ok(arms.root.getObjectByName(`${side}-forearm`), `${kind}: ${side} forearm`);
+
+      for (let finger = 1; finger <= 4; finger++) {
+        const root = hand.getObjectByName(`${side}-finger-${finger}`);
+        assert.ok(root, `${kind}: ${side} finger ${finger}`);
+        for (const segment of ['proximal', 'middle', 'distal']) {
+          assert.ok(
+            root.getObjectByName(`${side}-finger-${finger}-${segment}`),
+            `${kind}: ${side} finger ${finger} ${segment}`,
+          );
+        }
+        assert.ok(root.getObjectByName(`${side}-finger-${finger}-tip`), `${kind}: ${side} fingertip ${finger}`);
+      }
+
+      assert.ok(hand.getObjectByName(`${side}-thumb-proximal`), `${kind}: ${side} thumb proximal`);
+      assert.ok(hand.getObjectByName(`${side}-thumb-distal`), `${kind}: ${side} thumb distal`);
+    }
+  }
+
+  const knife = models.at(-1)[1];
+  assert.ok(knife.getObjectByName('knife-blade'));
+  assert.ok(knife.getObjectByName('knife-handle'));
+});
+
+test('beginning and cancelling melee blocks firearm actions and restores only the active gun', () => {
+  const { weapon, calls } = meleeHarness();
+  const ammoBefore = weapon.ammo.ammo;
+
+  assert.equal(weapon.beginMelee(), true);
+  assert.equal(weapon.meleeActive, true);
+  assert.equal(weapon.triggerDown, false);
+  assert.equal(weapon.ads, false);
+  assert.equal(weapon.reloading, false);
+  assert.equal(weapon.firePulse, 0);
+  assert.equal(weapon.models.pistol.userData.flash.visible, false);
+  assert.equal(weapon.models.pistol.userData.muzzleLight.intensity, 0);
+  assert.equal(weapon.models.pistol.visible, false);
+  assert.equal(weapon.models.ar.visible, false);
+  assert.equal(weapon.knifeModel.visible, true);
+  assert.equal(calls.reloading.at(-1), false);
+  assert.equal(calls.scope.at(-1), false);
+
+  assert.equal(weapon.beginMelee(), false, 'an active melee animation cannot restart');
+  weapon.fire();
+  weapon.reload();
+  weapon.switchTo('ar');
+  assert.equal(weapon.ammo.ammo, ammoBefore, 'melee must block gunfire');
+  assert.equal(weapon.reloading, false, 'melee must block reload');
+  assert.equal(weapon.current, 'pistol', 'melee must block manual weapon switching');
+  assert.equal(calls.shots, 0);
+
+  assert.equal(weapon.cancelMelee(true), true);
+  assert.equal(weapon.meleeActive, false);
+  assert.equal(weapon.meleeProgress, 0);
+  assert.equal(weapon.knifeModel.visible, false);
+  assert.equal(weapon.models.pistol.visible, true);
+  assert.equal(weapon.models.ar.visible, false);
+  assert.equal(weapon.equipProgress, 0, 'restored firearm must play its draw animation');
+  assert.equal(weapon.equipDuration, 0.28);
+  assert.equal(weapon.cancelMelee(), false, 'cancelling an inactive melee is a no-op');
+});
+
+test('melee strike callback fires exactly once when progress crosses the impact point', () => {
+  const { weapon } = meleeHarness();
+  let strikes = 0;
+
+  assert.equal(weapon.beginMelee(() => { strikes++; }), true);
+  weapon._updateMelee(0.26);
+  assert.equal(strikes, 0, 'impact must wait until progress reaches 0.43');
+
+  weapon._updateMelee(0.02);
+  assert.equal(strikes, 1, 'impact fires on the first update that crosses 0.43');
+  weapon._updateMelee(0.1);
+  weapon._updateMelee(1);
+  assert.equal(strikes, 1, 'later updates and recovery cannot repeat the impact');
+});
+
+test('cancelling melee before the impact point discards its strike callback', () => {
+  const { weapon } = meleeHarness();
+  let strikes = 0;
+
+  assert.equal(weapon.beginMelee(() => { strikes++; }), true);
+  weapon._updateMelee(0.2);
+  assert.equal(weapon.meleeProgress < 0.43, true);
+  assert.equal(weapon.cancelMelee(false), true);
+  weapon._updateMelee(1);
+
+  assert.equal(strikes, 0);
+  assert.equal(weapon.meleeStrikeCallback, null);
+  assert.equal(weapon.meleeStrikeFired, false);
 });
 
 test('each weapon class exposes the moving part needed by its reload', () => {

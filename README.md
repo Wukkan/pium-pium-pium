@@ -6,6 +6,8 @@ La actualización **Combat Update 1.1** incorpora manos articuladas y animacione
 
 El parche **Spawn Safety 1.1.1** audita toda la geometría de Arena y Ciudad: cada mapa dispone de 10 respawns fijos con un metro de margen, el servidor elige el más alejado de entidades vivas y nunca reutiliza paquetes de una vida anterior. Los spawns de bots, waypoints y la reaparición de cajas también se validan para impedir que una entidad quede dentro de una estructura.
 
+La actualización **Viewmodel & Crosshair 1.2** convierte el cuchillo en un cambio temporal de arma real: oculta el arma de fuego, bloquea acciones incompatibles y sincroniza el daño con el golpe visual. También añade brazos anclados, manos con palma, nudillos, pulgar y tres falanges por dedo; un estudio completo de mira con presets, color libre, tamaño, grosor, apertura, punto, contorno, opacidad y respuesta dinámica; y una experiencia de arsenal/compra táctica, minimalista y accesible.
+
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.
 
 ## Jugar en local
@@ -33,7 +35,7 @@ El botón **🔊 AUDIO** de la barra superior permite silenciar el juego inmedia
 - **Audio**: activar o silenciar todo el juego y conservar el volumen elegido.
 - **Video**: FOV, escala de resolución, sombras y su calidad, presupuesto de efectos, FPS y pantalla completa.
 - **Controles**: sensibilidad, apuntado y reasignación persistente de 22 acciones. Si eliges una tecla ocupada, las dos funciones intercambian sus asignaciones.
-- **Jugabilidad**: bunny-hop, balanceo del arma, sacudida de cámara, ping y apariencia de la mira.
+- **Jugabilidad**: bunny-hop, balanceo del arma, sacudida de cámara, ping y estudio completo de mira personalizada.
 - **Accesibilidad**: movimiento reducido, destello de daño y contraste alto.
 
 Los cambios se aplican al momento y se guardan en el navegador. **Escape** permanece reservado como salida segura.

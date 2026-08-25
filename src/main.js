@@ -6,7 +6,7 @@ import { WeaponSystem, WEAPON_DEFS, WEAPON_ORDER } from './weapons.js';
 import { BotManager } from './bots.js';
 import { Effects } from './effects.js';
 import { AudioSys } from './audio.js';
-import { HUD } from './hud.js';
+import { applyCrosshairElement, HUD } from './hud.js';
 import { Net } from './net.js';
 import { Remotes } from './remotes.js';
 import { KitManager } from './kits.js';
@@ -21,8 +21,9 @@ import {
   selectSafeSpawn,
 } from './shared/spawn-safety.js';
 import {
-  botPanelState, buyMenuCategoryState, isBotConfigAcknowledgement, loadoutMetadata,
-  effectiveMasterVolume, effectivePixelRatio, menuNavState, readSettings, shotTracerState,
+  applyCrosshairPreset, botPanelState, buyMenuCategoryState, CROSSHAIR_PRESETS,
+  isBotConfigAcknowledgement, loadoutMetadata, effectiveMasterVolume, effectivePixelRatio,
+  menuNavState, readSettings, shotTracerState,
 } from './ui-models.js';
 import {
   BINDING_ACTIONS, assignBinding, bindingSlotIndex, keyCodeLabel,
@@ -488,11 +489,7 @@ function applySettings() {
   hud.setFpsVisible(settings.showFps);
   hud.setPingVisible(settings.showPing);
   hud.setDamageFlashEnabled(settings.damageFlash);
-  hud.setCrosshairPreferences({
-    visible: settings.crosshairVisible,
-    color: settings.crosshairColor,
-    scale: settings.crosshairScale,
-  });
+  hud.setCrosshairPreferences(settings);
   hud.setBindingLabels({
     grenade: bindingLabel('grenade'),
     reload: bindingLabel('reload'),
@@ -587,8 +584,16 @@ function renderSettings() {
   value('option-aim-mode', settings.aimMode);
   value('option-weapon-bob', settings.weaponBob);
   value('option-screen-shake', settings.screenShake);
+  value('option-crosshair-style', settings.crosshairStyle);
   value('option-crosshair-color', settings.crosshairColor);
   value('option-crosshair-scale', settings.crosshairScale);
+  value('option-crosshair-thickness', settings.crosshairThickness);
+  value('option-crosshair-gap', settings.crosshairGap);
+  value('option-crosshair-dot-size', settings.crosshairDotSize);
+  value('option-crosshair-outline-thickness', settings.crosshairOutlineThickness);
+  value('option-crosshair-outline-color', settings.crosshairOutlineColor);
+  value('option-crosshair-opacity', settings.crosshairOpacity);
+  value('option-crosshair-dynamic-amount', settings.crosshairDynamicAmount);
   checked('option-sound-enabled', settings.soundEnabled);
   checked('option-shadows', settings.shadowsEnabled);
   checked('option-invert', settings.invertY);
@@ -596,6 +601,9 @@ function renderSettings() {
   checked('option-show-ping', settings.showPing);
   checked('option-bunny-hop', settings.bunnyHopEnabled);
   checked('option-crosshair-visible', settings.crosshairVisible);
+  checked('option-crosshair-dot', settings.crosshairDot);
+  checked('option-crosshair-outline', settings.crosshairOutline);
+  checked('option-crosshair-dynamic', settings.crosshairDynamic);
   checked('option-damage-flash', settings.damageFlash);
   checked('option-high-contrast', settings.highContrast);
   checked('option-reduced-motion', settings.reducedMotion);
@@ -605,6 +613,14 @@ function renderSettings() {
   output('option-weapon-bob-value', `${Math.round(settings.weaponBob * 100)}%`);
   output('option-screen-shake-value', `${Math.round(settings.screenShake * 100)}%`);
   output('option-crosshair-scale-value', `${Math.round(settings.crosshairScale * 100)}%`);
+  output('option-crosshair-thickness-value', `${settings.crosshairThickness.toFixed(1)} px`);
+  output('option-crosshair-gap-value', `${settings.crosshairGap.toFixed(0)} px`);
+  output('option-crosshair-dot-size-value', `${settings.crosshairDotSize.toFixed(1)} px`);
+  output('option-crosshair-outline-thickness-value', `${settings.crosshairOutlineThickness.toFixed(1)} px`);
+  output('option-crosshair-opacity-value', `${Math.round(settings.crosshairOpacity * 100)}%`);
+  output('option-crosshair-dynamic-amount-value', `${Math.round(settings.crosshairDynamicAmount * 100)}%`);
+  output('option-crosshair-color-value', settings.crosshairColor.toUpperCase());
+  output('option-crosshair-outline-color-value', settings.crosshairOutlineColor.toUpperCase());
   const volume = document.getElementById('option-volume');
   if (volume) {
     volume.disabled = !settings.soundEnabled;
@@ -632,13 +648,24 @@ function renderSettings() {
     const control = document.getElementById(id);
     if (!control) return;
     control.disabled = disabled;
-    control.closest('.option-row')?.classList.toggle('is-disabled', disabled);
+    control.closest('.option-row, .option-toggle')?.classList.toggle('is-disabled', disabled);
   };
   setDisabled('option-weapon-bob', settings.reducedMotion);
   setDisabled('option-screen-shake', settings.reducedMotion);
   setDisabled('option-shadow-quality', !settings.shadowsEnabled);
-  setDisabled('option-crosshair-scale', !settings.crosshairVisible);
-  setDisabled('option-crosshair-color', !settings.crosshairVisible);
+  for (const id of [
+    'option-crosshair-style', 'option-crosshair-color', 'option-crosshair-scale',
+    'option-crosshair-thickness', 'option-crosshair-gap', 'option-crosshair-dot',
+    'option-crosshair-outline', 'option-crosshair-opacity', 'option-crosshair-dynamic',
+  ]) setDisabled(id, !settings.crosshairVisible);
+  setDisabled(
+    'option-crosshair-dot-size',
+    !settings.crosshairVisible || (!settings.crosshairDot && settings.crosshairStyle !== 'dot'),
+  );
+  setDisabled('option-crosshair-dot', !settings.crosshairVisible || settings.crosshairStyle === 'dot');
+  setDisabled('option-crosshair-outline-thickness', !settings.crosshairVisible || !settings.crosshairOutline);
+  setDisabled('option-crosshair-outline-color', !settings.crosshairVisible || !settings.crosshairOutline);
+  setDisabled('option-crosshair-dynamic-amount', !settings.crosshairVisible || !settings.crosshairDynamic);
   if (settings.reducedMotion) {
     output('option-weapon-bob-value', `ANULADO · ${Math.round(settings.weaponBob * 100)}%`);
     output('option-screen-shake-value', `ANULADO · ${Math.round(settings.screenShake * 100)}%`);
@@ -646,12 +673,36 @@ function renderSettings() {
   if (!settings.crosshairVisible) {
     output('option-crosshair-scale-value', `OCULTA · ${Math.round(settings.crosshairScale * 100)}%`);
   }
+  const preview = document.getElementById('crosshair-preview');
+  if (preview) {
+    const visual = applyCrosshairElement(
+      preview,
+      { ...settings, crosshairVisible: true },
+      settings.crosshairDynamic ? 8 : 0,
+    );
+    preview.closest('.crosshair-preview-stage')?.classList.toggle('is-hidden', !settings.crosshairVisible);
+    preview.setAttribute(
+      'aria-label',
+      settings.crosshairVisible
+        ? `Vista previa de mira ${visual.style}`
+        : 'Vista previa de mira desactivada',
+    );
+  }
+  document.querySelectorAll('[data-crosshair-preset]').forEach((button) => {
+    const preset = CROSSHAIR_PRESETS[button.dataset.crosshairPreset];
+    const active = !!preset && Object.entries(preset)
+      .filter(([key]) => key !== 'label')
+      .every(([key, presetValue]) => settings[key] === presetValue);
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
   renderBindings();
   renderFullscreenState();
   setSettingsTab(activeSettingsTab);
 }
 
 function commitSettings(message = 'Cambios guardados automáticamente.', announce = true) {
+  settings = readSettings(settings);
   applySettings();
   const settingsSaved = saveSettings();
   const bindingsSaved = saveBindings();
@@ -704,6 +755,12 @@ function bindSettings() {
   numberInput('option-weapon-bob', 'weaponBob');
   numberInput('option-screen-shake', 'screenShake');
   numberInput('option-crosshair-scale', 'crosshairScale');
+  numberInput('option-crosshair-thickness', 'crosshairThickness');
+  numberInput('option-crosshair-gap', 'crosshairGap');
+  numberInput('option-crosshair-dot-size', 'crosshairDotSize');
+  numberInput('option-crosshair-outline-thickness', 'crosshairOutlineThickness');
+  numberInput('option-crosshair-opacity', 'crosshairOpacity');
+  numberInput('option-crosshair-dynamic-amount', 'crosshairDynamicAmount');
   toggleInput('option-sound-enabled', 'soundEnabled');
   toggleInput('option-shadows', 'shadowsEnabled');
   toggleInput('option-invert', 'invertY');
@@ -711,13 +768,41 @@ function bindSettings() {
   toggleInput('option-show-ping', 'showPing');
   toggleInput('option-bunny-hop', 'bunnyHopEnabled');
   toggleInput('option-crosshair-visible', 'crosshairVisible');
+  toggleInput('option-crosshair-dot', 'crosshairDot');
+  toggleInput('option-crosshair-outline', 'crosshairOutline');
+  toggleInput('option-crosshair-dynamic', 'crosshairDynamic');
   toggleInput('option-damage-flash', 'damageFlash');
   toggleInput('option-high-contrast', 'highContrast');
   toggleInput('option-reduced-motion', 'reducedMotion');
   selectInput('option-aim-mode', 'aimMode');
+  selectInput('option-crosshair-style', 'crosshairStyle');
   selectInput('option-crosshair-color', 'crosshairColor');
+  selectInput('option-crosshair-outline-color', 'crosshairOutlineColor');
   selectInput('option-shadow-quality', 'shadowQuality');
   selectInput('option-effects-quality', 'effectsQuality');
+
+  for (const id of ['option-crosshair-color', 'option-crosshair-outline-color']) {
+    document.getElementById(id)?.addEventListener('input', (event) => {
+      const property = id === 'option-crosshair-color'
+        ? 'crosshairColor'
+        : 'crosshairOutlineColor';
+      settings[property] = event.currentTarget.value;
+      commitSettings(null, false);
+    });
+  }
+  document.querySelectorAll('[data-crosshair-preset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      settings = applyCrosshairPreset(settings, button.dataset.crosshairPreset);
+      commitSettings(`Preset «${CROSSHAIR_PRESETS[button.dataset.crosshairPreset]?.label || 'mira'}» aplicado.`);
+    });
+  });
+  document.getElementById('reset-crosshair')?.addEventListener('click', () => {
+    const defaults = readSettings(null);
+    for (const key of Object.keys(defaults)) {
+      if (key.startsWith('crosshair')) settings[key] = defaults[key];
+    }
+    commitSettings('Mira personalizada restaurada.');
+  });
 
   document.getElementById('quick-mute')?.addEventListener('click', toggleSound);
   document.getElementById('settings-mute-action')?.addEventListener('click', toggleSound);
@@ -1023,86 +1108,65 @@ function resetStreak() { streak = 0; }
 // lanzar granada con la tecla configurada
 addEventListener('keydown', (e) => {
   if (!isAction(e, 'grenade') || e.repeat || !document.pointerLockElement) return;
-  if (state !== 'playing' || player.dead || weapons.inputBlocked) return;
+  if (state !== 'playing' || player.dead || weapons.inputBlocked || weapons.meleeActive) return;
   if (grenades.throwFrom(camera)) audio.nadeThrow();
 });
 
-// --- cuchillo (V): tajo rápido, 100 de daño por la espalda ---
-function buildKnifeMesh() {
-  const g = new THREE.Group();
-  const blade = new THREE.Mesh(
-    new THREE.BoxGeometry(0.025, 0.09, 0.36),
-    new THREE.MeshLambertMaterial({ color: 0xd8dde2 }),
-  );
-  blade.position.set(0, 0.02, -0.28);
-  const handle = new THREE.Mesh(
-    new THREE.BoxGeometry(0.045, 0.06, 0.16),
-    new THREE.MeshLambertMaterial({ color: 0x3a2c20 }),
-  );
-  g.add(blade, handle);
-  g.position.set(0.3, -0.24, -0.5);
-  g.visible = false;
-  return g;
-}
-const knifeMesh = buildKnifeMesh();
-camera.add(knifeMesh);
-let knifeCooldownUntil = 0;
-let knifeAnim = 0;
+// --- cuchillo (V): cambio temporal de viewmodel, 100 de daño por la espalda ---
 let offlineBotKilled = null; // lo asigna setupOffline
 
 function doKnife() {
-  const nowS = performance.now() / 1000;
-  if (nowS < knifeCooldownUntil || player.dead || state !== 'playing') return;
-  knifeCooldownUntil = nowS + 0.9;
-  knifeAnim = 0.001;
-  audio.knife();
+  if (player.dead || state !== 'playing') return;
+  const strike = () => {
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    fwd.y = 0;
+    fwd.normalize();
 
-  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-  fwd.y = 0;
-  fwd.normalize();
+    // El alcance se comprueba en el instante visual del golpe, no al sacar el cuchillo.
+    const enRango = (pos) => {
+      const dx = pos.x - player.pos.x, dz = pos.z - player.pos.z;
+      if (Math.hypot(dx, dz) > 2.4 || Math.abs(pos.y - player.pos.y) > 2) return false;
+      return new THREE.Vector3(dx, 0, dz).normalize().dot(fwd) > 0.5;
+    };
+    const calcDmg = (yaw) => {
+      const facing = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      return facing.dot(fwd) > 0.35 ? 100 : 40; // por la espalda = letal
+    };
 
-  // ¿hay alguien a tiro de cuchillo delante de mí?
-  const enRango = (pos) => {
-    const dx = pos.x - player.pos.x, dz = pos.z - player.pos.z;
-    if (Math.hypot(dx, dz) > 2.4 || Math.abs(pos.y - player.pos.y) > 2) return false;
-    return new THREE.Vector3(dx, 0, dz).normalize().dot(fwd) > 0.5;
-  };
-  const calcDmg = (yaw) => {
-    const facing = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    return facing.dot(fwd) > 0.35 ? 100 : 40; // por la espalda = letal
-  };
-
-  if (online && remotes) {
-    const grupos = [['pl', remotes.players], ['bot', remotes.bots]];
-    for (const [kind, map] of grupos) {
-      for (const ent of map.values()) {
-        if (!ent.alive) continue;
-        const pos = ent.rig.group.position;
-        if (!enRango(pos)) continue;
-        const dmg = calcDmg(ent.rig.group.rotation.y);
-        effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
-        hud.hitmarker(false);
+    if (online && remotes) {
+      const grupos = [['pl', remotes.players], ['bot', remotes.bots]];
+      for (const [kind, map] of grupos) {
+        for (const ent of map.values()) {
+          if (!ent.alive) continue;
+          const pos = ent.rig.group.position;
+          if (!enRango(pos)) continue;
+          const dmg = calcDmg(ent.rig.group.rotation.y);
+          effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
+          hud.hitmarker(false);
+          audio.hit(dmg >= 100);
+          lastKnifeHitAt = performance.now();
+          net.sendHit(kind, ent.id, dmg, dmg >= 100, 'knife');
+          return;
+        }
+      }
+    } else if (botsLocal) {
+      for (const bot of botsLocal.bots) {
+        if (bot.dead || !enRango(bot.pos)) continue;
+        const dmg = calcDmg(bot.yaw);
+        const killed = bot.takeDamage(dmg, player.pos);
+        effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
+        hud.hitmarker(killed);
         audio.hit(dmg >= 100);
-        lastKnifeHitAt = performance.now();
-        net.sendHit(kind, ent.id, dmg, dmg >= 100, 'knife');
+        if (killed) {
+          missions.event('knifekill');
+          if (offlineBotKilled) offlineBotKilled(bot, false);
+        }
         return;
       }
     }
-  } else if (botsLocal) {
-    for (const bot of botsLocal.bots) {
-      if (bot.dead || !enRango(bot.pos)) continue;
-      const dmg = calcDmg(bot.yaw);
-      const killed = bot.takeDamage(dmg, player.pos);
-      effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
-      hud.hitmarker(killed);
-      audio.hit(dmg >= 100);
-      if (killed) {
-        missions.event('knifekill');
-        if (offlineBotKilled) offlineBotKilled(bot, false);
-      }
-      return;
-    }
-  }
+  };
+  if (!weapons.beginMelee(strike)) return;
+  audio.knife();
 }
 
 let remotes = null;      // modo online
@@ -1843,7 +1907,9 @@ function renderBuyMenu() {
   const categoryStates = buyMenuCategoryState(buyCategory);
   document.querySelectorAll('[data-buy-category]').forEach((button) => {
     const stateForButton = categoryStates.find((item) => item.id === button.dataset.buyCategory);
-    button.classList.toggle('active', !!stateForButton?.active);
+    const active = !!stateForButton?.active;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
   });
   grid.textContent = '';
   const visibleSlots = weapons.slots.filter((key) => {
@@ -1863,8 +1929,14 @@ function renderBuyMenu() {
     card.type = 'button';
     card.className = `buy-card${equipped ? ' equipped' : ''}${owned ? ' owned' : ''}${!owned && !affordable ? ' locked' : ''}`;
     card.dataset.weapon = key;
-    const action = equipped ? 'EQUIPADA' : owned ? 'EQUIPAR' : affordable ? `COMPRAR $${def.price}` : `FALTAN $${def.price}`;
+    const missing = Math.max(0, def.price - weapons.money);
+    const action = equipped ? 'EQUIPADA' : owned ? 'EQUIPAR' : affordable ? `COMPRAR $${def.price}` : `FALTAN $${missing}`;
+    card.dataset.state = equipped ? 'equipped' : owned ? 'owned' : affordable ? 'buyable' : 'locked';
     const slot = WEAPON_ORDER.indexOf(key) + 1;
+    card.setAttribute(
+      'aria-label',
+      `${def.name}. ${action}. Cargador ${def.mag}, reserva ${def.reserve}. Atajo ${bindingLabel(`slot${slot}`)}.`,
+    );
     card.innerHTML = `<span class="buy-key">[${bindingLabel(`slot${slot}`)}] ${def.kind.toUpperCase()}</span>` +
       `<span class="buy-weapon-icon ${def.kind}" aria-hidden="true"></span>` +
       `<span class="buy-name">${def.name}</span>` +
@@ -2092,22 +2164,6 @@ function tick(now) {
   kitsMgr.update(dt);
   grenades.update(dt, player.eyePosition(playerEye));
   effects.update(dt);
-
-  // animación del tajo de cuchillo
-  if (knifeAnim > 0) {
-    knifeAnim += dt * 4.5;
-    if (knifeAnim >= 1) {
-      knifeAnim = 0;
-      knifeMesh.visible = false;
-    } else {
-      knifeMesh.visible = true;
-      const t = knifeAnim;
-      knifeMesh.position.x = 0.3 - t * 0.42;
-      knifeMesh.position.z = -0.5 - Math.sin(t * Math.PI) * 0.25;
-      knifeMesh.rotation.z = t * 1.1;
-      knifeMesh.rotation.y = -0.3 + t * 0.6;
-    }
-  }
 
   hud.update(dt);
   if (playing || state === 'dead') {

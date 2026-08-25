@@ -13,6 +13,9 @@ import {
   weaponAnimationState,
   humanoidModelProfile,
   readSettings,
+  CROSSHAIR_PRESETS,
+  crosshairPresentation,
+  applyCrosshairPreset,
   effectiveMasterVolume,
   effectivePixelRatio,
   menuNavState,
@@ -153,7 +156,11 @@ test('settings are sanitized for a stable AAA menu profile', () => {
     shadowQuality: 'high', effectsQuality: 'balanced',
     invertY: true, showFps: true, showPing: true, aimMode: 'hold',
     bunnyHopEnabled: true, weaponBob: 1, screenShake: 1,
-    crosshairVisible: true, crosshairColor: '#ffffff', crosshairScale: 1,
+    crosshairVisible: true, crosshairStyle: 'classic', crosshairColor: '#ffffff',
+    crosshairScale: 1, crosshairThickness: 2, crosshairGap: 6,
+    crosshairDot: false, crosshairDotSize: 2, crosshairOutline: true,
+    crosshairOutlineThickness: 1, crosshairOutlineColor: '#000000',
+    crosshairOpacity: 1, crosshairDynamic: true, crosshairDynamicAmount: 1,
     damageFlash: true, highContrast: false, reducedMotion: false,
   });
   assert.deepEqual(readSettings('broken'), {
@@ -162,7 +169,11 @@ test('settings are sanitized for a stable AAA menu profile', () => {
     shadowQuality: 'high', effectsQuality: 'balanced',
     invertY: false, showFps: false, showPing: true, aimMode: 'hold',
     bunnyHopEnabled: true, weaponBob: 1, screenShake: 1,
-    crosshairVisible: true, crosshairColor: '#ffffff', crosshairScale: 1,
+    crosshairVisible: true, crosshairStyle: 'classic', crosshairColor: '#ffffff',
+    crosshairScale: 1, crosshairThickness: 2, crosshairGap: 6,
+    crosshairDot: false, crosshairDotSize: 2, crosshairOutline: true,
+    crosshairOutlineThickness: 1, crosshairOutlineColor: '#000000',
+    crosshairOpacity: 1, crosshairDynamic: true, crosshairDynamicAmount: 1,
     damageFlash: true, highContrast: false, reducedMotion: false,
   });
 });
@@ -199,6 +210,117 @@ test('extended video, gameplay, and accessibility settings are sanitized', () =>
   assert.equal(settings.highContrast, true);
   assert.equal(effectivePixelRatio(settings.renderScale, 3), 1.5);
   assert.equal(effectivePixelRatio(1, 3), 2);
+});
+
+test('custom crosshair settings accept safe colors and clamp every visual dimension', () => {
+  const settings = readSettings({
+    crosshairStyle: 'tactical',
+    crosshairColor: ' #A1B2C3 ',
+    crosshairThickness: 99,
+    crosshairGap: -4,
+    crosshairDot: true,
+    crosshairDotSize: 20,
+    crosshairOutline: false,
+    crosshairOutlineThickness: 8,
+    crosshairOutlineColor: '#F0A020',
+    crosshairOpacity: 0.01,
+    crosshairDynamic: false,
+    crosshairDynamicAmount: -3,
+  });
+  assert.equal(settings.crosshairStyle, 'tactical');
+  assert.equal(settings.crosshairColor, '#a1b2c3');
+  assert.equal(settings.crosshairThickness, 6);
+  assert.equal(settings.crosshairGap, 0);
+  assert.equal(settings.crosshairDot, true);
+  assert.equal(settings.crosshairDotSize, 8);
+  assert.equal(settings.crosshairOutline, false);
+  assert.equal(settings.crosshairOutlineThickness, 3);
+  assert.equal(settings.crosshairOutlineColor, '#f0a020');
+  assert.equal(settings.crosshairOpacity, 0.2);
+  assert.equal(settings.crosshairDynamic, false);
+  assert.equal(settings.crosshairDynamicAmount, 0);
+});
+
+test('custom crosshair rejects unsafe CSS colors, unknown styles, and non-finite numbers', () => {
+  const settings = readSettings({
+    crosshairStyle: 'url-script',
+    crosshairColor: 'red; background:url(evil)',
+    crosshairOutlineColor: '#fff',
+    crosshairThickness: Infinity,
+    crosshairGap: Number.NaN,
+    crosshairOpacity: 'not-a-number',
+  });
+  assert.equal(settings.crosshairStyle, 'classic');
+  assert.equal(settings.crosshairColor, '#ffffff');
+  assert.equal(settings.crosshairOutlineColor, '#000000');
+  assert.equal(settings.crosshairThickness, 2);
+  assert.equal(settings.crosshairGap, 6);
+  assert.equal(settings.crosshairOpacity, 1);
+});
+
+test('crosshair presentation separates dimensions and limits dynamic expansion', () => {
+  const staticPresentation = crosshairPresentation({
+    crosshairScale: 1.5,
+    crosshairThickness: 3,
+    crosshairGap: 8,
+    crosshairDynamic: false,
+  }, 500);
+  assert.equal(staticPresentation.length, 13.5);
+  assert.equal(staticPresentation.thickness, 3);
+  assert.equal(staticPresentation.gap, 8);
+  assert.equal(staticPresentation.dynamicExpansion, 0);
+
+  const dynamicPresentation = crosshairPresentation({
+    crosshairGap: 10,
+    crosshairDynamic: true,
+    crosshairDynamicAmount: 2,
+  }, 500);
+  assert.equal(dynamicPresentation.gap, 52);
+  assert.equal(dynamicPresentation.dynamicExpansion, 42);
+});
+
+test('crosshair styles expose the correct arms and center dot', () => {
+  const classic = crosshairPresentation({ crosshairStyle: 'classic', crosshairDot: false });
+  assert.deepEqual(
+    [classic.showTop, classic.showBottom, classic.showLeft, classic.showRight, classic.showDot],
+    [true, true, true, true, false],
+  );
+
+  const tactical = crosshairPresentation({ crosshairStyle: 'tactical', crosshairDot: true });
+  assert.deepEqual(
+    [tactical.showTop, tactical.showBottom, tactical.showLeft, tactical.showRight, tactical.showDot],
+    [false, true, true, true, true],
+  );
+
+  const dot = crosshairPresentation({
+    crosshairStyle: 'dot', crosshairDot: false, crosshairOutline: false,
+  });
+  assert.deepEqual(
+    [dot.showTop, dot.showBottom, dot.showLeft, dot.showRight, dot.showDot],
+    [false, false, false, false, true],
+  );
+  assert.equal(dot.outlineThickness, 0);
+});
+
+test('crosshair presets are complete, immutable, and preserve unrelated settings', () => {
+  assert.deepEqual(Object.keys(CROSSHAIR_PRESETS), [
+    'balanced', 'precise', 'highVisibility', 'dynamic',
+  ]);
+  assert.ok(Object.values(CROSSHAIR_PRESETS).every(Object.isFrozen));
+  assert.ok(Object.isFrozen(CROSSHAIR_PRESETS));
+
+  const original = readSettings({ fov: 103, crosshairColor: '#123456' });
+  const precise = applyCrosshairPreset(original, 'precise');
+  assert.notEqual(precise, original);
+  assert.equal(original.crosshairColor, '#123456');
+  assert.equal(precise.fov, 103);
+  assert.equal(precise.crosshairColor, '#66e5ff');
+  assert.equal(precise.crosshairDot, true);
+  assert.equal(precise.crosshairDynamic, false);
+
+  const unchanged = applyCrosshairPreset(original, 'missing');
+  assert.deepEqual(unchanged, original);
+  assert.notEqual(unchanged, original);
 });
 
 test('menu navigation marks one active destination', () => {

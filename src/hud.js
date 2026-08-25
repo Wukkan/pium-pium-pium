@@ -2,7 +2,9 @@
 // HUD: vida, munición, mira, hitmarker, killfeed, viñeta de daño, pantallas.
 // ---------------------------------------------------------------------------
 
-import { podiumStageState, weaponHudLabel } from './ui-models.js';
+import {
+  crosshairPresentation, podiumStageState, readSettings, weaponHudLabel,
+} from './ui-models.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -10,6 +12,32 @@ const SLOT_NAMES = {
   pistol: 'Pistola', shotgun: 'Escopeta', smg: 'Subfusil', ar: 'Rifle', sniper: 'Franco',
   revolver: 'Revólver', launcher: 'Lanzagr.',
 };
+
+export function applyCrosshairElement(element, preferences = {}, spreadPx = 0) {
+  const visual = crosshairPresentation(preferences, spreadPx);
+  if (!element) return visual;
+  const set = (name, value) => element.style.setProperty(name, value);
+  set('--crosshair-color', visual.color);
+  set('--crosshair-length', `${visual.length.toFixed(2)}px`);
+  set('--crosshair-thickness', `${visual.thickness.toFixed(2)}px`);
+  set('--crosshair-half-thickness', `${(-visual.thickness / 2).toFixed(2)}px`);
+  set('--crosshair-gap', `${visual.gap.toFixed(2)}px`);
+  set('--crosshair-negative-extent', `${(-visual.gap - visual.length).toFixed(2)}px`);
+  set('--crosshair-dot-size', `${visual.dotSize.toFixed(2)}px`);
+  set('--crosshair-half-dot', `${(-visual.dotSize / 2).toFixed(2)}px`);
+  set('--crosshair-outline-thickness', `${visual.outlineThickness.toFixed(2)}px`);
+  set('--crosshair-outline-color', visual.outlineColor);
+  set('--crosshair-opacity', String(visual.opacity));
+  element.dataset.crosshairStyle = visual.style;
+  for (const [selector, visible] of [
+    ['.t', visual.showTop], ['.b', visual.showBottom],
+    ['.l', visual.showLeft], ['.r', visual.showRight], ['.dot', visual.showDot],
+  ]) {
+    const part = element.querySelector(selector);
+    if (part) part.style.display = visible ? 'block' : 'none';
+  }
+  return visual;
+}
 
 export class HUD {
   constructor() {
@@ -27,6 +55,12 @@ export class HUD {
     this._vignetteLevel = 0;
     this._damageFlashEnabled = true;
     this._crosshairVisible = true;
+    this._crosshairPreferences = readSettings(null);
+    this._crosshairSpread = 0;
+    this._crosshairVisual = crosshairPresentation(this._crosshairPreferences, 0);
+    this._crosshairRenderedGap = null;
+    this._scopeVisible = false;
+    this._combatActive = true;
     this._showPing = true;
     this._grenadeCount = 0;
     this._weapons = null;
@@ -48,20 +82,46 @@ export class HUD {
   showHud(show) { this.el.hud.style.display = show ? 'block' : 'none'; }
   showDeath(show, killerName) {
     this.el.death.style.display = show ? 'flex' : 'none';
+    this._combatActive = !show;
+    this._syncCrosshairDisplay();
     if (show) this.el.deathKiller.textContent = `Te eliminó ${killerName}`;
   }
 
-  setCrosshairGap(px) {
-    this.el.crosshair.style.setProperty('--gap', `${px.toFixed(1)}px`);
+  setCrosshairSpread(px) {
+    const numeric = Number(px);
+    this._crosshairSpread = Number.isFinite(numeric) ? Math.min(32, Math.max(0, numeric)) : 0;
+    const preferences = this._crosshairPreferences;
+    const expansion = preferences.crosshairDynamic
+      ? this._crosshairSpread * preferences.crosshairDynamicAmount
+      : 0;
+    const gap = Math.min(52, preferences.crosshairGap + expansion);
+    if (Math.abs(gap - (this._crosshairRenderedGap ?? -1)) < 0.04) return;
+    this._crosshairRenderedGap = gap;
+    this.el.crosshair.style.setProperty('--crosshair-gap', `${gap.toFixed(2)}px`);
+    this.el.crosshair.style.setProperty(
+      '--crosshair-negative-extent',
+      `${(-gap - this._crosshairVisual.length).toFixed(2)}px`,
+    );
   }
 
-  setCrosshairPreferences({ visible = true, color = '#ffffff', scale = 1 } = {}) {
-    this._crosshairVisible = visible;
-    this.el.crosshair.style.setProperty('--crosshair-color', color);
-    this.el.crosshair.style.setProperty('--crosshair-scale', String(scale));
-    if (this.el.scope.style.display !== 'block') {
-      this.el.crosshair.style.display = visible ? 'block' : 'none';
-    }
+  // Compatibilidad con integraciones anteriores: ahora el valor representa expansión por dispersión.
+  setCrosshairGap(px) { this.setCrosshairSpread(px); }
+
+  setCrosshairPreferences(preferences = {}) {
+    this._crosshairPreferences = readSettings(preferences);
+    const visual = applyCrosshairElement(
+      this.el.crosshair, this._crosshairPreferences, this._crosshairSpread,
+    );
+    this._crosshairVisual = visual;
+    this._crosshairRenderedGap = visual.gap;
+    this._crosshairVisible = visual.visible;
+    this._syncCrosshairDisplay();
+  }
+
+  _syncCrosshairDisplay() {
+    this.el.crosshair.style.display = this._scopeVisible || !this._crosshairVisible || !this._combatActive
+      ? 'none'
+      : 'block';
   }
 
   setBindingLabels({ grenade, reload, slots } = {}) {
@@ -86,8 +146,9 @@ export class HUD {
   }
 
   setScope(on) {
-    this.el.scope.style.display = on ? 'block' : 'none';
-    this.el.crosshair.style.display = on || !this._crosshairVisible ? 'none' : 'block';
+    this._scopeVisible = !!on;
+    this.el.scope.style.display = this._scopeVisible ? 'block' : 'none';
+    this._syncCrosshairDisplay();
   }
 
   updateHealth(hp, max) {

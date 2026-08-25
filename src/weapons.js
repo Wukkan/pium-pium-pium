@@ -100,6 +100,8 @@ export function sanitizeArsenalState(value) {
 
 const BASE_FOV = 78;
 const EQUIP_READY_PROGRESS = 0.999;
+const MELEE_DURATION = 0.62;
+const MELEE_COOLDOWN = 0.9;
 
 const EQUIP_DURATIONS = Object.freeze({
   pistol: 0.3,
@@ -119,6 +121,7 @@ const HAND_POSES = Object.freeze({
   ar:       { right: [0.018, -0.145, 0.075], left: [-0.018, -0.085, -0.32] },
   sniper:   { right: [0.018, -0.14, 0.09], left: [-0.018, -0.07, -0.39] },
   launcher: { right: [0.018, -0.15, 0.105], left: [-0.018, -0.105, -0.22] },
+  knife:    { right: [0.012, -0.135, 0.07], left: [-0.19, -0.175, 0.12] },
 });
 
 const MAGAZINE_WEAPONS = new Set(['pistol', 'smg', 'ar', 'sniper']);
@@ -215,32 +218,82 @@ export function firstPersonAnimationState({
   };
 }
 
+export function meleeAnimationState(progress = 0) {
+  const p = clamp01(progress);
+  const draw = smoothRange(0, 0.2, p);
+  const strike = windowPulse(p, 0.16, 0.43, 0.7);
+  const recover = smoothRange(0.62, 1, p);
+  const ready = draw * (1 - recover);
+  return {
+    visible: p < 1,
+    strike,
+    position: {
+      x: 0.08 - ready * 0.03 - strike * 0.44,
+      y: -0.24 - (1 - draw) * 0.34 + recover * 0.08,
+      z: -0.08 - ready * 0.03 - strike * 0.24,
+    },
+    rotation: {
+      x: -0.12 + strike * 0.35,
+      y: -0.38 + strike * 0.92,
+      z: 0.2 + (1 - draw) * 0.78 + strike * 1.18 - recover * 0.2,
+    },
+  };
+}
+
+export function viewmodelVisibilityState({ dead = false, scoped = false, meleeActive = false } = {}) {
+  const alive = !dead;
+  return {
+    rig: alive,
+    firearm: alive && !scoped && !meleeActive,
+    knife: alive && meleeActive,
+    scope: alive && scoped && !meleeActive,
+  };
+}
+
 function snapshotTransform(object) {
   object.userData.basePosition = object.position.clone();
   object.userData.baseRotation = object.rotation.clone();
 }
 
-function makeArmSegment(material, from, to, radiusTop, radiusBottom = radiusTop) {
-  const delta = new THREE.Vector3().subVectors(to, from);
-  const length = Math.max(0.001, delta.length());
-  const mesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(radiusTop, radiusBottom, length, 8, 1),
-    material,
-  );
-  mesh.position.copy(from).addScaledVector(delta, 0.5);
-  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize());
+const ARM_UP = new THREE.Vector3(0, 1, 0);
+
+function makeArmSegment(material, radiusTop, radiusBottom = radiusTop) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radiusTop, radiusBottom, 1, 10, 1), material);
   mesh.frustumCulled = false;
+  mesh.castShadow = true;
   return mesh;
+}
+
+function setArmSegment(mesh, from, to, delta) {
+  delta.subVectors(to, from);
+  const length = Math.max(0.001, delta.length());
+  mesh.position.copy(from).addScaledVector(delta, 0.5);
+  mesh.scale.set(1, length, 1);
+  mesh.quaternion.setFromUnitVectors(ARM_UP, delta.multiplyScalar(1 / length));
 }
 
 function buildFirstPersonArms(kind, materials) {
   const root = new THREE.Group();
   root.name = 'first-person-arms';
   const pose = HAND_POSES[kind] || HAND_POSES.pistol;
-  const palmGeometry = new THREE.BoxGeometry(0.105, 0.078, 0.13);
-  const panelGeometry = new THREE.BoxGeometry(0.086, 0.022, 0.068);
-  const fingerGeometry = new THREE.BoxGeometry(0.019, 0.048, 0.072);
-  const thumbGeometry = new THREE.CylinderGeometry(0.018, 0.023, 0.085, 7);
+  const palmGeometry = new THREE.SphereGeometry(0.075, 10, 7);
+  const palmPadGeometry = new THREE.BoxGeometry(0.086, 0.018, 0.072);
+  const knuckleGeometry = new THREE.SphereGeometry(0.014, 8, 5);
+  const fingerLengths = [0.034, 0.029, 0.024];
+  const fingerGeometries = fingerLengths.map((length, index) => {
+    const geometry = new THREE.CylinderGeometry(0.008 - index * 0.0007, 0.0105 - index * 0.0005, length, 8, 1);
+    geometry.rotateX(Math.PI / 2);
+    return geometry;
+  });
+  const fingertipGeometry = new THREE.SphereGeometry(0.009, 8, 5);
+  const thumbLengths = [0.038, 0.031];
+  const thumbGeometries = thumbLengths.map((length, index) => {
+    const geometry = new THREE.CylinderGeometry(0.011 - index * 0.001, 0.013 - index * 0.001, length, 8, 1);
+    geometry.rotateX(Math.PI / 2);
+    return geometry;
+  });
+  const elbowGeometry = new THREE.SphereGeometry(0.078, 10, 6);
+  const shoulderGeometry = new THREE.SphereGeometry(0.092, 10, 6);
 
   const makeHand = (side, position) => {
     const direction = side === 'left' ? -1 : 1;
@@ -250,28 +303,76 @@ function buildFirstPersonArms(kind, materials) {
 
     const palm = new THREE.Mesh(palmGeometry, materials.glove);
     palm.name = `${side}-glove-palm`;
+    palm.scale.set(0.72, 0.56, 0.94);
     palm.rotation.x = -0.18;
     hand.add(palm);
 
-    const knuckle = new THREE.Mesh(panelGeometry, materials.glovePanel);
-    knuckle.name = `${side}-knuckle-guard`;
-    knuckle.position.set(0, 0.046, -0.018);
-    knuckle.rotation.x = -0.12;
-    hand.add(knuckle);
+    const palmPad = new THREE.Mesh(palmPadGeometry, materials.glovePanel);
+    palmPad.name = `${side}-palm-pad`;
+    palmPad.position.set(0, -0.012, -0.038);
+    palmPad.rotation.x = -0.1;
+    hand.add(palmPad);
+
+    const baseCurls = side === 'right'
+      ? (kind === 'knife' ? [0.26, 0.68, 0.78, 0.86] : [0.16, 0.56, 0.66, 0.74])
+      : [0.5, 0.58, 0.66, 0.74];
+    const lengthScales = [0.93, 1.05, 1, 0.84];
 
     for (let i = 0; i < 4; i++) {
-      const finger = new THREE.Mesh(fingerGeometry, materials.glove);
+      const finger = new THREE.Group();
       finger.name = `${side}-finger-${i + 1}`;
-      finger.position.set((i - 1.5) * 0.022, -0.025, -0.075);
-      finger.rotation.x = 0.55;
+      finger.position.set((i - 1.5) * 0.021, -0.018, -0.063);
+      finger.rotation.x = 0.08;
+      const knuckle = new THREE.Mesh(knuckleGeometry, materials.glovePanel);
+      knuckle.name = `${side}-finger-${i + 1}-knuckle`;
+      knuckle.scale.set(0.88, 0.72, 0.9);
+      finger.add(knuckle);
+      let joint = finger;
+      for (let segmentIndex = 0; segmentIndex < fingerGeometries.length; segmentIndex++) {
+        const length = fingerLengths[segmentIndex] * lengthScales[i];
+        const segment = new THREE.Mesh(fingerGeometries[segmentIndex], materials.glove);
+        const names = ['proximal', 'middle', 'distal'];
+        segment.name = `${side}-finger-${i + 1}-${names[segmentIndex]}`;
+        segment.scale.z = lengthScales[i];
+        segment.position.z = -length / 2;
+        segment.castShadow = true;
+        joint.add(segment);
+        if (segmentIndex < fingerGeometries.length - 1) {
+          const nextJoint = new THREE.Group();
+          nextJoint.position.z = -length;
+          nextJoint.rotation.x = baseCurls[i] * (segmentIndex === 0 ? 0.7 : 0.9);
+          joint.add(nextJoint);
+          joint = nextJoint;
+        } else {
+          const tip = new THREE.Mesh(fingertipGeometry, materials.glovePanel);
+          tip.name = `${side}-finger-${i + 1}-tip`;
+          tip.position.z = -length;
+          tip.scale.set(0.9, 0.76, 1.08);
+          joint.add(tip);
+        }
+      }
       hand.add(finger);
     }
 
-    const thumb = new THREE.Mesh(thumbGeometry, materials.glovePanel);
+    const thumb = new THREE.Group();
     thumb.name = `${side}-thumb`;
-    thumb.position.set(direction * 0.064, -0.015, -0.005);
+    thumb.position.set(direction * 0.055, -0.018, -0.005);
     thumb.rotation.z = Math.PI / 2 + direction * 0.22;
     thumb.rotation.x = -0.28;
+    let thumbJoint = thumb;
+    for (let index = 0; index < thumbGeometries.length; index++) {
+      const segment = new THREE.Mesh(thumbGeometries[index], index === 0 ? materials.glove : materials.glovePanel);
+      segment.name = `${side}-thumb-${index === 0 ? 'proximal' : 'distal'}`;
+      segment.position.z = -thumbLengths[index] / 2;
+      thumbJoint.add(segment);
+      if (index === 0) {
+        const next = new THREE.Group();
+        next.position.z = -thumbLengths[index];
+        next.rotation.x = kind === 'knife' && side === 'right' ? 0.62 : 0.42;
+        thumbJoint.add(next);
+        thumbJoint = next;
+      }
+    }
     hand.add(thumb);
 
     const cuff = new THREE.Mesh(
@@ -283,21 +384,14 @@ function buildFirstPersonArms(kind, materials) {
     cuff.rotation.x = Math.PI / 2.7;
     hand.add(cuff);
 
-    const elbow = new THREE.Vector3(direction * 0.17, -0.115, 0.08);
-    const shoulder = new THREE.Vector3(direction * 0.285, -0.25, 0.18);
-    const forearm = makeArmSegment(
-      materials.sleeve,
-      new THREE.Vector3(direction * 0.005, -0.055, 0.09),
-      elbow,
-      0.071,
-      0.086,
+    const wristStrap = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.072, 0.072, 0.018, 10),
+      materials.glovePanel,
     );
-    forearm.name = `${side}-forearm`;
-    hand.add(forearm);
-
-    const upperArm = makeArmSegment(materials.sleeveDark, elbow, shoulder, 0.085, 0.105);
-    upperArm.name = `${side}-upper-arm`;
-    hand.add(upperArm);
+    wristStrap.name = `${side}-wrist-strap`;
+    wristStrap.position.set(direction * 0.004, -0.04, 0.058);
+    wristStrap.rotation.x = Math.PI / 2.7;
+    hand.add(wristStrap);
 
     snapshotTransform(hand);
     root.add(hand);
@@ -310,24 +404,73 @@ function buildFirstPersonArms(kind, materials) {
   left.rotation.z = -0.08;
   left.rotation.x = -0.12;
   snapshotTransform(left);
-  return { root, right, left };
+
+  const chains = {};
+  for (const [side, hand] of [['right', right], ['left', left]]) {
+    const direction = side === 'left' ? -1 : 1;
+    const chain = new THREE.Group();
+    chain.name = `${side}-arm-chain`;
+    const upperArm = makeArmSegment(materials.sleeveDark, 0.085, 0.103);
+    upperArm.name = `${side}-upper-arm`;
+    const forearm = makeArmSegment(materials.sleeve, 0.068, 0.083);
+    forearm.name = `${side}-forearm`;
+    const elbowGuard = new THREE.Mesh(elbowGeometry, materials.sleeveDark);
+    elbowGuard.name = `${side}-elbow-guard`;
+    elbowGuard.scale.set(0.92, 0.76, 0.9);
+    const shoulderPad = new THREE.Mesh(shoulderGeometry, materials.sleeveDark);
+    shoulderPad.name = `${side}-shoulder-pad`;
+    shoulderPad.scale.set(1, 0.8, 0.9);
+    chain.add(upperArm, forearm, elbowGuard, shoulderPad);
+    root.add(chain);
+    chains[side] = {
+      hand, direction, upperArm, forearm, elbowGuard, shoulderPad,
+      shoulder: new THREE.Vector3(direction * 0.3, -0.27, 0.2),
+      wristOffset: new THREE.Vector3(direction * 0.004, -0.052, 0.083),
+      wrist: new THREE.Vector3(), elbow: new THREE.Vector3(), delta: new THREE.Vector3(),
+    };
+  }
+
+  const update = () => {
+    for (const chain of Object.values(chains)) {
+      chain.wrist.copy(chain.wristOffset).applyEuler(chain.hand.rotation).add(chain.hand.position);
+      chain.elbow.lerpVectors(chain.shoulder, chain.wrist, 0.53);
+      chain.elbow.x += chain.direction * 0.055;
+      chain.elbow.y -= 0.038;
+      chain.elbow.z += 0.025;
+      setArmSegment(chain.upperArm, chain.shoulder, chain.elbow, chain.delta);
+      setArmSegment(chain.forearm, chain.elbow, chain.wrist, chain.delta);
+      chain.elbowGuard.position.copy(chain.elbow);
+      chain.shoulderPad.position.copy(chain.shoulder);
+    }
+  };
+  update();
+  return { root, right, left, chains, update };
+}
+
+function createViewmodelMaterials() {
+  return {
+    dark: new THREE.MeshLambertMaterial({ color: 0x171c24 }),
+    mid: new THREE.MeshLambertMaterial({ color: 0x465463 }),
+    polymer: new THREE.MeshLambertMaterial({ color: 0x252d37 }),
+    steel: new THREE.MeshStandardMaterial({ color: 0x8796a5, metalness: 0.78, roughness: 0.27 }),
+    wood: new THREE.MeshStandardMaterial({ color: 0x5c4738, roughness: 0.72 }),
+    rubber: new THREE.MeshStandardMaterial({ color: 0x11161d, roughness: 0.92 }),
+    accent: new THREE.MeshStandardMaterial({ color: 0xc69b48, metalness: 0.45, roughness: 0.42 }),
+    glove: new THREE.MeshStandardMaterial({ color: 0x394956, roughness: 0.88 }),
+    glovePanel: new THREE.MeshStandardMaterial({ color: 0x718493, roughness: 0.68 }),
+    cuff: new THREE.MeshStandardMaterial({ color: 0x202b36, roughness: 0.9 }),
+    sleeve: new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.94 }),
+    sleeveDark: new THREE.MeshStandardMaterial({ color: 0x253647, roughness: 0.96 }),
+  };
 }
 
 export function buildGunModel(kind) {
   const g = new THREE.Group();
   g.name = `viewmodel-${kind}`;
-  const dark = new THREE.MeshLambertMaterial({ color: 0x171c24 });
-  const mid = new THREE.MeshLambertMaterial({ color: 0x465463 });
-  const polymer = new THREE.MeshLambertMaterial({ color: 0x252d37 });
-  const steel = new THREE.MeshLambertMaterial({ color: 0x788795 });
-  const wood = new THREE.MeshLambertMaterial({ color: 0x5c4738 });
-  const rubber = new THREE.MeshLambertMaterial({ color: 0x11161d });
-  const accent = new THREE.MeshLambertMaterial({ color: 0xc69b48 });
-  const glove = new THREE.MeshLambertMaterial({ color: 0x394956 });
-  const glovePanel = new THREE.MeshLambertMaterial({ color: 0x718493 });
-  const cuff = new THREE.MeshLambertMaterial({ color: 0x202b36 });
-  const sleeve = new THREE.MeshLambertMaterial({ color: 0x34495e });
-  const sleeveDark = new THREE.MeshLambertMaterial({ color: 0x253647 });
+  const {
+    dark, mid, polymer, steel, wood, rubber, accent,
+    glove, glovePanel, cuff, sleeve, sleeveDark,
+  } = createViewmodelMaterials();
   const moving = {};
 
   const part = (mat, w, h, d, x, y, z) => {
@@ -458,6 +601,57 @@ export function buildGunModel(kind) {
   return g;
 }
 
+export function buildKnifeModel() {
+  const g = new THREE.Group();
+  g.name = 'viewmodel-knife';
+  const {
+    steel, rubber, accent, glove, glovePanel, cuff, sleeve, sleeveDark,
+  } = createViewmodelMaterials();
+
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.041, 0.19, 10), rubber);
+  handle.name = 'knife-handle';
+  handle.position.set(0, -0.095, 0.065);
+  handle.rotation.x = Math.PI / 2;
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.145, 0.026, 0.045), accent);
+  guard.name = 'knife-guard';
+  guard.position.set(0, -0.002, -0.035);
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.065, 0.38), steel);
+  blade.name = 'knife-blade';
+  blade.position.set(0, 0.008, -0.245);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.048, 0.13, 4), steel);
+  tip.name = 'knife-tip';
+  tip.position.set(0, 0.008, -0.5);
+  tip.rotation.x = -Math.PI / 2;
+  tip.rotation.y = Math.PI / 4;
+  const spine = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.018, 0.31), accent);
+  spine.name = 'knife-spine';
+  spine.position.set(0, 0.045, -0.22);
+  const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.036, 0.035, 10), accent);
+  pommel.name = 'knife-pommel';
+  pommel.position.set(0, -0.205, 0.155);
+  pommel.rotation.x = Math.PI / 2;
+  for (const part of [handle, guard, blade, tip, spine, pommel]) {
+    part.castShadow = true;
+    part.frustumCulled = false;
+  }
+  g.add(handle, guard, blade, tip, spine, pommel);
+
+  const arms = buildFirstPersonArms('knife', { glove, glovePanel, cuff, sleeve, sleeveDark });
+  arms.right.rotation.x -= 0.08;
+  arms.right.rotation.z += 0.06;
+  snapshotTransform(arms.right);
+  arms.left.rotation.x = -0.36;
+  arms.left.rotation.z = -0.22;
+  snapshotTransform(arms.left);
+  arms.update();
+  g.add(arms.root);
+  g.userData.viewmodel = { kind: 'knife', arms, moving: {} };
+  g.userData.blade = blade;
+  g.userData.handle = handle;
+  g.visible = false;
+  return g;
+}
+
 export class WeaponSystem {
   constructor(camera, scene, player, effects, audio, hud) {
     this.camera = camera;
@@ -503,6 +697,11 @@ export class WeaponSystem {
     this.bindings = { ...DEFAULT_BINDINGS };
     this.aimMode = 'hold';
     this.weaponBob = 1;
+    this.meleeActive = false;
+    this.meleeProgress = 0;
+    this.meleeCooldownUntil = 0;
+    this.meleeStrikeCallback = null;
+    this.meleeStrikeFired = false;
 
     // grupo del modelo en primera persona, colgado de la cámara
     this.rig = new THREE.Group();
@@ -515,9 +714,11 @@ export class WeaponSystem {
       this.rig.add(m);
       this.models[key] = m;
     }
+    this.knifeModel = buildKnifeModel();
+    this.rig.add(this.knifeModel);
 
     addEventListener('mousedown', (e) => {
-      if (!document.pointerLockElement || this.inputBlocked) return;
+      if (!document.pointerLockElement || this.inputBlocked || this.meleeActive) return;
       if (e.button === 0) this.triggerDown = true;
       if (e.button === 2) this.ads = this.aimMode === 'toggle' ? !this.ads : true;
     });
@@ -555,6 +756,7 @@ export class WeaponSystem {
   clearInput() {
     this.triggerDown = false;
     this.ads = false;
+    if (this.meleeActive) this.cancelMelee(false);
   }
 
   get def() { return WEAPON_DEFS[this.current]; }
@@ -638,7 +840,7 @@ export class WeaponSystem {
 
   switchTo(key) {
     if (this.forcedKey) return; // en búsqueda del arma no se cambia a mano
-    if (key === this.current || this.player.dead) return;
+    if (key === this.current || this.player.dead || this.meleeActive) return;
     if (weaponSelectionAction(!!this.owned[key]) === 'open-buy') {
       this.hud.announce(`Pulsa ${keyCodeLabel(this.bindings.openArsenal)} para abrir el arsenal y comprar armas`);
       this.audio.dry();
@@ -653,9 +855,7 @@ export class WeaponSystem {
     const previous = this.models[this.current];
     previous.userData.flash.visible = false;
     previous.userData.muzzleLight.intensity = 0;
-    this.models[this.current].visible = false;
     this.current = key;
-    this.models[key].visible = true;
     this.reloading = false;
     this.equipProgress = 0;
     this.equipDuration = EQUIP_DURATIONS[this.def.kind] || 0.45;
@@ -664,6 +864,7 @@ export class WeaponSystem {
     this.hud.updateAmmo(this);
     this.hud.updateSlots(this);
     this.hud.setReloading(false);
+    this._syncViewmodelVisibility();
   }
 
   // búsqueda del arma: el servidor impone qué arma llevas
@@ -699,7 +900,7 @@ export class WeaponSystem {
   reload() {
     const st = this.ammo;
     const def = this.def;
-    if (this.equipProgress < EQUIP_READY_PROGRESS || this.reloading ||
+    if (this.meleeActive || this.equipProgress < EQUIP_READY_PROGRESS || this.reloading ||
         st.ammo >= def.mag || st.reserve <= 0 || this.player.dead) return;
     this.reloading = true;
     this.reloadEnd = performance.now() / 1000 + def.reloadTime;
@@ -720,6 +921,77 @@ export class WeaponSystem {
     this.reloading = false;
     this.hud.updateAmmo(this);
     this.hud.setReloading(false);
+  }
+
+  beginMelee(onStrike = null) {
+    const time = performance.now() / 1000;
+    if (this.meleeActive || this.player.dead || this.inputBlocked || time < this.meleeCooldownUntil) return false;
+    this.meleeActive = true;
+    this.meleeProgress = 0;
+    this.meleeStrikeCallback = typeof onStrike === 'function' ? onStrike : null;
+    this.meleeStrikeFired = false;
+    this.meleeCooldownUntil = time + MELEE_COOLDOWN;
+    this.triggerDown = false;
+    this.ads = false;
+    this.reloading = false;
+    this.firePulse = 0;
+    this.models[this.current].userData.flash.visible = false;
+    this.models[this.current].userData.muzzleLight.intensity = 0;
+    this.hud.setReloading(false);
+    this.hud.setScope(false);
+    this._syncViewmodelVisibility(false);
+    return true;
+  }
+
+  cancelMelee(restoreDraw = true) {
+    if (!this.meleeActive) return false;
+    this.meleeActive = false;
+    this.meleeProgress = 0;
+    this.meleeStrikeCallback = null;
+    this.meleeStrikeFired = false;
+    this.knifeModel.visible = false;
+    if (restoreDraw && !this.player.dead) {
+      this.equipProgress = 0;
+      this.equipDuration = 0.28;
+      this.kickPos = 0.06;
+    }
+    this._syncViewmodelVisibility();
+    return true;
+  }
+
+  _syncViewmodelVisibility(scoped = this.ads && this.def.scope && !this.player.dead) {
+    const visibility = viewmodelVisibilityState({
+      dead: this.player.dead,
+      scoped,
+      meleeActive: this.meleeActive,
+    });
+    this.rig.visible = visibility.rig;
+    for (const [key, model] of Object.entries(this.models)) {
+      model.visible = visibility.firearm && key === this.current;
+    }
+    this.knifeModel.visible = visibility.knife;
+    this.hud.setScope(visibility.scope);
+    return visibility;
+  }
+
+  _updateMelee(dt) {
+    if (!this.meleeActive) return;
+    if (this.player.dead) {
+      this.cancelMelee(false);
+      return;
+    }
+    this.meleeProgress = Math.min(1, this.meleeProgress + Math.max(0, dt) / MELEE_DURATION);
+    const pose = meleeAnimationState(this.meleeProgress);
+    this.knifeModel.position.set(pose.position.x, pose.position.y, pose.position.z);
+    this.knifeModel.rotation.set(pose.rotation.x, pose.rotation.y, pose.rotation.z);
+    this.knifeModel.userData.viewmodel.arms.update();
+    if (!this.meleeStrikeFired && this.meleeProgress >= 0.43) {
+      this.meleeStrikeFired = true;
+      const strike = this.meleeStrikeCallback;
+      this.meleeStrikeCallback = null;
+      if (strike) strike();
+    }
+    if (this.meleeProgress >= 1) this.cancelMelee(true);
   }
 
   currentSpread() {
@@ -750,7 +1022,7 @@ export class WeaponSystem {
     const now = performance.now() / 1000;
     const def = this.def;
     const st = this.ammo;
-    if (this.equipProgress < EQUIP_READY_PROGRESS || this.player.dead ||
+    if (this.meleeActive || this.equipProgress < EQUIP_READY_PROGRESS || this.player.dead ||
         this.reloading || now - this.lastShot < 60 / def.rpm) return;
     if (st.ammo <= 0) {
       this.lastShot = now;
@@ -917,6 +1189,7 @@ export class WeaponSystem {
       moving.breech.position.y -= mechanism.breechOpen * 0.055;
       moving.breech.rotation.x += mechanism.breechOpen * 0.82;
     }
+    arms.update();
   }
 
   update(dt, inputEnabled) {
@@ -926,6 +1199,7 @@ export class WeaponSystem {
     this.animationTime += Math.max(0, dt);
     this.equipProgress = Math.min(1, this.equipProgress + dt / Math.max(0.1, this.equipDuration));
     this.firePulse = Math.max(0, this.firePulse - dt * 4.8);
+    this._updateMelee(dt);
 
     // recarga completa
     if (this.reloading && now >= this.reloadEnd) {
@@ -938,7 +1212,7 @@ export class WeaponSystem {
       this.hud.setReloading(false);
     }
 
-    if (inputEnabled && this.triggerDown && !this.player.dead) this.fire();
+    if (inputEnabled && this.triggerDown && !this.player.dead && !this.meleeActive) this.fire();
 
     // FOV según ADS
     const targetFov = (this.ads && !this.player.dead) ? this.baseFov / def.zoom : this.baseFov;
@@ -946,9 +1220,8 @@ export class WeaponSystem {
     this.camera.updateProjectionMatrix();
 
     // mira telescópica: oculta el modelo y muestra el overlay
-    const scoped = this.ads && def.scope && !this.player.dead;
-    this.rig.visible = !scoped && !this.player.dead;
-    this.hud.setScope(scoped);
+    const scoped = this.ads && def.scope && !this.player.dead && !this.meleeActive;
+    this._syncViewmodelVisibility(scoped);
 
     // animación del modelo: bob al andar + retroceso con muelle
     const speed = this.player.horizontalSpeed();
@@ -1000,6 +1273,6 @@ export class WeaponSystem {
     this._applyViewmodelPose(activeModel, firstPerson);
 
     // separación del punto de mira según dispersión
-    this.hud.setCrosshairGap(6 + this.currentSpread() * 900);
+    this.hud.setCrosshairSpread(this.meleeActive ? 0 : this.currentSpread() * 900);
   }
 }

@@ -93,16 +93,101 @@ const DEFAULT_SETTINGS = {
   weaponBob: 1,
   screenShake: 1,
   crosshairVisible: true,
+  crosshairStyle: 'classic',
   crosshairColor: '#ffffff',
   crosshairScale: 1,
+  crosshairThickness: 2,
+  crosshairGap: 6,
+  crosshairDot: false,
+  crosshairDotSize: 2,
+  crosshairOutline: true,
+  crosshairOutlineThickness: 1,
+  crosshairOutlineColor: '#000000',
+  crosshairOpacity: 1,
+  crosshairDynamic: true,
+  crosshairDynamicAmount: 1,
   damageFlash: true,
   highContrast: false,
   reducedMotion: false,
 };
 
-const CROSSHAIR_COLORS = new Set(['#ffffff', '#ffc34d', '#66e5ff', '#ff6464', '#79ef8d']);
+const CROSSHAIR_STYLES = new Set(['classic', 'tactical', 'dot']);
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const SHADOW_QUALITIES = new Set(['low', 'medium', 'high']);
 const EFFECT_QUALITIES = new Set(['low', 'balanced', 'high']);
+
+const freezePreset = (preset) => Object.freeze(preset);
+
+export const CROSSHAIR_PRESETS = Object.freeze({
+  balanced: freezePreset({
+    label: 'EQUILIBRADA',
+    crosshairVisible: true,
+    crosshairStyle: 'classic',
+    crosshairColor: '#ffffff',
+    crosshairScale: 1,
+    crosshairThickness: 2,
+    crosshairGap: 6,
+    crosshairDot: false,
+    crosshairDotSize: 2,
+    crosshairOutline: true,
+    crosshairOutlineThickness: 1,
+    crosshairOutlineColor: '#000000',
+    crosshairOpacity: 1,
+    crosshairDynamic: true,
+    crosshairDynamicAmount: 1,
+  }),
+  precise: freezePreset({
+    label: 'PRECISA',
+    crosshairVisible: true,
+    crosshairStyle: 'classic',
+    crosshairColor: '#66e5ff',
+    crosshairScale: 0.7,
+    crosshairThickness: 1,
+    crosshairGap: 3,
+    crosshairDot: true,
+    crosshairDotSize: 2,
+    crosshairOutline: true,
+    crosshairOutlineThickness: 0.5,
+    crosshairOutlineColor: '#000000',
+    crosshairOpacity: 1,
+    crosshairDynamic: false,
+    crosshairDynamicAmount: 0.5,
+  }),
+  highVisibility: freezePreset({
+    label: 'ALTA VISIBILIDAD',
+    crosshairVisible: true,
+    crosshairStyle: 'tactical',
+    crosshairColor: '#79ef8d',
+    crosshairScale: 1.4,
+    crosshairThickness: 3,
+    crosshairGap: 7,
+    crosshairDot: true,
+    crosshairDotSize: 3,
+    crosshairOutline: true,
+    crosshairOutlineThickness: 2,
+    crosshairOutlineColor: '#000000',
+    crosshairOpacity: 1,
+    crosshairDynamic: false,
+    crosshairDynamicAmount: 1,
+  }),
+  dynamic: freezePreset({
+    label: 'DINÁMICA',
+    crosshairVisible: true,
+    crosshairStyle: 'classic',
+    crosshairColor: '#ffc34d',
+    crosshairScale: 1,
+    crosshairThickness: 2,
+    crosshairGap: 5,
+    crosshairDot: false,
+    crosshairDotSize: 2,
+    crosshairOutline: true,
+    crosshairOutlineThickness: 1,
+    crosshairOutlineColor: '#000000',
+    crosshairOpacity: 1,
+    crosshairDynamic: true,
+    crosshairDynamicAmount: 1.25,
+  }),
+});
 
 const clamp = (value, min, max, fallback) => {
   const n = Number(value);
@@ -112,6 +197,12 @@ const clamp = (value, min, max, fallback) => {
 const readBoolean = (value, fallback) => value === undefined
   ? fallback
   : value === true || value === 1;
+
+const readHexColor = (value, fallback) => {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  return HEX_COLOR.test(normalized) ? normalized : fallback;
+};
 
 export function readSettings(raw) {
   let value = {};
@@ -140,14 +231,74 @@ export function readSettings(raw) {
     weaponBob: clamp(value.weaponBob, 0, 1, DEFAULT_SETTINGS.weaponBob),
     screenShake: clamp(value.screenShake, 0, 1, DEFAULT_SETTINGS.screenShake),
     crosshairVisible: readBoolean(value.crosshairVisible, DEFAULT_SETTINGS.crosshairVisible),
-    crosshairColor: CROSSHAIR_COLORS.has(String(value.crosshairColor).toLowerCase())
-      ? String(value.crosshairColor).toLowerCase()
-      : DEFAULT_SETTINGS.crosshairColor,
+    crosshairStyle: CROSSHAIR_STYLES.has(value.crosshairStyle)
+      ? value.crosshairStyle
+      : DEFAULT_SETTINGS.crosshairStyle,
+    crosshairColor: readHexColor(value.crosshairColor, DEFAULT_SETTINGS.crosshairColor),
     crosshairScale: clamp(value.crosshairScale, 0.6, 1.8, DEFAULT_SETTINGS.crosshairScale),
+    crosshairThickness: clamp(
+      value.crosshairThickness, 1, 6, DEFAULT_SETTINGS.crosshairThickness,
+    ),
+    crosshairGap: clamp(value.crosshairGap, 0, 20, DEFAULT_SETTINGS.crosshairGap),
+    crosshairDot: readBoolean(value.crosshairDot, DEFAULT_SETTINGS.crosshairDot),
+    crosshairDotSize: clamp(value.crosshairDotSize, 1, 8, DEFAULT_SETTINGS.crosshairDotSize),
+    crosshairOutline: readBoolean(value.crosshairOutline, DEFAULT_SETTINGS.crosshairOutline),
+    crosshairOutlineThickness: clamp(
+      value.crosshairOutlineThickness, 0.5, 3, DEFAULT_SETTINGS.crosshairOutlineThickness,
+    ),
+    crosshairOutlineColor: readHexColor(
+      value.crosshairOutlineColor, DEFAULT_SETTINGS.crosshairOutlineColor,
+    ),
+    crosshairOpacity: clamp(value.crosshairOpacity, 0.2, 1, DEFAULT_SETTINGS.crosshairOpacity),
+    crosshairDynamic: readBoolean(value.crosshairDynamic, DEFAULT_SETTINGS.crosshairDynamic),
+    crosshairDynamicAmount: clamp(
+      value.crosshairDynamicAmount, 0, 2, DEFAULT_SETTINGS.crosshairDynamicAmount,
+    ),
     damageFlash: readBoolean(value.damageFlash, DEFAULT_SETTINGS.damageFlash),
     highContrast: readBoolean(value.highContrast, DEFAULT_SETTINGS.highContrast),
     reducedMotion: readBoolean(value.reducedMotion, DEFAULT_SETTINGS.reducedMotion),
   };
+}
+
+export function crosshairPresentation(settings, spreadPx = 0) {
+  const normalized = readSettings(settings);
+  const style = normalized.crosshairStyle;
+  const spread = clamp(spreadPx, 0, 32, 0);
+  const requestedExpansion = normalized.crosshairDynamic
+    ? spread * normalized.crosshairDynamicAmount
+    : 0;
+  const gap = Math.min(52, normalized.crosshairGap + requestedExpansion);
+  const showLines = style !== 'dot';
+
+  return {
+    visible: normalized.crosshairVisible,
+    style,
+    color: normalized.crosshairColor,
+    length: normalized.crosshairScale * 9,
+    thickness: normalized.crosshairThickness,
+    gap,
+    baseGap: normalized.crosshairGap,
+    dynamicExpansion: gap - normalized.crosshairGap,
+    showTop: showLines && style !== 'tactical',
+    showBottom: showLines,
+    showLeft: showLines,
+    showRight: showLines,
+    showDot: style === 'dot' || normalized.crosshairDot,
+    dotSize: normalized.crosshairDotSize,
+    outlineThickness: normalized.crosshairOutline
+      ? normalized.crosshairOutlineThickness
+      : 0,
+    outlineColor: normalized.crosshairOutlineColor,
+    opacity: normalized.crosshairOpacity,
+  };
+}
+
+export function applyCrosshairPreset(settings, presetId) {
+  const normalized = readSettings(settings);
+  const preset = CROSSHAIR_PRESETS[presetId];
+  if (!preset) return normalized;
+  const { label: _label, ...values } = preset;
+  return readSettings({ ...normalized, ...values });
 }
 
 export function effectiveMasterVolume(settings = DEFAULT_SETTINGS) {
