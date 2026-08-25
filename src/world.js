@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { roundedBoxGeometry } from './rounded-geometry.js';
+import { collisionSafeBoxGeometry } from './rounded-geometry.js';
 import { buildMap, buildColliders, COLORS } from './shared/mapdata.js';
 import {
   BOT_BODY,
@@ -15,37 +15,33 @@ import {
 
 const BUILDING_COLORS = new Set([COLORS.building1, COLORS.building2, COLORS.building3]);
 
-// Los perfiles mantienen el bisel proporcional al grosor de cada pieza. Las
-// superficies extensas usan pocos segmentos y un radio contenido; los objetos
-// cercanos a la cámara (cajas/coberturas) reciben una silueta más redondeada.
+// Los perfiles controlan la franja de iluminación suave junto a cada arista.
+// La geometría del mapa permanece rectangular y completa para coincidir con
+// los colliders; solo cambian sus normales, nunca el volumen de cobertura.
 function roundingProfile(box) {
-  const shortest = Math.min(box.w, box.h, box.d);
-  const longest = Math.max(box.w, box.h, box.d);
-  const aspect = longest / Math.max(shortest, 0.001);
-
-  if (box.crate) return { ratio: 0.14, maxRadius: 0.22, segments: 2 };
+  if (box.crate) return { ratio: 0.14, maxRadius: 0.22 };
   if (box.color === COLORS.ground || box.color === COLORS.street) {
-    return { ratio: 0.05, maxRadius: 0.06, segments: 1 };
+    return { ratio: 0.05, maxRadius: 0.06 };
   }
   if (box.color === COLORS.wall) {
-    return { ratio: 0.045, maxRadius: 0.1, segments: 1 };
+    return { ratio: 0.045, maxRadius: 0.1 };
   }
   if (box.color === COLORS.barrier) {
-    return { ratio: 0.12, maxRadius: 0.14, segments: aspect >= 10 ? 1 : 2 };
+    return { ratio: 0.12, maxRadius: 0.14 };
   }
   if (box.color === COLORS.roof) {
-    return { ratio: 0.08, maxRadius: 0.1, segments: aspect >= 10 ? 1 : 2 };
+    return { ratio: 0.08, maxRadius: 0.1 };
   }
   if (BUILDING_COLORS.has(box.color)) {
-    return { ratio: 0.055, maxRadius: 0.24, segments: aspect >= 4 ? 1 : 2 };
+    return { ratio: 0.055, maxRadius: 0.24 };
   }
   if (box.color === COLORS.platform) {
-    return { ratio: 0.07, maxRadius: 0.18, segments: aspect >= 8 ? 1 : 2 };
+    return { ratio: 0.07, maxRadius: 0.18 };
   }
   if (box.color === COLORS.pad) {
-    return { ratio: 0.12, maxRadius: 0.04, segments: 2 };
+    return { ratio: 0.12, maxRadius: 0.04 };
   }
-  return { ratio: 0.1, maxRadius: 0.14, segments: aspect >= 8 ? 1 : 2 };
+  return { ratio: 0.1, maxRadius: 0.14 };
 }
 
 export function buildWorld(scene) {
@@ -118,7 +114,7 @@ export function buildWorld(scene) {
 
     for (const b of data.boxes) {
       const mesh = new THREE.Mesh(
-        roundedBoxGeometry(b.w, b.h, b.d, roundingProfile(b)),
+        collisionSafeBoxGeometry(b.w, b.h, b.d, roundingProfile(b)),
         mat(b.color),
       );
       mesh.position.set(b.x, b.y, b.z);

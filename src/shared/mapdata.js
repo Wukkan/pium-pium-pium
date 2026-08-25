@@ -61,9 +61,10 @@ function buildArena() {
   const SIZE = 76;
   const { boxes, box, crate, stairs } = makeBuilder();
 
-  box(0, -0.5, 0, SIZE, 1, SIZE, C.ground);
-
   const H = 7, T = 2;
+  // El suelo continúa bajo los muros; no se limita a tocar su borde interior.
+  box(0, -0.5, 0, SIZE + T * 2, 1, SIZE + T * 2, C.ground);
+
   box(0, H / 2, -SIZE / 2 - T / 2, SIZE + T * 2, H, T, C.wall);
   box(0, H / 2, SIZE / 2 + T / 2, SIZE + T * 2, H, T, C.wall);
   box(-SIZE / 2 - T / 2, H / 2, 0, T, H, SIZE, C.wall);
@@ -87,7 +88,8 @@ function buildArena() {
   stairs(-24, 15.5, 0, 1, 4, 5, C.building2);
 
   box(-25, 2, -25, 10, 4, 10, C.building3);
-  box(-25, 4.7, -25, 11, 1, 11, C.roof);
+  // El alero solapa exactamente base y torre: no queda una franja flotante.
+  box(-25, 4.6, -25, 11, 1.2, 11, C.roof);
   box(-27.5, 5.7, -27.5, 5, 1, 5, C.building3);
   stairs(-25, -16.5, 0, -1, 4, 4, C.building3);
 
@@ -121,7 +123,8 @@ function buildArena() {
   box(35, 6.9, 8.8, 5.5, 0.8, 0.4, C.barrier);
   box(35, 6.9, 3.2, 5.5, 0.8, 0.4, C.barrier);
   box(37.55, 6.9, 6, 0.4, 0.8, 6, C.barrier);
-  box(35, 8.9, 6, 0.3, 3, 0.3, C.roof);
+  // Mástil continuo desde la plataforma, sin el hueco vertical anterior.
+  box(35, 8.45, 6, 0.3, 3.9, 0.3, C.roof);
   stairs(24, 6, 1, 0, 3, 6.5, C.platform);
 
   // pasaje cubierto (muro oeste): galería con techo sobre pilares
@@ -175,9 +178,10 @@ function buildCiudad() {
   const SIZE = 72;
   const { boxes, box, crate, stairs } = makeBuilder();
 
-  box(0, -0.5, 0, SIZE, 1, SIZE, C.street);
-
   const H = 8, T = 2;
+  // La calle base continúa bajo los muros para formar una cubeta cerrada.
+  box(0, -0.5, 0, SIZE + T * 2, 1, SIZE + T * 2, C.street);
+
   box(0, H / 2, -SIZE / 2 - T / 2, SIZE + T * 2, H, T, C.wall);
   box(0, H / 2, SIZE / 2 + T / 2, SIZE + T * 2, H, T, C.wall);
   box(-SIZE / 2 - T / 2, H / 2, 0, T, H, SIZE, C.wall);
@@ -186,7 +190,8 @@ function buildCiudad() {
   // manzanas de edificios en los 4 cuadrantes (calles en cruz de 10 de ancho)
   // cuadrante NE
   box(19, 2.5, -19, 14, 5, 12, C.building1);
-  box(19, 5.3, -19, 15, 0.6, 13, C.roof);
+  // La azotea alcanza la cara inferior del puente (y=5.7).
+  box(19, 5.35, -19, 15, 0.7, 13, C.roof);
   stairs(19, -11.5, 0, -1, 4, 5, C.building1);
   box(30, 3.5, -28, 8, 7, 8, C.building3);
 
@@ -220,8 +225,8 @@ function buildCiudad() {
 
   // puente entre azoteas NE y SE (cruza la calle este)
   box(19, 5.9, 0, 4, 0.4, 26, C.platform);
-  box(21.2, 6.5, 0, 0.4, 0.8, 26, C.barrier);
-  box(16.8, 6.5, 0, 0.4, 0.8, 26, C.barrier);
+  box(21.1, 6.5, 0, 0.4, 0.8, 26, C.barrier);
+  box(16.9, 6.5, 0, 0.4, 0.8, 26, C.barrier);
 
   // cajas por las calles (destruibles)
   crate(6, -14); crate(7.7, -14); crate(6.85, -14, 2);

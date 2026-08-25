@@ -20,6 +20,8 @@ El parche **Stable Arsenal 1.6.1** elimina los saltos al cambiar de categoría t
 
 El parche **Tactical Knife 1.6.2** reconstruye la presentación del cuchillo en primera persona: hoja biselada con filo y vaciado visibles, mango estriado, manos con falanges y protecciones, brazos anatómicos más suaves y una guardia independiente que ya no viaja pegada a la hoja. El agarre se calibra contra la superficie real del mango y el ataque separa desenfunde, anticipación, impacto y recuperación.
 
+El parche **Solid Cover 1.6.3** corrige las juntas abiertas que produjo el redondeado independiente de cada bloque. Arena y Ciudad vuelven a llenar exactamente el mismo volumen que sus colliders y suavizan las aristas mediante iluminación, sin recortar cobertura. El suelo continúa bajo los muros, el alero suroeste y el mástil de Arena quedan apoyados, y el puente de Ciudad se une a la azotea con sus dos barandas asentadas. Nuevas regresiones comprueban esquinas con raycast, continuidad estructural, respawns y presupuesto geométrico.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.

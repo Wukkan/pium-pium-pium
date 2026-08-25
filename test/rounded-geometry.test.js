@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
 import {
+  collisionSafeBoxGeometry,
   proportionalCornerRadius,
   roundedBoxGeometry,
 } from '../src/rounded-geometry.js';
@@ -47,4 +48,33 @@ test('rounded geometry clamps invalid dimensions and complexity to safe values',
   );
   assert.ok(geometry.attributes.position.count <= 2916);
   geometry.dispose();
+});
+
+test('collision-safe geometry keeps every AABB corner covered while softening normals', () => {
+  const geometry = collisionSafeBoxGeometry(4, 2, 1, { ratio: 0.2, segments: 2 });
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
+  mesh.updateMatrixWorld(true);
+
+  const size = new THREE.Vector3();
+  geometry.boundingBox.getSize(size);
+  assert.deepEqual(size.toArray(), [4, 2, 1]);
+  assert.equal(geometry.type, 'CollisionSafeBoxGeometry');
+  assert.equal(geometry.parameters.radius, 0.2);
+
+  const raycaster = new THREE.Raycaster(
+    new THREE.Vector3(1.999, 0.999, 2),
+    new THREE.Vector3(0, 0, -1),
+  );
+  assert.ok(raycaster.intersectObject(mesh, false).length > 0, 'AABB corner lost visual cover');
+
+  const normals = geometry.attributes.normal.array;
+  let blendedNormals = 0;
+  for (let index = 0; index < normals.length; index += 3) {
+    const axes = [normals[index], normals[index + 1], normals[index + 2]]
+      .filter((value) => Math.abs(value) > 0.05).length;
+    if (axes >= 2) blendedNormals++;
+  }
+  assert.ok(blendedNormals > 0, 'edge lighting no longer reads as softened');
+  geometry.dispose();
+  mesh.material.dispose();
 });
