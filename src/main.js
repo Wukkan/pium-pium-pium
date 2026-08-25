@@ -31,7 +31,11 @@ import {
 } from './input-bindings.js';
 import { disposeHumanoid, makeHumanoid } from './humanoid.js';
 import { SKIN_COLORS, sanitizeSkin } from './player-profile.js';
-import { buildWeaponOnlyModel, WeaponPreviewManager } from './weapon-previews.js';
+import {
+  buildWeaponOnlyModel,
+  LiveWeaponPreviewManager,
+  WeaponPreviewManager,
+} from './weapon-previews.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — shooter multijugador original para navegador.
@@ -406,6 +410,15 @@ const weaponPreviewManager = new WeaponPreviewManager({
   maxPixelRatio: 1.5,
   pixelRatio: Math.min(Number(globalThis.devicePixelRatio) || 1, 1.5),
 });
+const liveWeaponPreviewManager = new LiveWeaponPreviewManager({
+  width: 420,
+  height: 152,
+  maxPixelRatio: 1.5,
+  maxPixels: 180_000,
+  maxDimension: 640,
+  reducedMotion: settings.reducedMotion,
+  renderScale: settings.renderScale,
+});
 let menuWeaponPreviewHandles = [];
 let buyWeaponPreviewHandles = [];
 
@@ -414,14 +427,38 @@ function clearWeaponPreviewHandles(handles) {
   handles.length = 0;
 }
 
-function mountWeaponCardPreview(card, selector, kind, collection) {
+function mountWeaponCardPreview(card, selector, kind, collection, {
+  equipped = false,
+  autoActivate = equipped,
+} = {}) {
   const host = card.querySelector(selector);
   if (!host) return;
-  const handle = weaponPreviewManager.mount(host, kind, { label: '' });
-  collection.push(handle);
+  const snapshotHandle = weaponPreviewManager.mount(host, kind, { label: '' });
+  const liveHandle = liveWeaponPreviewManager.mount(host, kind, {
+    equipped,
+    autoActivate,
+    interactionTarget: card,
+    fallbackElement: snapshotHandle.image,
+  });
+  collection.push({
+    dispose() {
+      liveHandle.dispose();
+      snapshotHandle.dispose();
+    },
+  });
 }
 
-addEventListener('pagehide', () => weaponPreviewManager.dispose(), { once: true });
+addEventListener('pagehide', (event) => {
+  if (event.persisted) {
+    liveWeaponPreviewManager.suspend();
+    return;
+  }
+  liveWeaponPreviewManager.dispose();
+  weaponPreviewManager.dispose();
+});
+addEventListener('pageshow', (event) => {
+  if (event.persisted) liveWeaponPreviewManager.resume();
+});
 
 function saveSettings() {
   return safeStorageSet('pium_settings', JSON.stringify(settings));
@@ -520,6 +557,10 @@ function applySettings() {
   audio.setVoiceLimit({ low: 18, balanced: 28, high: 40 }[settings.effectsQuality] || 28);
   document.body.classList.toggle('reduced-motion', settings.reducedMotion);
   document.body.classList.toggle('high-contrast', settings.highContrast);
+  liveWeaponPreviewManager.syncPreferences({
+    reducedMotion: settings.reducedMotion,
+    renderScale: settings.renderScale,
+  });
   hud.setFpsVisible(settings.showFps);
   hud.setPingVisible(settings.showPing);
   hud.setDamageFlashEnabled(settings.damageFlash);
@@ -971,8 +1012,11 @@ function renderMenuArsenal() {
     primary: new Set(['shotgun', 'smg', 'ar', 'sniper']),
     special: new Set(['launcher']),
   };
-  weapons.slots.forEach((key, i) => {
-    if (menuArsenalFilter !== 'all' && !categories[menuArsenalFilter]?.has(key)) return;
+  const visibleSlots = weapons.slots.filter((key) =>
+    menuArsenalFilter === 'all' || categories[menuArsenalFilter]?.has(key));
+  const featuredKey = visibleSlots.includes(weapons.current) ? weapons.current : visibleSlots[0];
+  visibleSlots.forEach((key) => {
+    const i = weapons.slots.indexOf(key);
     const def = WEAPON_DEFS[key];
     const owned = !!weapons.owned[key];
     const equipped = key === weapons.current;
@@ -987,7 +1031,7 @@ function renderMenuArsenal() {
     const cadence = Math.min(100, Math.round((def.rpm / 950) * 100));
     const control = Math.min(100, Math.round((1 - Math.min(0.07, def.recoil) / 0.07) * 100));
     card.setAttribute('aria-label', `${def.name}. ${action}. Cargador ${def.mag}, reserva ${def.reserve}.`);
-    card.innerHTML = `<span class="weapon-index">[${bindingLabel(`slot${i + 1}`)}] ${def.kind.toUpperCase()}</span><span class="weapon-icon" data-weapon-preview="${def.kind}" aria-hidden="true"><span class="weapon-preview-fallback">${def.kind.toUpperCase()}</span></span><span class="weapon-name">${def.name}</span><span class="weapon-info">Cargador ${def.mag} · Reserva ${def.reserve}</span><span class="weapon-stats" aria-hidden="true"><span class="weapon-stat">DAÑO <i style="--stat:${damage}%"></i></span><span class="weapon-stat">CADENCIA <i style="--stat:${cadence}%"></i></span><span class="weapon-stat">CONTROL <i style="--stat:${control}%"></i></span></span><span class="weapon-action">${action}</span>`;
+    card.innerHTML = `<span class="weapon-index">[${bindingLabel(`slot${i + 1}`)}] ${def.kind.toUpperCase()}</span><span class="weapon-icon" data-weapon-preview="${def.kind}" aria-hidden="true"><span class="weapon-preview-platform"></span><span class="weapon-preview-fallback">${def.kind.toUpperCase()}</span><span class="weapon-preview-live"><i></i> VISTA 3D EN VIVO</span><span class="weapon-preview-turn">↻ AUTO</span></span><span class="weapon-name">${def.name}</span><span class="weapon-info">Cargador ${def.mag} · Reserva ${def.reserve}</span><span class="weapon-stats" aria-hidden="true"><span class="weapon-stat">DAÑO <i style="--stat:${damage}%"></i></span><span class="weapon-stat">CADENCIA <i style="--stat:${cadence}%"></i></span><span class="weapon-stat">CONTROL <i style="--stat:${control}%"></i></span></span><span class="weapon-action">${action}</span>`;
     card.addEventListener('click', () => {
       if (owned) weapons.switchTo(key);
       else if (affordable) weapons.tryBuy(key);
@@ -995,7 +1039,10 @@ function renderMenuArsenal() {
       renderLoadoutPanel();
     });
     grid.append(card);
-    mountWeaponCardPreview(card, '.weapon-icon', def.kind, menuWeaponPreviewHandles);
+    mountWeaponCardPreview(card, '.weapon-icon', def.kind, menuWeaponPreviewHandles, {
+      equipped,
+      autoActivate: key === featuredKey,
+    });
   });
 }
 
@@ -1014,7 +1061,12 @@ function showMenuScreen(screen) {
     if (stateForButton?.active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
-  if (active === 'arsenal') renderMenuArsenal();
+  if (active === 'arsenal') {
+    renderMenuArsenal();
+    liveWeaponPreviewManager.resume();
+  } else if (!buyOpen) {
+    liveWeaponPreviewManager.suspend();
+  }
   if (active === 'operator') {
     initOperatorPreview();
     renderMenuPanels();
@@ -1957,6 +2009,7 @@ function renderBuyMenu() {
     if (buyCategory === 'rifles') return kind === 'ar' || kind === 'sniper' || kind === 'launcher';
     return true;
   });
+  const featuredKey = visibleSlots.includes(weapons.current) ? weapons.current : visibleSlots[0];
   visibleSlots.forEach((key) => {
     const def = WEAPON_DEFS[key];
     const card = document.createElement('button');
@@ -1975,7 +2028,7 @@ function renderBuyMenu() {
       `${def.name}. ${action}. Cargador ${def.mag}, reserva ${def.reserve}. Atajo ${bindingLabel(`slot${slot}`)}.`,
     );
     card.innerHTML = `<span class="buy-key">[${bindingLabel(`slot${slot}`)}] ${def.kind.toUpperCase()}</span>` +
-      `<span class="buy-weapon-icon" data-weapon-preview="${def.kind}" aria-hidden="true"><span class="weapon-preview-fallback">${def.kind.toUpperCase()}</span></span>` +
+      `<span class="buy-weapon-icon" data-weapon-preview="${def.kind}" aria-hidden="true"><span class="weapon-preview-platform"></span><span class="weapon-preview-fallback">${def.kind.toUpperCase()}</span><span class="weapon-preview-live"><i></i> VISTA 3D EN VIVO</span><span class="weapon-preview-turn">↻ AUTO</span></span>` +
       `<span class="buy-name">${def.name}</span>` +
       `<span class="buy-info">Cargador ${def.mag} · Reserva ${def.reserve}</span>` +
       `<span class="buy-action">${action}</span>`;
@@ -1986,7 +2039,10 @@ function renderBuyMenu() {
       renderBuyMenu();
     });
     grid.append(card);
-    mountWeaponCardPreview(card, '.buy-weapon-icon', def.kind, buyWeaponPreviewHandles);
+    mountWeaponCardPreview(card, '.buy-weapon-icon', def.kind, buyWeaponPreviewHandles, {
+      equipped,
+      autoActivate: key === featuredKey,
+    });
   });
 }
 
@@ -1994,8 +2050,13 @@ function setBuyMenu(open, restorePointer = true) {
   const nextOpen = !!open && state === 'playing' && !player.dead;
   if (nextOpen && !buyOpen) buyMenuReturnFocus = document.activeElement;
   buyOpen = nextOpen;
-  if (buyOpen) renderBuyMenu();
   hud.showBuyMenu(buyOpen);
+  if (buyOpen) {
+    renderBuyMenu();
+    liveWeaponPreviewManager.resume();
+  } else {
+    liveWeaponPreviewManager.suspend();
+  }
   setBuyBackgroundInert(buyOpen);
   refreshWeaponInputBlock();
   if (buyOpen) {

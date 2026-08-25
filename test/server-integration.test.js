@@ -112,7 +112,7 @@ test('server reserves safe unique spawns, caps rooms, and cancels stale respawns
   await waitForServer(child);
 
   const health = await fetch(`http://127.0.0.1:${port}/salud`).then((response) => response.json());
-  assert.deepEqual(health, { ok: true, version: '1.3.1' });
+  assert.deepEqual(health, { ok: true, version: '1.4.0' });
 
   for (let index = 0; index < TOTAL_SLOTS; index++) {
     clients.push(await connectClient(port, `QA_${index}`));
