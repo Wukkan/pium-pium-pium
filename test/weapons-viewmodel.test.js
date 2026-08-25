@@ -227,6 +227,30 @@ test('gun and knife models expose articulated fingers, thumbs and arm chains', (
   assert.ok(knife.getObjectByName('knife-handle'));
 });
 
+test('viewmodels use rounded visible boxes within the web geometry budget', () => {
+  const models = [
+    ...WEAPON_KINDS.map((kind) => [kind, buildGunModel(kind)]),
+    ['knife', buildKnifeModel()],
+  ];
+
+  for (const [kind, model] of models) {
+    let triangles = 0;
+    let roundedBoxes = 0;
+    let legacyBoxes = 0;
+    model.traverse((object) => {
+      if (!object.isMesh || !object.geometry) return;
+      const geometry = object.geometry;
+      triangles += (geometry.index?.count ?? geometry.attributes.position.count) / 3;
+      if (geometry.type === 'RoundedBoxGeometry') roundedBoxes++;
+      if (geometry.type === 'BoxGeometry') legacyBoxes++;
+    });
+
+    assert.ok(roundedBoxes >= 5, `${kind}: visible hard-surface parts are bevelled`);
+    assert.equal(legacyBoxes, 0, `${kind}: no visible legacy boxes remain`);
+    assert.ok(triangles <= 7000, `${kind}: ${triangles} triangles exceed the viewmodel budget`);
+  }
+});
+
 test('beginning and cancelling melee blocks firearm actions and restores only the active gun', () => {
   const { weapon, calls } = meleeHarness();
   const ammoBefore = weapon.ammo.ammo;

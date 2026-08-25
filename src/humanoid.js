@@ -5,10 +5,23 @@ import {
   operatorDeathState,
   operatorMotionState,
 } from './character-motion.js';
+import { roundedBoxGeometry } from './rounded-geometry.js';
 
 // ---------------------------------------------------------------------------
 // Modelo humanoide "blocky" compartido por bots locales y jugadores remotos.
 // ---------------------------------------------------------------------------
+
+// Los volúmenes exteriores siguen siendo idénticos a los hitboxes originales.
+// Las piezas grandes reciben un bisel un poco más suave, mientras los detalles
+// finos usan un solo segmento para mantener estable el presupuesto por operador.
+function operatorBoxGeometry(width, height, depth) {
+  const shortest = Math.min(Math.abs(width), Math.abs(height), Math.abs(depth));
+  return roundedBoxGeometry(width, height, depth, {
+    ratio: shortest < 0.07 ? 0.12 : shortest < 0.16 ? 0.15 : 0.18,
+    maxRadius: shortest < 0.07 ? 0.008 : 0.055,
+    segments: shortest >= 0.16 ? 2 : 1,
+  });
+}
 
 export function makeNameSprite(name, color = '#ffffff') {
   const canvas = document.createElement('canvas');
@@ -34,7 +47,7 @@ export function makeHat(type) {
   if (!type || type === 'none') return null;
   const g = new THREE.Group();
   const add = (color, w, h, d, x, y, z) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+    const m = new THREE.Mesh(operatorBoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
     m.position.set(x, y, z);
     m.castShadow = true;
     g.add(m);
@@ -108,7 +121,7 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   };
 
   const box = (w, h, d, mat, x, y, z, partName, parent) => add(
-    new THREE.BoxGeometry(w, h, d), mat, x, y, z, partName, parent,
+    operatorBoxGeometry(w, h, d), mat, x, y, z, partName, parent,
   );
   const sphere = (radius, mat, x, y, z, partName, parent) => add(
     new THREE.SphereGeometry(radius, 12, 8), mat, x, y, z, partName, parent,
@@ -207,7 +220,7 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   box(0.12, 0.08, 0.2, armorEdge, 0, 0.12, -0.18, null, gun);
   box(0.035, 0.05, 0.32, metal, 0, 0.04, -1.02, null, gun);
   const muzzleFlash = add(
-    new THREE.ConeGeometry(0.09, 0.28, 4), flashMaterial,
+    new THREE.ConeGeometry(0.09, 0.28, 6), flashMaterial,
     0, 0.04, -1.23, null, gun,
   );
   muzzleFlash.name = 'muzzleFlash';

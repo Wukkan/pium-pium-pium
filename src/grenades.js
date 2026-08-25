@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { roundedBoxGeometry } from './rounded-geometry.js';
 
 // ---------------------------------------------------------------------------
 // Granadas: se lanzan con G, rebotan en el escenario y explotan a los 2.2 s.
@@ -30,11 +31,11 @@ function disposeGrenadeMesh(mesh) {
 function buildGrenadeMesh() {
   const g = new THREE.Group();
   const body = new THREE.Mesh(
-    new THREE.SphereGeometry(0.14, 8, 8),
+    new THREE.SphereGeometry(0.14, 16, 10),
     new THREE.MeshLambertMaterial({ color: 0x2c3a2c }),
   );
   const band = new THREE.Mesh(
-    new THREE.BoxGeometry(0.3, 0.05, 0.05),
+    roundedBoxGeometry(0.3, 0.05, 0.05, { ratio: 0.42, maxRadius: 0.022 }),
     new THREE.MeshLambertMaterial({ color: 0xd83a2e }),
   );
   body.castShadow = true;

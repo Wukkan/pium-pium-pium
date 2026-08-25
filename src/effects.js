@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { QuarksEffects } from './quarks-effects.js';
+import { roundedBoxGeometry } from './rounded-geometry.js';
 
 // ---------------------------------------------------------------------------
 // Efectos visuales: trazadoras de balas, partículas de impacto y números
@@ -46,11 +47,11 @@ export class Effects {
   constructor(scene, backend = {}) {
     this.scene = scene;
     this.items = [];
-    this.tracerGeo = new THREE.BoxGeometry(1, 1, 1);
-    this.particleGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
+    this.tracerGeo = roundedBoxGeometry(1, 1, 1, { radius: 0.48, segments: 2 });
+    this.particleGeo = new THREE.SphereGeometry(0.055, 10, 7);
     this.shockwaveGeo = new THREE.SphereGeometry(0.14, 20, 12);
-    this.smokeGeo = new THREE.SphereGeometry(0.22, 8, 8);
-    this.casingGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.12, 7);
+    this.smokeGeo = new THREE.SphereGeometry(0.22, 12, 8);
+    this.casingGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.12, 12);
     this.casingMaterial = new THREE.MeshStandardMaterial({
       color: 0xc89b3c, metalness: 0.82, roughness: 0.3,
     });

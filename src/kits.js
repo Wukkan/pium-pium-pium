@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { roundedBoxGeometry } from './rounded-geometry.js';
 
 // ---------------------------------------------------------------------------
 // Loot: kits de vida y cajas de munición caen donde muere alguien.
@@ -35,11 +36,20 @@ function buildKitMesh() {
   const group = new THREE.Group();
   const white = new THREE.MeshLambertMaterial({ color: 0xf2f2f2 });
   const red = new THREE.MeshLambertMaterial({ color: 0xd83a2e });
-  const base = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.26, 0.45), white);
+  const base = new THREE.Mesh(
+    roundedBoxGeometry(0.45, 0.26, 0.45, { ratio: 0.22, maxRadius: 0.065 }),
+    white,
+  );
   base.castShadow = true;
-  const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.08, 0.11), red);
+  const c1 = new THREE.Mesh(
+    roundedBoxGeometry(0.3, 0.08, 0.11, { ratio: 0.32, maxRadius: 0.026 }),
+    red,
+  );
   c1.position.y = 0.14;
-  const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.3), red);
+  const c2 = new THREE.Mesh(
+    roundedBoxGeometry(0.11, 0.08, 0.3, { ratio: 0.32, maxRadius: 0.026 }),
+    red,
+  );
   c2.position.y = 0.14;
   group.add(base, c1, c2);
   return group;
@@ -48,16 +58,16 @@ function buildKitMesh() {
 function buildAmmoMesh() {
   const group = new THREE.Group();
   const base = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 0.3, 0.42),
+    roundedBoxGeometry(0.5, 0.3, 0.42, { ratio: 0.18, maxRadius: 0.065 }),
     new THREE.MeshLambertMaterial({ color: 0x3b4d2f }),
   );
   const lid = new THREE.Mesh(
-    new THREE.BoxGeometry(0.42, 0.07, 0.34),
+    roundedBoxGeometry(0.42, 0.07, 0.34, { ratio: 0.32, maxRadius: 0.024 }),
     new THREE.MeshLambertMaterial({ color: 0xb58b38 }),
   );
   lid.position.y = 0.18;
   const stripe = new THREE.Mesh(
-    new THREE.BoxGeometry(0.08, 0.08, 0.36),
+    roundedBoxGeometry(0.08, 0.08, 0.36, { ratio: 0.34, maxRadius: 0.027 }),
     new THREE.MeshLambertMaterial({ color: 0xe5c15a }),
   );
   stripe.position.y = 0.22;

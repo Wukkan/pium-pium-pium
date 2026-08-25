@@ -10,6 +10,13 @@
   <link rel="preload" href="sounds/sniper.wav" as="audio" type="audio/wav" />
   <title>PIUM PIUM PIUM</title>
   <style>
+    :root {
+      /* Sistema proporcional de esquinas: controles, superficies y ventanas. */
+      --radius-sm: clamp(7px, .55vw, 9px);
+      --radius-md: clamp(11px, .85vw, 14px);
+      --radius-lg: clamp(16px, 1.25vw, 22px);
+      --radius-pill: 999px;
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
     body { font-family: 'Arial Black', 'Segoe UI', Arial, sans-serif; }
@@ -38,6 +45,7 @@
     #crosshair { left: 50%; top: 50%; }
     .crosshair-shape .line, .crosshair-shape .dot {
       position: absolute; display: block; background: var(--crosshair-color);
+      border-radius: var(--radius-pill);
       box-shadow: 0 0 0 var(--crosshair-outline-thickness) var(--crosshair-outline-color);
     }
     .crosshair-shape .t { width: var(--crosshair-thickness); height: var(--crosshair-length); left: var(--crosshair-half-thickness); top: var(--crosshair-negative-extent); }
@@ -51,7 +59,7 @@
       position: absolute; left: 50%; top: 50%; width: 0; height: 0;
       opacity: 0; transition: opacity .12s;
     }
-    #hitmarker .hm { position: absolute; width: 12px; height: 2.5px; background: #fff; box-shadow: 0 0 3px rgba(0,0,0,.9); }
+    #hitmarker .hm { position: absolute; width: 12px; height: 2.5px; border-radius: var(--radius-pill); background: #fff; box-shadow: 0 0 3px rgba(0,0,0,.9); }
     #hitmarker .hm1 { transform: translate(4px, 4px) rotate(45deg); }
     #hitmarker .hm2 { transform: translate(-16px, 4px) rotate(-45deg); }
     #hitmarker .hm3 { transform: translate(4px, -8px) rotate(-45deg); }
@@ -68,10 +76,10 @@
     @keyframes reload-blink { 50% { opacity: 0.45; } }
     #reload-bar-bg {
       width: 130px; height: 7px; margin: 5px auto 0;
-      background: rgba(0,0,0,.5); border-radius: 4px; overflow: hidden;
+      background: rgba(0,0,0,.5); border-radius: var(--radius-pill); overflow: hidden;
       border: 1px solid rgba(255,255,255,.3); transform: skewX(-12deg);
     }
-    #reload-bar { height: 100%; width: 0%; background: linear-gradient(#ffe27a, #f0a81b); }
+    #reload-bar { height: 100%; width: 0%; border-radius: inherit; background: linear-gradient(#ffe27a, #f0a81b); }
 
     /* damage vignette */
     #damage-vignette {
@@ -83,10 +91,10 @@
     #health-wrap { position: absolute; left: 24px; bottom: 24px; width: 260px; }
     #health-label { font-size: 15px; margin-bottom: 4px; }
     #health-bar-bg {
-      height: 20px; background: rgba(0,0,0,.45); border-radius: 4px; overflow: hidden;
+      height: 20px; background: rgba(0,0,0,.45); border-radius: var(--radius-pill); overflow: hidden;
       transform: skewX(-12deg); border: 2px solid rgba(255,255,255,.25);
     }
-    #health-bar { height: 100%; width: 100%; background: linear-gradient(#9be15d, #66bb2f); transition: width .15s; }
+    #health-bar { height: 100%; width: 100%; border-radius: inherit; background: linear-gradient(#9be15d, #66bb2f); transition: width .15s; }
     #health-bar.low { background: linear-gradient(#ff7b6b, #d63a2a); }
 
     /* ammo */
@@ -115,7 +123,7 @@
     #killfeed { position: absolute; right: 20px; top: 18px; text-align: right; }
     .kf-entry {
       font-size: 13px; color: #fff; background: rgba(0,0,0,.4);
-      padding: 4px 10px; margin-bottom: 5px; border-radius: 3px;
+      padding: 4px 10px; margin-bottom: 5px; border-radius: var(--radius-sm);
       font-weight: 700; font-style: italic;
       transition: opacity .5s;
     }
@@ -136,7 +144,7 @@
       position: absolute; inset: 0;
       background: radial-gradient(circle at center, transparent 0%, transparent 31%, rgba(0,0,0,.97) 33%);
     }
-    #scope .cross-h, #scope .cross-v { position: absolute; background: rgba(0,0,0,.85); }
+    #scope .cross-h, #scope .cross-v { position: absolute; border-radius: var(--radius-pill); background: rgba(0,0,0,.85); }
     #scope .cross-h { left: 50%; top: 15%; width: 1.5px; height: 70%; transform: translateX(-50%); }
     #scope .cross-v { top: 50%; left: 15%; height: 1.5px; width: 70%; transform: translateY(-50%); }
 
@@ -538,7 +546,7 @@
     .menu-weapon-card .weapon-info { position: relative; z-index: 1; display: block; margin-top: 5px; color: #8094b0; font: 10px Arial, sans-serif; }
     .menu-weapon-card .weapon-stats { position: relative; z-index: 1; display: grid; gap: 6px; margin-top: 13px; }
     .menu-weapon-card .weapon-stat { display: grid; grid-template-columns: 54px 1fr; align-items: center; gap: 8px; color: #657b9b; font: 800 8px Arial, sans-serif; letter-spacing: .7px; }
-    .menu-weapon-card .weapon-stat i { display: block; overflow: hidden; height: 3px; border-radius: 1px; background: rgba(255,255,255,.075); }
+    .menu-weapon-card .weapon-stat i { display: block; overflow: hidden; height: 3px; border-radius: var(--radius-pill); background: rgba(255,255,255,.075); }
     .menu-weapon-card .weapon-stat i::before { content: ''; display: block; width: var(--stat); height: 100%; border-radius: inherit; background: linear-gradient(90deg, #4f789f, #9fc9ef); }
     .menu-weapon-card .weapon-action { position: relative; z-index: 1; display: flex; align-items: center; gap: 7px; margin-top: auto; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.06); color: #91dfa4; font: 900 9px Arial, sans-serif; letter-spacing: .7px; }
     .menu-weapon-card .weapon-action::before { content: ''; width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px color-mix(in srgb, currentColor 60%, transparent); }
@@ -641,7 +649,7 @@
     .settings-status { min-height: 18px; margin-top: 15px; color: #82df9a; font: 800 11px Arial, sans-serif; }
     .settings-status[data-tone="warning"] { color: #ffb36b; }
     .settings-status[data-tone="listening"] { color: #ffd471; }
-    #keybinding-status { margin-top: 8px; padding: 8px 10px; border-left: 3px solid currentColor; border-radius: 3px; background: rgba(255,255,255,.035); }
+    #keybinding-status { margin-top: 8px; padding: 8px 10px; border-left: 3px solid currentColor; border-radius: var(--radius-sm); background: rgba(255,255,255,.035); }
     .high-contrast #menu { background: #050914; }
     .high-contrast .options-group, .high-contrast .settings-tabs, .high-contrast .keybind-row { border-color: rgba(255,255,255,.35); background: rgba(0,0,0,.72); }
     .high-contrast .hud-text { text-shadow: 0 2px 0 #000, 0 0 5px #000, 1px 1px 0 #000; }
@@ -691,13 +699,13 @@
     .buy-categories { min-width: 0; padding-right: 19px; border-right: 1px solid rgba(255,255,255,.075); }
     .buy-categories-title { margin: 2px 0 10px; color: #607796; font: 900 8px Arial, sans-serif; letter-spacing: 1.8px; }
     .buy-category { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 43px; margin: 2px 0; padding: 0 10px 0 12px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #7f95b2; cursor: pointer; font: 900 10px Arial, sans-serif; letter-spacing: .7px; text-align: left; transition: color .13s, border-color .13s, background .13s; }
-    .buy-category span { display: grid; place-items: center; min-width: 23px; height: 20px; padding: 0 5px; border: 1px solid rgba(255,255,255,.075); border-radius: 3px; background: rgba(255,255,255,.025); color: #526b8c; font-size: 8px; }
+    .buy-category span { display: grid; place-items: center; min-width: 23px; height: 20px; padding: 0 5px; border: 1px solid rgba(255,255,255,.075); border-radius: var(--radius-pill); background: rgba(255,255,255,.025); color: #526b8c; font-size: 8px; }
     .buy-category:hover { color: #eaf2ff; background: rgba(255,255,255,.04); }
     .buy-category.active { border-color: rgba(255,195,77,.38); background: linear-gradient(90deg, rgba(255,195,77,.15), rgba(255,195,77,.025)); color: #ffd471; box-shadow: inset 2px 0 0 #ffc34d; }
     .buy-category.active span { border-color: rgba(255,195,77,.24); background: rgba(255,195,77,.08); color: #ffc34d; }
     .buy-help { display: grid; gap: 8px; margin-top: 30px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,.065); color: #526987; font: 9px/1.4 Arial, sans-serif; }
     .buy-help div { display: grid; grid-template-columns: minmax(54px, auto) 1fr; align-items: center; gap: 8px; }
-    .buy-help b { display: inline-grid; place-items: center; min-height: 24px; padding: 3px 6px; border: 1px solid rgba(126,158,195,.18); border-radius: 3px; background: rgba(255,255,255,.03); color: #b8c8dc; font: 900 8px Arial, sans-serif; letter-spacing: .4px; text-align: center; }
+    .buy-help b { display: inline-grid; place-items: center; min-height: 24px; padding: 3px 6px; border: 1px solid rgba(126,158,195,.18); border-radius: var(--radius-pill); background: rgba(255,255,255,.03); color: #b8c8dc; font: 900 8px Arial, sans-serif; letter-spacing: .4px; text-align: center; }
     .buy-content { min-width: 0; }
     .buy-grid-heading { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin: 0 0 10px; padding: 0 1px 10px; border-bottom: 1px solid rgba(255,255,255,.065); color: #607796; }
     .buy-grid-copy span { display: block; font: 900 8px Arial, sans-serif; letter-spacing: 1.7px; }
@@ -711,7 +719,7 @@
     .buy-state-legend .is-locked i { background: #d4776c; }
     #buy-grid { display: grid; grid-template-columns: repeat(3, minmax(170px, 1fr)); gap: 10px; margin-top: 0; }
     .buy-card { position: relative; display: flex; flex-direction: column; min-height: 218px; overflow: hidden; padding: 14px; border: 1px solid rgba(112,143,181,.2); border-radius: 6px; background: linear-gradient(150deg, rgba(27,42,61,.88), rgba(7,13,22,.97)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035); }
-    .buy-card::before { content: 'COMPRABLE'; position: absolute; right: 11px; top: 11px; z-index: 2; padding: 4px 6px; border: 1px solid rgba(100,165,222,.26); border-radius: 3px; background: rgba(43,91,132,.18); color: #87bce8; font: 900 7px Arial, sans-serif; letter-spacing: .7px; }
+    .buy-card::before { content: 'COMPRABLE'; position: absolute; right: 11px; top: 11px; z-index: 2; padding: 4px 6px; border: 1px solid rgba(100,165,222,.26); border-radius: var(--radius-pill); background: rgba(43,91,132,.18); color: #87bce8; font: 900 7px Arial, sans-serif; letter-spacing: .7px; }
     .buy-card::after { content: ''; position: absolute; right: -44px; bottom: -58px; width: 142px; height: 142px; border: 1px solid rgba(109,153,207,.09); border-radius: 50%; box-shadow: 0 0 0 20px rgba(109,153,207,.018); pointer-events: none; }
     .buy-card:hover { transform: translateY(-2px); border-color: rgba(126,181,232,.64); background: linear-gradient(150deg, rgba(36,55,78,.95), rgba(9,17,28,.99)); box-shadow: 0 12px 28px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.05); }
     .buy-card:focus-visible { z-index: 2; }
@@ -748,7 +756,7 @@
     .buy-weapon-icon.launcher::before { width: 78%; left: 5%; height: 16px; top: 22px; border-radius: 9px; }
     .buy-weapon-icon.launcher::after { left: 36%; top: 38px; width: 16%; height: 13px; }
     .buy-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 17px; padding-top: 13px; border-top: 1px solid rgba(255,255,255,.07); color: #5e7492; font: 9px Arial, sans-serif; letter-spacing: .45px; }
-    .buy-footer b { display: inline-grid; place-items: center; min-width: 24px; min-height: 22px; margin: 0 3px; padding: 2px 6px; border: 1px solid rgba(255,195,77,.28); border-radius: 3px; background: rgba(255,195,77,.055); color: #ffd471; }
+    .buy-footer b { display: inline-grid; place-items: center; min-width: 24px; min-height: 22px; margin: 0 3px; padding: 2px 6px; border: 1px solid rgba(255,195,77,.28); border-radius: var(--radius-pill); background: rgba(255,195,77,.055); color: #ffd471; }
     .buy-footer-note { color: #4f6480; text-transform: uppercase; letter-spacing: .8px; }
     .high-contrast .menu-arsenal-heading, .high-contrast .menu-arsenal-controlbar, .high-contrast .menu-weapon-card, .high-contrast .buy-window, .high-contrast .buy-card { border-color: rgba(255,255,255,.44); background-color: #050914; }
     @media (max-width: 920px) {
@@ -851,13 +859,13 @@
     #bot-apply:hover, #bot-apply:focus-visible { filter: brightness(1.07); transform: translateY(1px); box-shadow: 0 4px 0 #965b13, 0 8px 18px rgba(0,0,0,.25); outline: none; }
     #bot-apply:disabled, .bot-stepper button:disabled, #bot-count:disabled { opacity: .45; cursor: not-allowed; filter: none; }
     #bot-panel-status { min-height: 18px; color: #8ce7a4; font: 700 12px/1.45 Arial, sans-serif; }
-    #bot-panel-note { margin-top: 15px; padding: 11px 13px; color: #7890b1; background: rgba(75,109,154,.08); border-left: 3px solid #567ca9; border-radius: 3px; font: 11px/1.55 Arial, sans-serif; }
+    #bot-panel-note { margin-top: 15px; padding: 11px 13px; color: #7890b1; background: rgba(75,109,154,.08); border-left: 3px solid #567ca9; border-radius: var(--radius-sm); font: 11px/1.55 Arial, sans-serif; }
     #bot-panel[data-locked="true"] .bot-toggle { opacity: .45; cursor: not-allowed; }
     #bot-panel[data-locked="true"] #bot-panel-note { color: #c9ad72; border-left-color: #ffc34d; background: rgba(255,195,77,.07); }
     #bot-panel[data-pending="true"] .bot-panel-controls { opacity: .62; }
     #bot-panel[data-pending="true"] #bot-panel-status { color: #ffd36d; }
     .bot-panel-footer { display: flex; justify-content: space-between; gap: 14px; margin-top: 16px; padding-top: 13px; border-top: 1px solid rgba(255,255,255,.08); color: #617a9c; font: 900 9px Arial, sans-serif; letter-spacing: 1.2px; }
-    .bot-panel-footer kbd { padding: 2px 6px; border: 1px solid rgba(255,255,255,.18); border-radius: 3px; background: rgba(255,255,255,.06); color: #c9d8eb; font: inherit; }
+    .bot-panel-footer kbd { padding: 2px 6px; border: 1px solid rgba(255,255,255,.18); border-radius: var(--radius-pill); background: rgba(255,255,255,.06); color: #c9d8eb; font: inherit; }
     @media (max-width: 600px) {
       #bot-panel { padding: 10px; }
       .bot-panel-window { max-height: calc(100vh - 20px); padding: 20px 16px 16px; }
@@ -869,6 +877,187 @@
       .bot-panel-action-row { align-items: stretch; flex-direction: column; }
       #bot-apply { width: 100%; }
       .bot-panel-footer { align-items: start; flex-direction: column; }
+    }
+
+    /* ---------- SISTEMA GLOBAL DE ESQUINAS REDONDEADAS ---------- */
+    /* Ventanas y superficies principales: radios amplios para separar capas. */
+    #podium,
+    #team-picker,
+    #custom-panel,
+    #menu-loadout,
+    .buy-window,
+    .bot-panel-window {
+      border-radius: var(--radius-lg);
+    }
+
+    #scores,
+    #chat-menu,
+    .menu-hero-side,
+    .menu-arsenal-heading,
+    #menu-screen-operator .operator-card,
+    .settings-tabs,
+    .options-group,
+    .audio-hero,
+    .crosshair-preview-stage,
+    .crosshair-editor-group,
+    .operator-card {
+      border-radius: var(--radius-md);
+    }
+
+    #menu-screen-operator .operator-card::before {
+      border-radius: var(--radius-sm);
+    }
+
+    /* Tarjetas y paneles secundarios: mismo radio medio en toda la aplicación. */
+    .info-card,
+    .menu-weapon-card,
+    .buy-card,
+    .loadout-chip,
+    #podium-rows,
+    .menu-arsenal-controlbar,
+    .menu-arsenal-balance,
+    .buy-balance,
+    .bot-metric,
+    .bot-control-card,
+    .keybind-row,
+    .fixed-binding {
+      border-radius: var(--radius-md);
+    }
+
+    /* Acciones principales y controles con área táctil mediana. */
+    #play-btn,
+    .vote-option,
+    #podium .vote-option,
+    .secondary-action,
+    .settings-action,
+    .settings-tab,
+    .crosshair-preset,
+    .keybind-button,
+    .buy-close,
+    .buy-category,
+    #bot-apply {
+      border-radius: var(--radius-sm);
+    }
+
+    /* Navegación, filtros y botones compactos. */
+    .menu-nav-btn,
+    .menu-arsenal-filter,
+    .hat-btn,
+    .ghost-action,
+    .text-action {
+      border-radius: var(--radius-sm);
+    }
+
+    /* Entradas: el radio sigue la altura del control, no el contenedor. */
+    #name-input,
+    #bot-count,
+    .option-control select,
+    .option-control input[type="color"] {
+      border-radius: var(--radius-sm);
+    }
+
+    .option-toggle input[type="checkbox"],
+    .bot-toggle-track,
+    #quick-mute,
+    #net-status,
+    #match-banner,
+    .bot-stepper button {
+      border-radius: var(--radius-pill);
+    }
+
+    #bot-close,
+    .color-btn,
+    .option-toggle input[type="checkbox"]::before,
+    .bot-toggle-track::after {
+      border-radius: 50%;
+    }
+
+    /* Etiquetas, ayudas, keycaps y avisos se leen como piezas compactas. */
+    .kf-entry,
+    .settings-note,
+    #keybinding-status,
+    #bot-panel-note,
+    .crosshair-preview-stage::after,
+    [role="tooltip"] {
+      border-radius: var(--radius-sm);
+    }
+
+    .settings-note kbd,
+    .fixed-binding kbd,
+    .buy-category span,
+    .buy-help b,
+    .buy-footer b,
+    .bot-panel-footer kbd,
+    .buy-card::before {
+      border-radius: var(--radius-pill);
+    }
+
+    /* Barras, trazos e indicadores siempre terminan en cápsula. */
+    #reload-bar-bg,
+    #reload-bar,
+    #health-bar-bg,
+    #health-bar,
+    #scope .cross-h,
+    #scope .cross-v,
+    #hitmarker .hm,
+    .crosshair-shape .line,
+    .eyebrow span,
+    .menu-nav-btn.active::after,
+    .menu-weapon-card::before,
+    .menu-weapon-card .weapon-stat i,
+    .menu-weapon-card .weapon-stat i::before,
+    .buy-window::-webkit-scrollbar-thumb,
+    .settings-tabs::-webkit-scrollbar-thumb {
+      border-radius: var(--radius-pill);
+    }
+
+    .option-control input[type="range"] {
+      border-radius: var(--radius-pill);
+    }
+    .option-control input[type="range"]::-webkit-slider-runnable-track {
+      border-radius: var(--radius-pill);
+    }
+    .option-control input[type="range"]::-moz-range-track {
+      border-radius: var(--radius-pill);
+    }
+    .option-control input[type="range"]::-webkit-slider-thumb {
+      border-radius: 50%;
+    }
+    .option-control input[type="range"]::-moz-range-thumb {
+      border-radius: 50%;
+    }
+    .option-control input[type="color"]::-webkit-color-swatch {
+      border: 0;
+      border-radius: calc(var(--radius-sm) - 2px);
+    }
+    .option-control input[type="color"]::-moz-color-swatch {
+      border: 0;
+      border-radius: calc(var(--radius-sm) - 2px);
+    }
+
+    /* La muerte conserva el overlay completo y presenta su contenido en una tarjeta. */
+    #death { isolation: isolate; }
+    #death::before {
+      content: '';
+      position: absolute; left: 50%; top: 50%; z-index: 0;
+      width: min(540px, calc(100vw - 32px)); height: min(270px, calc(100vh - 40px));
+      border: 1px solid rgba(255,151,133,.22); border-radius: var(--radius-lg);
+      background: linear-gradient(145deg, rgba(58,10,13,.7), rgba(16,8,13,.72));
+      box-shadow: 0 28px 90px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.05);
+      transform: translate(-50%, -50%); pointer-events: none;
+    }
+    #death > * { position: relative; z-index: 1; }
+
+    /* El contraste y el foco permanecen exteriores al contorno redondeado. */
+    :where(button, input, select):focus-visible { outline-offset: 3px; }
+
+    @media (max-width: 520px) {
+      :root {
+        --radius-sm: 7px;
+        --radius-md: 11px;
+        --radius-lg: 16px;
+      }
+      #death::before { width: calc(100vw - 24px); }
     }
     </style>
 </head>
@@ -1202,7 +1391,7 @@
       <div class="screen-footer">Configuración guardada automáticamente en este navegador · Las opciones mostradas modifican funciones reales del juego.</div>
     </section>
     </main>
-    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v1.2.0 // VIEWMODEL & CROSSHAIR</span></footer>
+    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v1.3.0 // ROUNDED WORLD</span></footer>
     </div>
   </div>
 

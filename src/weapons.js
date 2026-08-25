@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ammoAfterPickup, weaponSelectionAction, weaponAnimationState } from './ui-models.js';
 import { DEFAULT_BINDINGS, bindingSlotIndex, keyCodeLabel } from './input-bindings.js';
+import { roundedBoxGeometry } from './rounded-geometry.js';
 
 // ---------------------------------------------------------------------------
 // Armas: definición, modelo en primera persona (cajas), disparo por raycast,
@@ -257,8 +258,17 @@ function snapshotTransform(object) {
 
 const ARM_UP = new THREE.Vector3(0, 1, 0);
 
+function viewmodelBoxGeometry(width, height, depth, options = {}) {
+  const shortest = Math.min(Math.abs(width), Math.abs(height), Math.abs(depth));
+  return roundedBoxGeometry(width, height, depth, {
+    ratio: options.ratio ?? (shortest < 0.03 ? 0.13 : shortest < 0.065 ? 0.16 : 0.19),
+    maxRadius: options.maxRadius ?? 0.018,
+    segments: options.segments ?? (shortest >= 0.055 ? 2 : 1),
+  });
+}
+
 function makeArmSegment(material, radiusTop, radiusBottom = radiusTop) {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radiusTop, radiusBottom, 1, 10, 1), material);
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radiusTop, radiusBottom, 1, 12, 1), material);
   mesh.frustumCulled = false;
   mesh.castShadow = true;
   return mesh;
@@ -276,24 +286,26 @@ function buildFirstPersonArms(kind, materials) {
   const root = new THREE.Group();
   root.name = 'first-person-arms';
   const pose = HAND_POSES[kind] || HAND_POSES.pistol;
-  const palmGeometry = new THREE.SphereGeometry(0.075, 10, 7);
-  const palmPadGeometry = new THREE.BoxGeometry(0.086, 0.018, 0.072);
-  const knuckleGeometry = new THREE.SphereGeometry(0.014, 8, 5);
+  const palmGeometry = new THREE.SphereGeometry(0.075, 12, 8);
+  const palmPadGeometry = viewmodelBoxGeometry(0.086, 0.018, 0.072, {
+    ratio: 0.28, maxRadius: 0.005, segments: 1,
+  });
+  const knuckleGeometry = new THREE.SphereGeometry(0.014, 10, 6);
   const fingerLengths = [0.034, 0.029, 0.024];
   const fingerGeometries = fingerLengths.map((length, index) => {
-    const geometry = new THREE.CylinderGeometry(0.008 - index * 0.0007, 0.0105 - index * 0.0005, length, 8, 1);
+    const geometry = new THREE.CylinderGeometry(0.008 - index * 0.0007, 0.0105 - index * 0.0005, length, 10, 1);
     geometry.rotateX(Math.PI / 2);
     return geometry;
   });
-  const fingertipGeometry = new THREE.SphereGeometry(0.009, 8, 5);
+  const fingertipGeometry = new THREE.SphereGeometry(0.009, 10, 6);
   const thumbLengths = [0.038, 0.031];
   const thumbGeometries = thumbLengths.map((length, index) => {
-    const geometry = new THREE.CylinderGeometry(0.011 - index * 0.001, 0.013 - index * 0.001, length, 8, 1);
+    const geometry = new THREE.CylinderGeometry(0.011 - index * 0.001, 0.013 - index * 0.001, length, 10, 1);
     geometry.rotateX(Math.PI / 2);
     return geometry;
   });
-  const elbowGeometry = new THREE.SphereGeometry(0.078, 10, 6);
-  const shoulderGeometry = new THREE.SphereGeometry(0.092, 10, 6);
+  const elbowGeometry = new THREE.SphereGeometry(0.078, 12, 8);
+  const shoulderGeometry = new THREE.SphereGeometry(0.092, 12, 8);
 
   const makeHand = (side, position) => {
     const direction = side === 'left' ? -1 : 1;
@@ -376,7 +388,7 @@ function buildFirstPersonArms(kind, materials) {
     hand.add(thumb);
 
     const cuff = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.068, 0.074, 0.075, 8),
+      new THREE.CylinderGeometry(0.068, 0.074, 0.075, 12),
       materials.cuff,
     );
     cuff.name = `${side}-wrist-cuff`;
@@ -385,7 +397,7 @@ function buildFirstPersonArms(kind, materials) {
     hand.add(cuff);
 
     const wristStrap = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.072, 0.072, 0.018, 10),
+      new THREE.CylinderGeometry(0.072, 0.072, 0.018, 12),
       materials.glovePanel,
     );
     wristStrap.name = `${side}-wrist-strap`;
@@ -474,14 +486,14 @@ export function buildGunModel(kind) {
   const moving = {};
 
   const part = (mat, w, h, d, x, y, z) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    const m = new THREE.Mesh(viewmodelBoxGeometry(w, h, d), mat);
     m.position.set(x, y, z);
     g.add(m);
     return m;
   };
 
   const tube = (mat, radius, length, x, y, z) => {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 10), mat);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 12), mat);
     m.position.set(x, y, z);
     m.rotation.x = Math.PI / 2;
     m.castShadow = true;
@@ -608,25 +620,31 @@ export function buildKnifeModel() {
     steel, rubber, accent, glove, glovePanel, cuff, sleeve, sleeveDark,
   } = createViewmodelMaterials();
 
-  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.041, 0.19, 10), rubber);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.041, 0.19, 12), rubber);
   handle.name = 'knife-handle';
   handle.position.set(0, -0.095, 0.065);
   handle.rotation.x = Math.PI / 2;
-  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.145, 0.026, 0.045), accent);
+  const guard = new THREE.Mesh(viewmodelBoxGeometry(0.145, 0.026, 0.045, {
+    ratio: 0.25, maxRadius: 0.006, segments: 2,
+  }), accent);
   guard.name = 'knife-guard';
   guard.position.set(0, -0.002, -0.035);
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.065, 0.38), steel);
+  const blade = new THREE.Mesh(viewmodelBoxGeometry(0.032, 0.065, 0.38, {
+    ratio: 0.18, maxRadius: 0.006, segments: 2,
+  }), steel);
   blade.name = 'knife-blade';
   blade.position.set(0, 0.008, -0.245);
-  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.048, 0.13, 4), steel);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.048, 0.13, 6), steel);
   tip.name = 'knife-tip';
   tip.position.set(0, 0.008, -0.5);
   tip.rotation.x = -Math.PI / 2;
   tip.rotation.y = Math.PI / 4;
-  const spine = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.018, 0.31), accent);
+  const spine = new THREE.Mesh(viewmodelBoxGeometry(0.045, 0.018, 0.31, {
+    ratio: 0.22, maxRadius: 0.004, segments: 1,
+  }), accent);
   spine.name = 'knife-spine';
   spine.position.set(0, 0.045, -0.22);
-  const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.036, 0.035, 10), accent);
+  const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.036, 0.035, 12), accent);
   pommel.name = 'knife-pommel';
   pommel.position.set(0, -0.205, 0.155);
   pommel.rotation.x = Math.PI / 2;

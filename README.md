@@ -8,6 +8,8 @@ El parche **Spawn Safety 1.1.1** audita toda la geometría de Arena y Ciudad: ca
 
 La actualización **Viewmodel & Crosshair 1.2** convierte el cuchillo en un cambio temporal de arma real: oculta el arma de fuego, bloquea acciones incompatibles y sincroniza el daño con el golpe visual. También añade brazos anclados, manos con palma, nudillos, pulgar y tres falanges por dedo; un estudio completo de mira con presets, color libre, tamaño, grosor, apertura, punto, contorno, opacidad y respuesta dinámica; y una experiencia de arsenal/compra táctica, minimalista y accesible.
 
+La actualización **Rounded World 1.3** suaviza de forma proporcional todas las piezas visibles del escenario, operadores, manos, armas, cuchillo, kits, granadas y efectos. Las dimensiones exteriores, hitboxes y colliders se conservan exactamente; Arena y Ciudad permanecen dentro de un presupuesto controlado de geometría. La interfaz completa comparte ahora un sistema adaptable de radios para ventanas, tarjetas, HUD, compra, bots, opciones, mira, barras y controles, manteniendo circulares los elementos que lo requieren.
+
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.
 
 ## Jugar en local
