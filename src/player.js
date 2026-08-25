@@ -54,6 +54,10 @@ export class Player {
     this.bunnyHopEnabled = true;
     this.screenShake = 1;
     this.fovOffset = 0;
+    this.fallbackLookActive = false;
+    this.fallbackLookSurface = null;
+    this.fallbackPointerX = null;
+    this.fallbackPointerY = null;
 
     this.onJump = null;
     this.onLand = null;
@@ -73,12 +77,40 @@ export class Player {
       }
     });
     addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement) {
-        this.yaw -= e.movementX * this.sensitivity;
-        this.pitch += (this.invertY ? 1 : -1) * e.movementY * this.sensitivity;
-        this.pitch = Math.max(-1.55, Math.min(1.55, this.pitch));
+      const locked = !!document.pointerLockElement;
+      const overFallbackSurface = this.fallbackLookActive &&
+        (!this.fallbackLookSurface || this.fallbackLookSurface.contains?.(e.target));
+      if (!locked && !overFallbackSurface) return;
+      const limit = locked ? Number.POSITIVE_INFINITY : 80;
+      let rawX = Number(e.movementX);
+      let rawY = Number(e.movementY);
+      if (!locked) {
+        const clientX = Number(e.clientX);
+        const clientY = Number(e.clientY);
+        if (Number.isFinite(clientX) && Number.isFinite(this.fallbackPointerX)) {
+          const clientDeltaX = clientX - this.fallbackPointerX;
+          if (!Number.isFinite(rawX) || (rawX === 0 && clientDeltaX !== 0)) rawX = clientDeltaX;
+        }
+        if (Number.isFinite(clientY) && Number.isFinite(this.fallbackPointerY)) {
+          const clientDeltaY = clientY - this.fallbackPointerY;
+          if (!Number.isFinite(rawY) || (rawY === 0 && clientDeltaY !== 0)) rawY = clientDeltaY;
+        }
+        this.fallbackPointerX = Number.isFinite(clientX) ? clientX : null;
+        this.fallbackPointerY = Number.isFinite(clientY) ? clientY : null;
       }
+      const movementX = Math.max(-limit, Math.min(limit, Number.isFinite(rawX) ? rawX : 0));
+      const movementY = Math.max(-limit, Math.min(limit, Number.isFinite(rawY) ? rawY : 0));
+      this.yaw -= movementX * this.sensitivity;
+      this.pitch += (this.invertY ? 1 : -1) * movementY * this.sensitivity;
+      this.pitch = Math.max(-1.55, Math.min(1.55, this.pitch));
     });
+  }
+
+  setFallbackLook(active, surface = null) {
+    this.fallbackLookActive = !!active;
+    this.fallbackLookSurface = surface || null;
+    this.fallbackPointerX = null;
+    this.fallbackPointerY = null;
   }
 
   setBindings(bindings) {

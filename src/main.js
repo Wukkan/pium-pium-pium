@@ -42,6 +42,7 @@ import {
   lobbySelectionState,
   sanitizeLobbySelection,
 } from './lobby-catalog.js';
+import { gameplayControlActive, requestPointerLockSafe } from './game-entry.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — shooter multijugador original para navegador.
@@ -1200,7 +1201,7 @@ function resetStreak() { streak = 0; }
 
 // lanzar granada con la tecla configurada
 addEventListener('keydown', (e) => {
-  if (!isAction(e, 'grenade') || e.repeat || !document.pointerLockElement) return;
+  if (!isAction(e, 'grenade') || e.repeat || !hasGameplayControl()) return;
   if (state !== 'playing' || player.dead || weapons.inputBlocked || weapons.meleeActive) return;
   if (grenades.throwFrom(camera)) audio.nadeThrow();
 });
@@ -1270,6 +1271,8 @@ let joined = false;
 let lastSnap = null;
 let kills = 0, deaths = 0;
 let state = 'menu'; // menu | playing | dead
+let fallbackControlsActive = false;
+let fallbackControlHintShown = false;
 
 const playerEye = new THREE.Vector3();
 const remoteAudioForward = new THREE.Vector3();
@@ -1546,7 +1549,7 @@ function setupOffline() {
       weapons.refill();
       grenades.refill();
       hud.updateHealth(player.health, player.maxHealth);
-      state = document.pointerLockElement ? 'playing' : 'menu';
+      state = hasGameplayControl() ? 'playing' : 'menu';
       if (state === 'menu') hud.showMenu(true);
     }, 2600);
   };
@@ -1618,7 +1621,7 @@ function setupOnline() {
       weapons.setForced(m.mode === 'gun' ? WEAPON_ORDER[0] : null);
       if (m.mode === 'teams') setTeamPicker(true);
       else setTeamPicker(false);
-      if (returningFromPodium && !document.pointerLockElement) {
+      if (returningFromPodium && !hasGameplayControl()) {
         hud.info(m.mode === 'teams'
           ? 'Elige equipo y haz clic en la arena para continuar'
           : 'Haz clic en la arena para retomar el control');
@@ -1635,6 +1638,7 @@ function setupOnline() {
     podiumOpen = true;
     podiumStage = m.stage || 'map';
     refreshWeaponInputBlock();
+    setFallbackControls(false);
     if (document.pointerLockElement) document.exitPointerLock();
     hud.showPodium(m);
     hud.setPodiumStage(podiumStage, m.secs || 15);
@@ -1776,7 +1780,7 @@ function setupOnline() {
     grenades.refill();
     hud.showDeath(false);
     hud.updateHealth(player.health, player.maxHealth);
-    state = document.pointerLockElement ? 'playing' : 'menu';
+    state = hasGameplayControl() ? 'playing' : 'menu';
     if (state === 'menu') hud.showMenu(true);
   });
 
@@ -1803,7 +1807,7 @@ function setupOnline() {
 async function joinAndPlay() {
   cancelBindingCapture('Asignación cancelada al iniciar la partida.');
   audio.ensure();
-  if (joined || botsLocal) { tryLock(); return; }
+  if (joined || botsLocal) { enterGameplayView(); return; }
   if (connecting) return;
   const initialSelection = lobbySelectionState(lobbySelection, lobbyRooms);
   if (serverAvailable && initialSelection.full) {
@@ -1861,18 +1865,63 @@ async function joinAndPlay() {
     hud.updateHealth(player.health, player.maxHealth);
     hud.updateAmmo(weapons);
     hud.updateScore(kills, deaths);
-    tryLock();
+    enterGameplayView();
   }
 }
 
+function setFallbackControls(active) {
+  fallbackControlsActive = !!active;
+  document.body.classList.toggle('fallback-controls', fallbackControlsActive);
+  player.setFallbackLook(fallbackControlsActive, renderer.domElement);
+  weapons.setFallbackControls(fallbackControlsActive, renderer.domElement);
+}
+
+function hasGameplayControl() {
+  return gameplayControlActive(document.pointerLockElement, fallbackControlsActive);
+}
+
+function showFallbackControlHint() {
+  if (fallbackControlHintShown) return;
+  fallbackControlHintShown = true;
+  hud.info('Partida activa · modo compatible de mouse habilitado');
+}
+
+function enterGameplayView() {
+  state = 'playing';
+  hud.showMenu(false);
+  hud.showHud(true);
+  setFallbackControls(!document.pointerLockElement);
+  if (!tryLock()) showFallbackControlHint();
+}
+
 function tryLock() {
-  const p = renderer.domElement.requestPointerLock({ unadjustedMovement: true });
-  if (p && p.catch) {
-    p.catch(() => {
-      const fallback = renderer.domElement.requestPointerLock();
-      if (fallback && fallback.catch) fallback.catch(() => {});
-    });
+  if (document.pointerLockElement === renderer.domElement) {
+    setFallbackControls(false);
+    return true;
   }
+  if (state === 'playing') setFallbackControls(true);
+  const attempt = requestPointerLockSafe(renderer.domElement);
+  void attempt.completion.then((locked) => {
+    if (!locked && state === 'playing' && !document.pointerLockElement) {
+      setFallbackControls(true);
+      showFallbackControlHint();
+    }
+  });
+  return attempt.requested;
+}
+
+function openMainMenuFromGame() {
+  setFallbackControls(false);
+  if (state !== 'playing') return;
+  state = 'menu';
+  hud.showMenu(true);
+  showMenuScreen('play');
+  hud.setMenuStats(kills, deaths);
+  hud.setScope(false);
+  hud.showScores(false);
+  setChat(false);
+  setBuyMenu(false);
+  renderMenuPanels();
 }
 
 playBtn.addEventListener('click', joinAndPlay);
@@ -1887,22 +1936,18 @@ nameInput.addEventListener('keydown', (e) => {
 
 document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement) {
+    if (buyOpen || botPanelOpen || podiumOpen || teamPickerOpen) {
+      document.exitPointerLock();
+      return;
+    }
+    setFallbackControls(false);
     if (state === 'menu') state = 'playing';
     hud.showMenu(false);
     hud.showHud(true);
   } else {
+    setFallbackControls(false);
     if (buyOpen || botPanelOpen || podiumOpen || teamPickerOpen) return;
-    if (state === 'playing') {
-      state = 'menu';
-      hud.showMenu(true);
-      showMenuScreen('play');
-      hud.setMenuStats(kills, deaths);
-      hud.setScope(false);
-      hud.showScores(false);
-      setChat(false);
-      setBuyMenu(false);
-      renderMenuPanels();
-    }
+    openMainMenuFromGame();
   }
 });
 
@@ -1919,7 +1964,7 @@ function refreshWorldRanking() {
 }
 
 addEventListener('keydown', (e) => {
-  if (isAction(e, 'scoreboard') && !e.repeat && document.pointerLockElement && !weapons.inputBlocked) {
+  if (isAction(e, 'scoreboard') && !e.repeat && hasGameplayControl() && !weapons.inputBlocked) {
     e.preventDefault();
     refreshWorldRanking();
     const rows = [];
@@ -2150,6 +2195,7 @@ function setBotPanel(open, restorePointer = true) {
   hud.showBotPanel(botPanelOpen);
   refreshWeaponInputBlock();
   if (botPanelOpen) {
+    setFallbackControls(false);
     if (document.pointerLockElement) document.exitPointerLock();
     requestAnimationFrame(() => {
       document.getElementById(botControl.locked ? 'bot-close' : 'bot-count')?.focus();
@@ -2254,6 +2300,7 @@ function setBuyMenu(open, restorePointer = true) {
   setBuyBackgroundInert(buyOpen);
   refreshWeaponInputBlock();
   if (buyOpen) {
+    setFallbackControls(false);
     if (document.pointerLockElement) document.exitPointerLock();
     requestAnimationFrame(() => document.getElementById('buy-close')?.focus());
   } else {
@@ -2311,7 +2358,7 @@ function handleMatchOverlaySlot(index) {
     else if (index === 2) net.sendTeam(null);
     else return false;
     setTeamPicker(false);
-    if (!document.pointerLockElement) hud.info('Haz clic en la arena para retomar el control');
+    if (!hasGameplayControl()) hud.info('Haz clic en la arena para retomar el control');
     return true;
   }
   return false;
@@ -2323,6 +2370,12 @@ addEventListener('keydown', (e) => {
   if (!uiFocused && isAction(e, 'muteSound') && !e.repeat) {
     e.preventDefault();
     toggleSound();
+    return;
+  }
+  if (e.code === 'Escape' && fallbackControlsActive && state === 'playing' &&
+      !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen) {
+    e.preventDefault();
+    openMainMenuFromGame();
     return;
   }
   if (botPanelOpen) {
@@ -2360,13 +2413,13 @@ addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  if (uiFocused && !document.pointerLockElement) return;
+  if (uiFocused && !hasGameplayControl()) return;
   if (isAction(e, 'openBots') && !e.repeat && !podiumOpen && !teamPickerOpen) {
     e.preventDefault();
     setBotPanel(true);
     return;
   }
-  if (!document.pointerLockElement) return;
+  if (!hasGameplayControl()) return;
   if (isAction(e, 'openArsenal') && !e.repeat && !podiumOpen && !teamPickerOpen) {
     setChat(false);
     setBuyMenu(!buyOpen);
@@ -2429,7 +2482,7 @@ function tick(now) {
   lastTime = now;
 
   const playing = state === 'playing';
-  const inputEnabled = playing && !!document.pointerLockElement && !connecting && !player.dead &&
+  const inputEnabled = playing && hasGameplayControl() && !connecting && !player.dead &&
     !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;
 
   if (state !== 'menu') {

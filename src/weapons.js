@@ -1109,6 +1109,8 @@ export class WeaponSystem {
     this.meleeCooldownUntil = 0;
     this.meleeStrikeCallback = null;
     this.meleeStrikeFired = false;
+    this.fallbackControls = false;
+    this.fallbackControlSurface = null;
 
     // grupo del modelo en primera persona, colgado de la cámara
     this.rig = new THREE.Group();
@@ -1125,7 +1127,7 @@ export class WeaponSystem {
     this.rig.add(this.knifeModel);
 
     addEventListener('mousedown', (e) => {
-      if (!document.pointerLockElement || this.inputBlocked || this.meleeActive) return;
+      if (!this.hasGameplayControl(e) || this.inputBlocked || this.meleeActive) return;
       if (e.button === 0) this.triggerDown = true;
       if (e.button === 2) this.ads = this.aimMode === 'toggle' ? !this.ads : true;
     });
@@ -1134,18 +1136,18 @@ export class WeaponSystem {
       if (e.button === 2 && this.aimMode === 'hold') this.ads = false;
     });
     addEventListener('contextmenu', (e) => {
-      if (document.pointerLockElement) e.preventDefault();
+      if (this.hasGameplayControl(e)) e.preventDefault();
     });
     this.inputBlocked = false; // true mientras un overlay usa las teclas numéricas
     addEventListener('keydown', (e) => {
-      if (!document.pointerLockElement || this.inputBlocked) return;
+      if (!this.hasGameplayControl() || this.inputBlocked) return;
       if (e.code === this.bindings.reload && !e.repeat) this.reload();
       const idx = bindingSlotIndex(this.bindings, e.code);
       if (!e.repeat && idx >= 0 && idx < this.slots.length) this.switchTo(this.slots[idx]);
     });
     addEventListener('blur', () => this.clearInput());
     document.addEventListener('pointerlockchange', () => {
-      if (!document.pointerLockElement) this.clearInput();
+      if (!this.hasGameplayControl()) this.clearInput();
     });
   }
 
@@ -1154,10 +1156,23 @@ export class WeaponSystem {
     this.clearInput();
   }
 
+  setFallbackControls(active, surface = null) {
+    this.fallbackControls = !!active;
+    this.fallbackControlSurface = surface || null;
+    if (!this.hasGameplayControl()) this.clearInput();
+  }
+
+  hasGameplayControl(event = null) {
+    if (document.pointerLockElement) return true;
+    if (!this.fallbackControls) return false;
+    if (!event || !this.fallbackControlSurface) return true;
+    return this.fallbackControlSurface.contains?.(event.target) === true;
+  }
+
   setPreferences({ aimMode = 'hold', weaponBob = 1 } = {}) {
     this.aimMode = aimMode === 'toggle' ? 'toggle' : 'hold';
     this.weaponBob = Math.min(1, Math.max(0, Number(weaponBob) || 0));
-    if (this.aimMode === 'hold' && !document.pointerLockElement) this.ads = false;
+    if (this.aimMode === 'hold' && !this.hasGameplayControl()) this.ads = false;
   }
 
   clearInput() {
