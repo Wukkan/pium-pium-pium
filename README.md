@@ -10,6 +10,8 @@ La actualización **Viewmodel & Crosshair 1.2** convierte el cuchillo en un camb
 
 La actualización **Rounded World 1.3** suaviza de forma proporcional todas las piezas visibles del escenario, operadores, manos, armas, cuchillo, kits, granadas y efectos. Las dimensiones exteriores, hitboxes y colliders se conservan exactamente; Arena y Ciudad permanecen dentro de un presupuesto controlado de geometría. La interfaz completa comparte ahora un sistema adaptable de radios para ventanas, tarjetas, HUD, compra, bots, opciones, mira, barras y controles, manteniendo circulares los elementos que lo requieren.
 
+El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
+
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.
 
 ## Jugar en local

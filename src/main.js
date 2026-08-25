@@ -29,8 +29,9 @@ import {
   BINDING_ACTIONS, assignBinding, bindingSlotIndex, keyCodeLabel,
   matchesBinding, readBindings,
 } from './input-bindings.js';
-import { makeHumanoid } from './humanoid.js';
+import { disposeHumanoid, makeHumanoid } from './humanoid.js';
 import { SKIN_COLORS, sanitizeSkin } from './player-profile.js';
+import { buildWeaponOnlyModel, WeaponPreviewManager } from './weapon-previews.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — shooter multijugador original para navegador.
@@ -280,28 +281,39 @@ const operatorPreview = {
 function disposePreviewRig() {
   if (!operatorPreview.rig) return;
   operatorPreview.scene.remove(operatorPreview.rig.group);
-  operatorPreview.rig.group.traverse((object) => {
-    if (!object.isMesh && !object.isSprite) return;
-    if (object.geometry) object.geometry.dispose();
-    const materials = Array.isArray(object.material) ? object.material : [object.material];
-    for (const material of materials) {
-      if (material.map) material.map.dispose();
-      material.dispose();
-    }
-  });
+  disposeHumanoid(operatorPreview.rig);
   operatorPreview.rig = null;
+}
+
+function equipOperatorPreviewWeapon(rig, kind) {
+  if (!rig?.gun) return false;
+  let detailedWeapon;
+  try {
+    detailedWeapon = buildWeaponOnlyModel(kind);
+  } catch (error) {
+    console.warn(`No se pudo preparar el modelo de ${kind} para el operador.`, error);
+    return false;
+  }
+  for (const child of rig.gun.children) child.visible = false;
+  detailedWeapon.name = `operator-weapon-${kind}`;
+  detailedWeapon.scale.setScalar(1.03);
+  rig.gun.add(detailedWeapon);
+  rig.previewWeapon = detailedWeapon;
+  return true;
 }
 
 function refreshOperatorPreview() {
   if (!operatorPreview.scene) return;
   const name = (nameInput?.value || 'OPERADOR').toUpperCase();
   const color = skin.color || 0x3f6ea8;
-  const key = `${name}|${skin.hat || 'none'}|${color}`;
+  const weaponKind = WEAPON_DEFS[weapons.current]?.kind || 'pistol';
+  const key = `${name}|${skin.hat || 'none'}|${color}|${weaponKind}`;
   if (key === operatorPreview.key) return;
   operatorPreview.key = key;
   disposePreviewRig();
   const rig = makeHumanoid(color, name, (part) => ({ preview: true, part }), '#ffffff', skin.hat || 'none');
   rig.nameSprite.visible = false;
+  equipOperatorPreviewWeapon(rig, weaponKind);
   rig.group.scale.setScalar(1.1);
   rig.group.rotation.y = operatorPreview.angle;
   operatorPreview.scene.add(rig.group);
@@ -388,6 +400,28 @@ let bindings = readBindings(safeStorageGet('pium_bindings_v1'));
 let activeSettingsTab = 'audio';
 let bindingCaptureAction = null;
 let appliedBindingsSignature = '';
+const weaponPreviewManager = new WeaponPreviewManager({
+  width: 384,
+  height: 136,
+  maxPixelRatio: 1.5,
+  pixelRatio: Math.min(Number(globalThis.devicePixelRatio) || 1, 1.5),
+});
+let menuWeaponPreviewHandles = [];
+let buyWeaponPreviewHandles = [];
+
+function clearWeaponPreviewHandles(handles) {
+  for (const handle of handles) handle.dispose();
+  handles.length = 0;
+}
+
+function mountWeaponCardPreview(card, selector, kind, collection) {
+  const host = card.querySelector(selector);
+  if (!host) return;
+  const handle = weaponPreviewManager.mount(host, kind, { label: '' });
+  collection.push(handle);
+}
+
+addEventListener('pagehide', () => weaponPreviewManager.dispose(), { once: true });
 
 function saveSettings() {
   return safeStorageSet('pium_settings', JSON.stringify(settings));
@@ -927,6 +961,7 @@ function renderMenuArsenal() {
   const money = document.getElementById('menu-arsenal-money');
   if (!grid || !money) return;
   money.textContent = `$ ${weapons.money}`;
+  clearWeaponPreviewHandles(menuWeaponPreviewHandles);
   grid.textContent = '';
   document.querySelectorAll('[data-menu-arsenal-filter]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.menuArsenalFilter === menuArsenalFilter));
@@ -952,7 +987,7 @@ function renderMenuArsenal() {
     const cadence = Math.min(100, Math.round((def.rpm / 950) * 100));
     const control = Math.min(100, Math.round((1 - Math.min(0.07, def.recoil) / 0.07) * 100));
     card.setAttribute('aria-label', `${def.name}. ${action}. Cargador ${def.mag}, reserva ${def.reserve}.`);
-    card.innerHTML = `<span class="weapon-index">[${bindingLabel(`slot${i + 1}`)}] ${def.kind.toUpperCase()}</span><span class="weapon-icon" aria-hidden="true"></span><span class="weapon-name">${def.name}</span><span class="weapon-info">Cargador ${def.mag} · Reserva ${def.reserve}</span><span class="weapon-stats" aria-hidden="true"><span class="weapon-stat">DAÑO <i style="--stat:${damage}%"></i></span><span class="weapon-stat">CADENCIA <i style="--stat:${cadence}%"></i></span><span class="weapon-stat">CONTROL <i style="--stat:${control}%"></i></span></span><span class="weapon-action">${action}</span>`;
+    card.innerHTML = `<span class="weapon-index">[${bindingLabel(`slot${i + 1}`)}] ${def.kind.toUpperCase()}</span><span class="weapon-icon" data-weapon-preview="${def.kind}" aria-hidden="true"><span class="weapon-preview-fallback">${def.kind.toUpperCase()}</span></span><span class="weapon-name">${def.name}</span><span class="weapon-info">Cargador ${def.mag} · Reserva ${def.reserve}</span><span class="weapon-stats" aria-hidden="true"><span class="weapon-stat">DAÑO <i style="--stat:${damage}%"></i></span><span class="weapon-stat">CADENCIA <i style="--stat:${cadence}%"></i></span><span class="weapon-stat">CONTROL <i style="--stat:${control}%"></i></span></span><span class="weapon-action">${action}</span>`;
     card.addEventListener('click', () => {
       if (owned) weapons.switchTo(key);
       else if (affordable) weapons.tryBuy(key);
@@ -960,6 +995,7 @@ function renderMenuArsenal() {
       renderLoadoutPanel();
     });
     grid.append(card);
+    mountWeaponCardPreview(card, '.weapon-icon', def.kind, menuWeaponPreviewHandles);
   });
 }
 
@@ -1911,6 +1947,7 @@ function renderBuyMenu() {
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
+  clearWeaponPreviewHandles(buyWeaponPreviewHandles);
   grid.textContent = '';
   const visibleSlots = weapons.slots.filter((key) => {
     if (buyCategory === 'all') return true;
@@ -1938,7 +1975,7 @@ function renderBuyMenu() {
       `${def.name}. ${action}. Cargador ${def.mag}, reserva ${def.reserve}. Atajo ${bindingLabel(`slot${slot}`)}.`,
     );
     card.innerHTML = `<span class="buy-key">[${bindingLabel(`slot${slot}`)}] ${def.kind.toUpperCase()}</span>` +
-      `<span class="buy-weapon-icon ${def.kind}" aria-hidden="true"></span>` +
+      `<span class="buy-weapon-icon" data-weapon-preview="${def.kind}" aria-hidden="true"><span class="weapon-preview-fallback">${def.kind.toUpperCase()}</span></span>` +
       `<span class="buy-name">${def.name}</span>` +
       `<span class="buy-info">Cargador ${def.mag} · Reserva ${def.reserve}</span>` +
       `<span class="buy-action">${action}</span>`;
@@ -1949,6 +1986,7 @@ function renderBuyMenu() {
       renderBuyMenu();
     });
     grid.append(card);
+    mountWeaponCardPreview(card, '.buy-weapon-icon', def.kind, buyWeaponPreviewHandles);
   });
 }
 

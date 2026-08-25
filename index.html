@@ -533,15 +533,7 @@
     .menu-weapon-card.locked:hover { transform: none; border-color: rgba(139,105,106,.2); box-shadow: inset 0 1px 0 rgba(255,255,255,.025); }
     .menu-weapon-card.locked:hover::after { transform: translateX(-125%); }
     .menu-weapon-card .weapon-index { position: relative; z-index: 1; display: block; color: #7890b0; font: 900 9px Arial, sans-serif; letter-spacing: 1.1px; }
-    .menu-weapon-card .weapon-icon { position: relative; display: block; height: 70px; margin: 10px 0 13px; border-top: 1px solid rgba(255,255,255,.045); border-bottom: 1px solid rgba(255,255,255,.055); background: radial-gradient(ellipse at 48% 65%, rgba(101,140,182,.13), transparent 63%); }
-    .menu-weapon-card .weapon-icon::before { content: ''; position: absolute; left: 9px; top: 28px; width: var(--weapon-length, 110px); max-width: calc(100% - 24px); height: var(--weapon-height, 10px); border-radius: 2px; background: linear-gradient(90deg, #10151c, #637387 45%, #202934 72%, #0f141b); box-shadow: var(--weapon-stock, 26px 11px 0 -2px #161b24), 0 6px 14px rgba(0,0,0,.32); transform: skewX(var(--weapon-skew, -18deg)); }
-    .menu-weapon-card[data-kind="pistol"] { --weapon-length: 72px; --weapon-height: 13px; --weapon-stock: 18px 12px 0 -3px #161b24; }
-    .menu-weapon-card[data-kind="shotgun"] { --weapon-length: 138px; --weapon-height: 8px; --weapon-stock: 20px 12px 0 -1px #4a3525; }
-    .menu-weapon-card[data-kind="smg"] { --weapon-length: 92px; --weapon-height: 14px; --weapon-stock: 28px 14px 0 -3px #161b24; }
-    .menu-weapon-card[data-kind="ar"] { --weapon-length: 132px; --weapon-height: 11px; --weapon-stock: 36px 13px 0 -2px #161b24; }
-    .menu-weapon-card[data-kind="sniper"] { --weapon-length: 150px; --weapon-height: 7px; --weapon-stock: 34px 13px 0 -1px #2c2018; }
-    .menu-weapon-card[data-kind="revolver"] { --weapon-length: 76px; --weapon-height: 14px; --weapon-stock: 22px 14px 0 -3px #3a251c; }
-    .menu-weapon-card[data-kind="launcher"] { --weapon-length: 118px; --weapon-height: 18px; --weapon-stock: 28px 15px 0 -3px #273422; --weapon-skew: -8deg; }
+    .menu-weapon-card .weapon-icon { position: relative; display: block; overflow: hidden; height: 70px; margin: 10px 0 13px; border-top: 1px solid rgba(255,255,255,.045); border-bottom: 1px solid rgba(255,255,255,.055); border-radius: var(--radius-sm); background: radial-gradient(ellipse at 48% 65%, rgba(101,140,182,.16), transparent 63%), linear-gradient(180deg, rgba(255,255,255,.018), rgba(0,0,0,.09)); }
     .menu-weapon-card .weapon-name { position: relative; z-index: 1; display: block; color: #f4f7fb; font: 900 16px 'Arial Black', Arial, sans-serif; letter-spacing: -.2px; }
     .menu-weapon-card .weapon-info { position: relative; z-index: 1; display: block; margin-top: 5px; color: #8094b0; font: 10px Arial, sans-serif; }
     .menu-weapon-card .weapon-stats { position: relative; z-index: 1; display: grid; gap: 6px; margin-top: 13px; }
@@ -740,21 +732,11 @@
     .buy-card.locked .buy-name { color: #99a3b0; }
     .buy-card.locked .buy-info { color: #6e7886; }
     .buy-card.locked .buy-action { color: #cd8278; }
-    .buy-weapon-icon { position: relative; display: block; height: 66px; margin: 10px 0 12px; border-top: 1px solid rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.055); background: radial-gradient(ellipse at 50% 66%, rgba(91,132,176,.12), transparent 62%); }
+    .buy-weapon-icon { position: relative; display: block; overflow: hidden; height: 66px; margin: 10px 0 12px; border-top: 1px solid rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.055); border-radius: var(--radius-sm); background: radial-gradient(ellipse at 50% 66%, rgba(91,132,176,.15), transparent 62%), linear-gradient(180deg, rgba(255,255,255,.018), rgba(0,0,0,.09)); }
     .buy-card.locked .buy-weapon-icon { filter: grayscale(.75); opacity: .52; }
-    .buy-weapon-icon::before, .buy-weapon-icon::after { content: ''; position: absolute; display: block; background: linear-gradient(90deg, #0e141c, #667789 53%, #242e3a 75%, #10161e); box-shadow: 0 5px 11px rgba(0,0,0,.36); transform: skewX(-16deg); }
-    .buy-weapon-icon::before { left: 6%; top: 29px; width: 76%; height: 9px; border-radius: 2px; }
-    .buy-weapon-icon::after { left: 36%; top: 37px; width: 13%; height: 17px; background: #151c25; transform: rotate(18deg) skewX(-10deg); }
-    .buy-weapon-icon.pistol::before { width: 52%; left: 15%; top: 28px; }
-    .buy-weapon-icon.pistol::after { left: 35%; top: 32px; height: 20px; }
-    .buy-weapon-icon.revolver::before { width: 68%; left: 12%; height: 6px; top: 27px; }
-    .buy-weapon-icon.revolver::after { left: 35%; top: 25px; width: 21%; height: 17px; border-radius: 50%; transform: none; }
-    .buy-weapon-icon.shotgun::before { width: 83%; left: 5%; height: 7px; top: 27px; }
-    .buy-weapon-icon.shotgun::after { left: 23%; top: 34px; width: 28%; height: 10px; }
-    .buy-weapon-icon.sniper::before { width: 88%; left: 2%; height: 5px; top: 29px; }
-    .buy-weapon-icon.sniper::after { left: 48%; top: 18px; width: 17%; height: 8px; border-radius: 5px; transform: none; }
-    .buy-weapon-icon.launcher::before { width: 78%; left: 5%; height: 16px; top: 22px; border-radius: 9px; }
-    .buy-weapon-icon.launcher::after { left: 36%; top: 38px; width: 16%; height: 13px; }
+    .weapon-preview-image { position: relative; z-index: 1; display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; filter: drop-shadow(0 8px 8px rgba(0,0,0,.44)); }
+    .weapon-preview-fallback { position: absolute; inset: 0; display: grid; place-items: center; color: #607795; font: 900 9px Arial, sans-serif; letter-spacing: 1.6px; }
+    [data-weapon-preview-state="ready"] .weapon-preview-fallback { display: none; }
     .buy-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 17px; padding-top: 13px; border-top: 1px solid rgba(255,255,255,.07); color: #5e7492; font: 9px Arial, sans-serif; letter-spacing: .45px; }
     .buy-footer b { display: inline-grid; place-items: center; min-width: 24px; min-height: 22px; margin: 0 3px; padding: 2px 6px; border: 1px solid rgba(255,195,77,.28); border-radius: var(--radius-pill); background: rgba(255,195,77,.055); color: #ffd471; }
     .buy-footer-note { color: #4f6480; text-transform: uppercase; letter-spacing: .8px; }
@@ -1391,7 +1373,7 @@
       <div class="screen-footer">Configuración guardada automáticamente en este navegador · Las opciones mostradas modifican funciones reales del juego.</div>
     </section>
     </main>
-    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v1.3.0 // ROUNDED WORLD</span></footer>
+    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v1.3.1 // TRUE WEAPON PREVIEWS</span></footer>
     </div>
   </div>
 
