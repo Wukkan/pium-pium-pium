@@ -18,6 +18,8 @@ La actualización **Real Grip 1.6.0** sustituye la pose genérica de manos por a
 
 El parche **Stable Arsenal 1.6.1** elimina los saltos al cambiar de categoría tanto en el arsenal principal como en el depósito de partida. Ambos conservan exactamente el mismo marco, usan catálogos internos desplazables y tarjetas compactas de proporción casi cuadrada; los filtros reinician su propio scroll y el diseño mantiene ancho, alto y alineación en escritorio, tablet y móvil.
 
+El parche **Tactical Knife 1.6.2** reconstruye la presentación del cuchillo en primera persona: hoja biselada con filo y vaciado visibles, mango estriado, manos con falanges y protecciones, brazos anatómicos más suaves y una guardia independiente que ya no viaja pegada a la hoja. El agarre se calibra contra la superficie real del mango y el ataque separa desenfunde, anticipación, impacto y recuperación.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.

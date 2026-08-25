@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  applyKnifeMeleePose,
   buildGunModel,
   buildKnifeModel,
   firstPersonAnimationState,
@@ -178,7 +179,8 @@ test('melee animation is clamped, strikes once in the middle and finishes hidden
   assert.equal(start.visible, true);
   assert.equal(start.strike, 0);
   assert.ok(strike.strike > 0.99);
-  assert.ok(strike.position.x < start.position.x - 0.3);
+  assert.ok(strike.position.x < start.position.x - 0.24);
+  assert.ok(Math.abs(strike.rotation.y - start.rotation.y) > 1.2, 'slash needs a readable wrist rotation');
   assert.equal(finish.visible, false);
   assert.equal(finish.strike, 0);
   assert.deepEqual(clampedFinish, finish);
@@ -225,6 +227,36 @@ test('gun and knife models expose articulated fingers, thumbs and arm chains', (
   const knife = models.at(-1)[1];
   assert.ok(knife.getObjectByName('knife-blade'));
   assert.ok(knife.getObjectByName('knife-handle'));
+  assert.ok(knife.getObjectByName('knife-edge'));
+  assert.ok(knife.getObjectByName('knife-fuller'));
+  assert.ok(knife.getObjectByName('right-thumb-tip'));
+  assert.ok(knife.getObjectByName('left-thumb-tip'));
+  assert.ok(knife.getObjectByName('right-forearm-seam'));
+  assert.ok(knife.getObjectByName('left-forearm-seam'));
+  assert.notEqual(
+    knife.userData.viewmodel.arms.right.parent,
+    knife.userData.viewmodel.arms.left.parent,
+    'dominant and guard hands need independent animation pivots',
+  );
+});
+
+test('knife pose helper keeps both arm chains finite across every attack phase', () => {
+  const knife = buildKnifeModel();
+  for (const progress of [0, 0.18, 0.27, 0.43, 0.68, 1]) {
+    const pose = meleeAnimationState(progress);
+    assert.equal(applyKnifeMeleePose(knife, pose), true);
+    const { arms, attackPivot, guardPivot } = knife.userData.viewmodel;
+    for (const object of [attackPivot, guardPivot, arms.right, arms.left]) {
+      assert.ok(object.position.toArray().every(Number.isFinite), `${progress}: invalid position`);
+      assert.ok(object.rotation.toArray().slice(0, 3).every(Number.isFinite), `${progress}: invalid rotation`);
+    }
+    for (const side of ['right', 'left']) {
+      const chain = arms.chains[side];
+      assert.ok(chain.shoulder.toArray().every(Number.isFinite), `${progress}: ${side} shoulder invalid`);
+      assert.ok(chain.elbow.toArray().every(Number.isFinite), `${progress}: ${side} elbow invalid`);
+      assert.ok(chain.wrist.toArray().every(Number.isFinite), `${progress}: ${side} wrist invalid`);
+    }
+  }
 });
 
 test('viewmodels use rounded visible boxes within the web geometry budget', () => {
@@ -254,6 +286,8 @@ test('viewmodels use rounded visible boxes within the web geometry budget', () =
 test('beginning and cancelling melee blocks firearm actions and restores only the active gun', () => {
   const { weapon, calls } = meleeHarness();
   const ammoBefore = weapon.ammo.ammo;
+  const attackPivot = weapon.knifeModel.userData.viewmodel.attackPivot;
+  attackPivot.position.set(9, 9, 9);
 
   assert.equal(weapon.beginMelee(), true);
   assert.equal(weapon.meleeActive, true);
@@ -266,6 +300,8 @@ test('beginning and cancelling melee blocks firearm actions and restores only th
   assert.equal(weapon.models.pistol.visible, false);
   assert.equal(weapon.models.ar.visible, false);
   assert.equal(weapon.knifeModel.visible, true);
+  assert.deepEqual(attackPivot.position.toArray(), Object.values(meleeAnimationState(0).position));
+  assert.deepEqual(weapon.knifeModel.position.toArray(), [0, 0, 0], 'knife root must not leak its previous attack transform');
   assert.equal(calls.reloading.at(-1), false);
   assert.equal(calls.scope.at(-1), false);
 

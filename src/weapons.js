@@ -216,22 +216,46 @@ export function firstPersonAnimationState({
 
 export function meleeAnimationState(progress = 0) {
   const p = clamp01(progress);
-  const draw = smoothRange(0, 0.2, p);
-  const strike = windowPulse(p, 0.16, 0.43, 0.7);
-  const recover = smoothRange(0.62, 1, p);
+  const draw = smoothRange(0, 0.18, p);
+  const windup = windowPulse(p, 0.12, 0.27, 0.43);
+  const strike = windowPulse(p, 0.25, 0.43, 0.68);
+  const recover = smoothRange(0.66, 1, p);
   const ready = draw * (1 - recover);
+  const guardDrawArc = Math.sin(draw * Math.PI);
   return {
     visible: p < 1,
+    draw,
+    windup,
     strike,
+    recover,
     position: {
-      x: 0.08 - ready * 0.03 - strike * 0.32,
-      y: -0.24 - (1 - draw) * 0.34 + recover * 0.08,
-      z: -0.08 - ready * 0.03 - strike * 0.16,
+      x: 0.08 - ready * 0.03 + windup * 0.09 - strike * 0.24,
+      y: 0.07 - (1 - draw) * 0.55 + windup * 0.04 - strike * 0.04 + recover * 0.06,
+      z: -0.04 - ready * 0.025 + windup * 0.045 - strike * 0.14,
     },
     rotation: {
-      x: -0.12 + strike * 0.35,
-      y: -0.38 + strike * 0.75,
-      z: 0.2 + (1 - draw) * 0.78 + strike * 0.9 - recover * 0.2,
+      x: -0.08 - windup * 0.12 + strike * 0.38,
+      y: 0.78 + windup * 0.18 - strike * 1.34,
+      z: 0.26 + (1 - draw) * 0.82 - windup * 0.12 + strike * 0.96 - recover * 0.22,
+    },
+    // La mano de guardia tiene su propio pivote en espacio de cámara. Solo
+    // contrapesa el golpe; nunca viaja rígidamente pegada a la hoja.
+    guard: {
+      position: {
+        x: -(1 - draw) * 0.045 + guardDrawArc * 0.20 - ready * 0.20 - windup * 0.025 + strike * 0.015,
+        y: -(1 - draw) * 0.55 + ready * 0.14 - strike * 0.025 + recover * 0.06,
+        z: (1 - draw) * 0.055 + windup * 0.018 + strike * 0.026,
+      },
+      rotation: {
+        x: -(1 - draw) * 0.16 + windup * 0.08 - strike * 0.06,
+        y: (1 - draw) * 0.12 - windup * 0.07 + strike * 0.045,
+        z: -(1 - draw) * 0.28 - windup * 0.08 + strike * 0.12,
+      },
+    },
+    hands: {
+      gripPressure: clamp01(0.35 * draw + 0.65 * Math.max(windup, strike)),
+      dominantFlex: -windup * 0.055 + strike * 0.085,
+      guardFlex: windup * 0.09 + strike * 0.14,
     },
   };
 }
@@ -262,8 +286,18 @@ function viewmodelBoxGeometry(width, height, depth, options = {}) {
   });
 }
 
-function makeArmSegment(material, radiusTop, radiusBottom = radiusTop) {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radiusTop, radiusBottom, 1, 12, 1), material);
+function makeArmSegment(material, radiusTop, radiusBottom = radiusTop, { anatomical = false } = {}) {
+  const geometry = anatomical
+    ? new THREE.LatheGeometry([
+      new THREE.Vector2(radiusBottom * 0.84, -0.5),
+      new THREE.Vector2(radiusBottom, -0.41),
+      new THREE.Vector2(radiusBottom * 1.04, -0.12),
+      new THREE.Vector2((radiusTop + radiusBottom) * 0.515, 0.16),
+      new THREE.Vector2(radiusTop, 0.41),
+      new THREE.Vector2(radiusTop * 0.84, 0.5),
+    ], 16)
+    : new THREE.CylinderGeometry(radiusTop, radiusBottom, 1, 12, 1);
+  const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.castShadow = true;
   return mesh;
@@ -282,27 +316,43 @@ function setArmSegment(mesh, from, to, delta, fixedLength = null) {
 function buildFirstPersonArms(kind, materials) {
   const root = new THREE.Group();
   root.name = 'first-person-arms';
+  const isKnife = kind === 'knife';
   const baseGrip = handGripState({ kind });
-  const palmGeometry = new THREE.SphereGeometry(0.075, 12, 8);
+  const palmGeometry = isKnife
+    ? viewmodelBoxGeometry(0.102, 0.058, 0.132, { ratio: 0.4, maxRadius: 0.024, segments: 1 })
+    : new THREE.SphereGeometry(0.075, 12, 8);
   const palmPadGeometry = viewmodelBoxGeometry(0.086, 0.018, 0.072, {
     ratio: 0.28, maxRadius: 0.005, segments: 1,
   });
   const knuckleGeometry = new THREE.SphereGeometry(0.014, 10, 6);
   const fingerLengths = [0.034, 0.029, 0.024];
   const fingerGeometries = fingerLengths.map((length, index) => {
-    const geometry = new THREE.CylinderGeometry(0.008 - index * 0.0007, 0.0105 - index * 0.0005, length, 10, 1);
+    const geometry = new THREE.CylinderGeometry(
+      0.008 - index * 0.0007,
+      0.0105 - index * 0.0005,
+      length,
+      10,
+      1,
+    );
     geometry.rotateX(Math.PI / 2);
     return geometry;
   });
   const fingertipGeometry = new THREE.SphereGeometry(0.009, 10, 6);
+  const thumbTipGeometry = isKnife ? new THREE.SphereGeometry(0.009, 8, 5) : null;
   const thumbLengths = [0.038, 0.031];
   const thumbGeometries = thumbLengths.map((length, index) => {
-    const geometry = new THREE.CylinderGeometry(0.011 - index * 0.001, 0.013 - index * 0.001, length, 10, 1);
+    const geometry = new THREE.CylinderGeometry(
+      0.011 - index * 0.001,
+      0.013 - index * 0.001,
+      length,
+      10,
+      1,
+    );
     geometry.rotateX(Math.PI / 2);
     return geometry;
   });
-  const elbowGeometry = new THREE.SphereGeometry(0.078, 12, 8);
-  const shoulderGeometry = new THREE.SphereGeometry(0.092, 12, 8);
+  const elbowGeometry = new THREE.SphereGeometry(0.078, isKnife ? 14 : 12, isKnife ? 9 : 8);
+  const shoulderGeometry = new THREE.SphereGeometry(0.092, isKnife ? 14 : 12, isKnife ? 9 : 8);
 
   const fingerNames = ['index', 'middle', 'ring', 'pinky'];
   const fingerCurlRadians = [1.12, 1.38, 1.2];
@@ -317,8 +367,9 @@ function buildFirstPersonArms(kind, materials) {
 
     const palm = new THREE.Mesh(palmGeometry, materials.glove);
     palm.name = `${side}-glove-palm`;
-    palm.scale.set(0.7, 0.52, 0.96);
-    palm.rotation.x = -0.18;
+    if (isKnife) palm.scale.set(1, 1, 1);
+    else palm.scale.set(0.7, 0.52, 0.96);
+    palm.rotation.x = isKnife ? -0.11 : -0.18;
     palm.castShadow = true;
     hand.add(palm);
 
@@ -328,6 +379,37 @@ function buildFirstPersonArms(kind, materials) {
     palmPad.position.set(0, side === 'right' ? -0.032 : 0.032, -0.038);
     palmPad.rotation.x = -0.1;
     hand.add(palmPad);
+
+    if (isKnife) {
+      const backPlate = new THREE.Mesh(
+        viewmodelBoxGeometry(0.078, 0.014, 0.064, { ratio: 0.32, maxRadius: 0.005, segments: 1 }),
+        materials.gloveGrip || materials.glovePanel,
+      );
+      backPlate.name = `${side}-hand-backplate`;
+      backPlate.position.set(0, direction * 0.031, -0.018);
+      backPlate.rotation.x = -0.09;
+      backPlate.castShadow = true;
+      hand.add(backPlate);
+
+      const thenar = new THREE.Mesh(
+        new THREE.SphereGeometry(0.026, 10, 6),
+        materials.glove,
+      );
+      thenar.name = `${side}-thenar-pad`;
+      thenar.position.set(direction * 0.034, -direction * 0.018, -0.014);
+      thenar.scale.set(0.76, 0.5, 1.22);
+      thenar.castShadow = true;
+      hand.add(thenar);
+
+      const handSeam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.003, 0.003, 0.052, 8, 1),
+        materials.stitch || materials.glovePanel,
+      );
+      handSeam.name = `${side}-hand-stitch`;
+      handSeam.position.set(0, direction * 0.040, 0.008);
+      handSeam.rotation.z = Math.PI / 2;
+      hand.add(handSeam);
+    }
 
     const lengthScales = [0.96, 1.07, 1, 0.86];
     const fingers = {};
@@ -370,6 +452,17 @@ function buildFirstPersonArms(kind, materials) {
           joint.add(tip);
         }
       }
+      if (isKnife) {
+        const protector = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0075, 0.008, 0.026, 8, 1),
+          materials.gloveGrip || materials.glovePanel,
+        );
+        protector.name = `${side}-${fingerName}-protector`;
+        protector.position.set(0, direction * 0.0105, -0.017);
+        protector.rotation.x = Math.PI / 2;
+        protector.castShadow = true;
+        finger.add(protector);
+      }
       finger.userData.semantic = fingerName;
       finger.userData.joints = joints;
       fingers[fingerName] = finger;
@@ -378,7 +471,7 @@ function buildFirstPersonArms(kind, materials) {
 
     const thumb = new THREE.Group();
     thumb.name = `${side}-thumb`;
-    thumb.position.set(direction * 0.055, -0.018, -0.005);
+    thumb.position.set(direction * 0.055, -0.018, isKnife && side === 'right' ? -0.020 : -0.005);
     thumb.rotation.y = direction * 0.78;
     thumb.rotation.x = -0.28;
     const thumbJoints = [thumb];
@@ -396,6 +489,14 @@ function buildFirstPersonArms(kind, materials) {
         thumbJoints.push(next);
         thumbJoint = next;
       }
+    }
+    if (isKnife) {
+      const thumbTip = new THREE.Mesh(thumbTipGeometry, materials.glovePanel);
+      thumbTip.name = `${side}-thumb-tip`;
+      thumbTip.position.z = -thumbLengths[1];
+      thumbTip.scale.set(1.06, 0.88, 1.18);
+      thumbTip.castShadow = true;
+      thumbJoint.add(thumbTip);
     }
     thumb.userData.joints = thumbJoints;
     hand.add(thumb);
@@ -469,6 +570,12 @@ function buildFirstPersonArms(kind, materials) {
 
   const chains = {};
   const inverseParentMatrix = new THREE.Matrix4();
+  const sleeveBandGeometry = isKnife
+    ? new THREE.CylinderGeometry(1, 1, 0.045, 14, 1, true)
+    : null;
+  const sleeveSeamGeometry = isKnife
+    ? new THREE.CylinderGeometry(0.0035, 0.0035, 0.48, 8, 1)
+    : null;
   const supportArmLengths = {
     pistol: [0.2, 0.18],
     revolver: [0.29, 0.27],
@@ -477,7 +584,7 @@ function buildFirstPersonArms(kind, materials) {
     ar: [0.3, 0.28],
     sniper: [0.32, 0.3],
     launcher: [0.35, 0.33],
-    knife: [0.342, 0.324],
+    knife: [0.32, 0.30],
   };
   for (const [side, hand] of [['right', right], ['left', left]]) {
     const direction = side === 'left' ? -1 : 1;
@@ -488,24 +595,55 @@ function buildFirstPersonArms(kind, materials) {
         : supportArmLengths[kind] || supportArmLengths.pistol;
     const chain = new THREE.Group();
     chain.name = `${side}-arm-chain`;
-    const upperArm = makeArmSegment(materials.sleeveDark, 0.064, 0.074);
+    const upperArm = makeArmSegment(
+      materials.sleeveDark,
+      isKnife ? 0.052 : 0.064,
+      isKnife ? 0.061 : 0.074,
+      { anatomical: isKnife },
+    );
     upperArm.name = `${side}-upper-arm`;
-    const forearm = makeArmSegment(materials.sleeve, 0.052, 0.064);
+    const forearm = makeArmSegment(
+      materials.sleeve,
+      isKnife ? 0.044 : 0.052,
+      isKnife ? 0.054 : 0.064,
+      { anatomical: isKnife },
+    );
     forearm.name = `${side}-forearm`;
     const elbowGuard = new THREE.Mesh(elbowGeometry, materials.sleeveDark);
     elbowGuard.name = `${side}-elbow-guard`;
-    elbowGuard.scale.set(0.92, 0.76, 0.9);
+    elbowGuard.scale.set(isKnife ? 0.64 : 0.92, isKnife ? 0.51 : 0.76, isKnife ? 0.63 : 0.9);
     const shoulderPad = new THREE.Mesh(shoulderGeometry, materials.sleeveDark);
     shoulderPad.name = `${side}-shoulder-pad`;
-    shoulderPad.scale.set(1, 0.8, 0.9);
+    shoulderPad.scale.set(isKnife ? 0.74 : 1, isKnife ? 0.56 : 0.8, isKnife ? 0.69 : 0.9);
+    if (isKnife) {
+      for (const [segment, radius, offset] of [
+        [upperArm, 0.054, -0.31],
+        [forearm, 0.046, 0.31],
+      ]) {
+        const band = new THREE.Mesh(sleeveBandGeometry, materials.stitch || materials.sleeveDark);
+        band.name = `${side}-${segment === upperArm ? 'upper-arm' : 'forearm'}-fold`;
+        band.position.y = offset;
+        band.scale.set(radius, 1, radius);
+        segment.add(band);
+
+        const seam = new THREE.Mesh(sleeveSeamGeometry, materials.sleeveDark);
+        seam.name = `${side}-${segment === upperArm ? 'upper-arm' : 'forearm'}-seam`;
+        seam.position.z = radius * 0.94;
+        segment.add(seam);
+      }
+    }
     chain.add(upperArm, forearm, elbowGuard, shoulderPad);
     root.add(chain);
     chains[side] = {
-      hand, direction, upperArm, forearm, elbowGuard, shoulderPad,
-      baseShoulder: new THREE.Vector3(direction * 0.31, -0.28, 0.21),
+      root: chain, hand, direction, upperArm, forearm, elbowGuard, shoulderPad,
+      baseShoulder: new THREE.Vector3(
+        direction * (isKnife ? 0.345 : 0.31),
+        isKnife ? -0.315 : -0.28,
+        isKnife ? 0.235 : 0.21,
+      ),
       shoulder: new THREE.Vector3(),
       wristOffset: new THREE.Vector3(direction * 0.004, -0.052, 0.083),
-      pole: new THREE.Vector3(direction, -0.58, 0.3),
+      pole: new THREE.Vector3(direction, isKnife ? -0.30 : -0.58, isKnife ? 0.48 : 0.3),
       poleDirection: new THREE.Vector3(),
       directionVector: new THREE.Vector3(),
       wrist: new THREE.Vector3(), elbow: new THREE.Vector3(), delta: new THREE.Vector3(),
@@ -514,9 +652,12 @@ function buildFirstPersonArms(kind, materials) {
     };
   }
 
-  const update = (animatedParentMatrix = null) => {
-    if (animatedParentMatrix) inverseParentMatrix.copy(animatedParentMatrix).invert();
-    for (const chain of Object.values(chains)) {
+  const update = (animatedParentMatrices = null) => {
+    for (const [side, chain] of Object.entries(chains)) {
+      const animatedParentMatrix = animatedParentMatrices?.isMatrix4
+        ? animatedParentMatrices
+        : animatedParentMatrices?.[side] || null;
+      if (animatedParentMatrix) inverseParentMatrix.copy(animatedParentMatrix).invert();
       chain.wrist.copy(chain.wristOffset).applyEuler(chain.hand.rotation).add(chain.hand.position);
       chain.shoulder.copy(chain.baseShoulder);
       // En golpes amplios el arma y la mano rotan, pero los hombros permanecen
@@ -565,15 +706,21 @@ function createViewmodelMaterials() {
     mid: new THREE.MeshLambertMaterial({ color: 0x465463 }),
     polymer: new THREE.MeshLambertMaterial({ color: 0x252d37 }),
     steel: new THREE.MeshStandardMaterial({ color: 0x8796a5, metalness: 0.78, roughness: 0.27 }),
+    steelEdge: new THREE.MeshStandardMaterial({
+      color: 0xc7d0d7, metalness: 0.92, roughness: 0.16, side: THREE.DoubleSide,
+    }),
+    steelDark: new THREE.MeshStandardMaterial({ color: 0x3f4a54, metalness: 0.72, roughness: 0.34 }),
     wood: new THREE.MeshStandardMaterial({ color: 0x5c4738, roughness: 0.72 }),
     rubber: new THREE.MeshStandardMaterial({ color: 0x11161d, roughness: 0.92 }),
     accent: new THREE.MeshStandardMaterial({ color: 0xc69b48, metalness: 0.45, roughness: 0.42 }),
     glove: new THREE.MeshStandardMaterial({
-      color: 0x465d70, roughness: 0.82, emissive: 0x0b1219, emissiveIntensity: 0.14,
+      color: 0x3b4d5c, roughness: 0.92, emissive: 0x080d12, emissiveIntensity: 0.025,
     }),
     glovePanel: new THREE.MeshStandardMaterial({
-      color: 0x8299aa, roughness: 0.64, emissive: 0x111a22, emissiveIntensity: 0.12,
+      color: 0x6c8291, roughness: 0.78, emissive: 0x090e12, emissiveIntensity: 0.035,
     }),
+    gloveGrip: new THREE.MeshStandardMaterial({ color: 0x1b252d, roughness: 0.98 }),
+    stitch: new THREE.MeshStandardMaterial({ color: 0xa79a7a, roughness: 1 }),
     cuff: new THREE.MeshStandardMaterial({ color: 0x202b36, roughness: 0.9 }),
     sleeve: new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.94 }),
     sleeveDark: new THREE.MeshStandardMaterial({ color: 0x253647, roughness: 0.96 }),
@@ -754,56 +901,160 @@ export function buildGunModel(kind) {
   return g;
 }
 
+function tacticalKnifeBladeGeometry() {
+  const profile = new THREE.Shape();
+  profile.moveTo(0, -0.038);
+  profile.lineTo(0, 0.052);
+  profile.lineTo(0.29, 0.048);
+  profile.lineTo(0.40, 0.028);
+  profile.lineTo(0.49, -0.008);
+  profile.lineTo(0.305, -0.036);
+  profile.lineTo(0.055, -0.04);
+  profile.closePath();
+  const geometry = new THREE.ExtrudeGeometry(profile, {
+    depth: 0.028,
+    steps: 1,
+    curveSegments: 1,
+    bevelEnabled: true,
+    bevelSegments: 1,
+    bevelSize: 0.0035,
+    bevelThickness: 0.0035,
+  });
+  geometry.translate(0, 0, -0.014);
+  geometry.rotateY(Math.PI / 2);
+  return geometry;
+}
+
+function tacticalKnifeEdgeGeometry() {
+  const edge = new THREE.Shape();
+  edge.moveTo(0.035, -0.035);
+  edge.lineTo(0.305, -0.031);
+  edge.lineTo(0.49, -0.008);
+  edge.lineTo(0.31, -0.018);
+  edge.lineTo(0.055, -0.021);
+  edge.closePath();
+  const geometry = new THREE.ShapeGeometry(edge, 1);
+  geometry.rotateY(Math.PI / 2);
+  return geometry;
+}
+
+export function applyKnifeMeleePose(model, pose = meleeAnimationState(0)) {
+  const viewmodel = model.userData.viewmodel;
+  if (!viewmodel?.attackPivot || !viewmodel?.guardPivot) return false;
+  const { attackPivot, guardPivot, arms } = viewmodel;
+  model.position.set(0, 0, 0);
+  model.rotation.set(0, 0, 0);
+  attackPivot.position.set(pose.position.x, pose.position.y, pose.position.z);
+  attackPivot.rotation.set(pose.rotation.x, pose.rotation.y, pose.rotation.z);
+  guardPivot.position.set(pose.guard.position.x, pose.guard.position.y, pose.guard.position.z);
+  guardPivot.rotation.set(pose.guard.rotation.x, pose.guard.rotation.y, pose.guard.rotation.z);
+
+  const grip = handGripState({ kind: 'knife', firePulse: pose.hands.gripPressure });
+  arms.applyGrip(grip);
+  // Al apretar, las falanges cierran pero la palma cede unos milímetros hacia
+  // fuera. Así las yemas comprimen la superficie sin atravesar el mango.
+  arms.right.position.x -= pose.hands.gripPressure * 0.014;
+  arms.right.rotation.x += pose.hands.dominantFlex;
+  arms.left.rotation.x += pose.hands.guardFlex;
+  viewmodel.grip = grip;
+
+  attackPivot.updateMatrix();
+  guardPivot.updateMatrix();
+  arms.update({ right: attackPivot.matrix, left: guardPivot.matrix });
+  return true;
+}
+
 export function buildKnifeModel() {
   const g = new THREE.Group();
   g.name = 'viewmodel-knife';
   const {
-    steel, rubber, accent, glove, glovePanel, cuff, sleeve, sleeveDark,
+    steel, steelEdge, steelDark, rubber, accent,
+    glove, glovePanel, gloveGrip, stitch, cuff, sleeve, sleeveDark,
   } = createViewmodelMaterials();
 
-  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.041, 0.235, 12), rubber);
+  const attackPivot = new THREE.Group();
+  attackPivot.name = 'knife-attack-pivot';
+  const guardPivot = new THREE.Group();
+  guardPivot.name = 'knife-guard-pivot';
+
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.042, 0.235, 16, 2), rubber);
   handle.name = 'knife-handle';
   handle.position.set(0, -0.095, 0.065);
   // Sigue la diagonal guarda-pomo para que hoja, empuñadura y mano formen una
-  // sola silueta continua (el antiguo giro de 90° dejaba una separación).
+  // sola silueta continua.
   handle.rotation.x = 2.39;
-  const guard = new THREE.Mesh(viewmodelBoxGeometry(0.145, 0.026, 0.045, {
-    ratio: 0.25, maxRadius: 0.006, segments: 2,
+  for (let index = 0; index < 3; index++) {
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(0.0385, 0.0027, 3, 10), steelDark);
+    rib.name = `knife-handle-rib-${index + 1}`;
+    rib.position.y = -0.06 + index * 0.06;
+    rib.rotation.x = Math.PI / 2;
+    handle.add(rib);
+  }
+
+  const guard = new THREE.Mesh(viewmodelBoxGeometry(0.142, 0.028, 0.052, {
+    ratio: 0.3, maxRadius: 0.007, segments: 1,
   }), accent);
   guard.name = 'knife-guard';
   guard.position.set(0, -0.002, -0.035);
-  const blade = new THREE.Mesh(viewmodelBoxGeometry(0.032, 0.065, 0.38, {
-    ratio: 0.18, maxRadius: 0.006, segments: 2,
-  }), steel);
+  const quillions = [-1, 1].map((direction) => {
+    const quillion = new THREE.Mesh(viewmodelBoxGeometry(0.027, 0.068, 0.03, {
+      ratio: 0.34, maxRadius: 0.007, segments: 1,
+    }), accent);
+    quillion.name = `knife-guard-quillion-${direction < 0 ? 'left' : 'right'}`;
+    quillion.position.set(direction * 0.063, direction * 0.011, -0.033);
+    quillion.rotation.z = -direction * 0.34;
+    return quillion;
+  });
+
+  const blade = new THREE.Mesh(tacticalKnifeBladeGeometry(), steel);
   blade.name = 'knife-blade';
-  blade.position.set(0, 0.008, -0.245);
-  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.048, 0.13, 6), steel);
-  tip.name = 'knife-tip';
-  tip.position.set(0, 0.008, -0.5);
-  tip.rotation.x = -Math.PI / 2;
-  tip.rotation.y = Math.PI / 4;
-  const spine = new THREE.Mesh(viewmodelBoxGeometry(0.045, 0.018, 0.31, {
-    ratio: 0.22, maxRadius: 0.004, segments: 1,
-  }), accent);
+  blade.position.set(0, 0.008, -0.035);
+  const edge = new THREE.Mesh(tacticalKnifeEdgeGeometry(), steelEdge);
+  edge.name = 'knife-edge';
+  edge.position.set(0.018, 0.008, -0.035);
+  const fuller = new THREE.Mesh(viewmodelBoxGeometry(0.006, 0.015, 0.27, {
+    ratio: 0.28, maxRadius: 0.0025, segments: 1,
+  }), steelDark);
+  fuller.name = 'knife-fuller';
+  fuller.position.set(0.0185, 0.031, -0.215);
+  const spine = new THREE.Mesh(viewmodelBoxGeometry(0.034, 0.012, 0.285, {
+    ratio: 0.25, maxRadius: 0.003, segments: 1,
+  }), steelDark);
   spine.name = 'knife-spine';
-  spine.position.set(0, 0.045, -0.22);
-  const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.036, 0.035, 12), accent);
+  spine.position.set(0, 0.056, -0.205);
+  const tip = new THREE.Object3D();
+  tip.name = 'knife-tip';
+  tip.position.set(0, 0, -0.525);
+
+  const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.036, 0.038, 16, 1), steelDark);
   pommel.name = 'knife-pommel';
   pommel.position.set(0, -0.205, 0.155);
   pommel.rotation.x = 2.39;
-  for (const part of [handle, guard, blade, tip, spine, pommel]) {
+  for (const part of [handle, guard, ...quillions, blade, edge, fuller, spine, pommel]) {
     part.castShadow = true;
     part.frustumCulled = false;
   }
-  g.add(handle, guard, blade, tip, spine, pommel);
 
-  const arms = buildFirstPersonArms('knife', { glove, glovePanel, cuff, sleeve, sleeveDark });
-  arms.update();
+  const arms = buildFirstPersonArms('knife', {
+    glove, glovePanel, gloveGrip, stitch, cuff, sleeve, sleeveDark,
+  });
+  // Solo la mano dominante comparte el pivote de la hoja. La guardia usa un
+  // pivote independiente para conservar su masa y contrapesar el ataque.
+  attackPivot.add(handle, guard, ...quillions, blade, edge, fuller, spine, tip, pommel);
+  attackPivot.add(arms.right, arms.chains.right.root);
+  guardPivot.add(arms.left, arms.chains.left.root);
+  arms.root.add(attackPivot, guardPivot);
   g.add(arms.root);
+
   const gripTargets = createGripTargets(g, arms.gripState);
-  g.userData.viewmodel = { kind: 'knife', arms, moving: {}, grip: arms.gripState, gripTargets };
+  attackPivot.add(gripTargets.right);
+  guardPivot.add(gripTargets.left);
+  g.userData.viewmodel = {
+    kind: 'knife', arms, moving: {}, grip: arms.gripState, gripTargets, attackPivot, guardPivot,
+  };
   g.userData.blade = blade;
   g.userData.handle = handle;
+  applyKnifeMeleePose(g, meleeAnimationState(0));
   g.visible = false;
   return g;
 }
@@ -1095,6 +1346,7 @@ export class WeaponSystem {
     this.models[this.current].userData.muzzleLight.intensity = 0;
     this.hud.setReloading(false);
     this.hud.setScope(false);
+    applyKnifeMeleePose(this.knifeModel, meleeAnimationState(0));
     this._syncViewmodelVisibility(false);
     return true;
   }
@@ -1138,10 +1390,7 @@ export class WeaponSystem {
     }
     this.meleeProgress = Math.min(1, this.meleeProgress + Math.max(0, dt) / MELEE_DURATION);
     const pose = meleeAnimationState(this.meleeProgress);
-    this.knifeModel.position.set(pose.position.x, pose.position.y, pose.position.z);
-    this.knifeModel.rotation.set(pose.rotation.x, pose.rotation.y, pose.rotation.z);
-    this.knifeModel.updateMatrix();
-    this.knifeModel.userData.viewmodel.arms.update(this.knifeModel.matrix);
+    applyKnifeMeleePose(this.knifeModel, pose);
     if (!this.meleeStrikeFired && this.meleeProgress >= 0.43) {
       this.meleeStrikeFired = true;
       const strike = this.meleeStrikeCallback;

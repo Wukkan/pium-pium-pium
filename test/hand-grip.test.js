@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  applyKnifeMeleePose,
   buildGunModel,
   buildKnifeModel,
   firstPersonAnimationState,
@@ -137,6 +138,89 @@ test('knife pose closes the dominant hand around the handle and keeps a separate
     assert.ok(average(knife.right.fingers[finger].curl) >= 0.58, `${finger} must wrap the knife handle`);
   }
   assert.notDeepEqual(knife.left.position, knife.right.position, 'guard and knife hands cannot overlap');
+});
+
+test('knife fingertips rest on the handle surface in anatomical order', () => {
+  const model = buildKnifeModel();
+  const handle = model.getObjectByName('knife-handle');
+  const halfLength = handle.geometry.parameters.height / 2;
+
+  for (const progress of [0, 0.18, 0.27, 0.43, 0.68]) {
+    applyKnifeMeleePose(model, meleeAnimationState(progress));
+    model.updateMatrixWorld(true);
+    const start = handle.position.clone().set(0, -halfLength, 0).applyMatrix4(handle.matrixWorld);
+    const end = handle.position.clone().set(0, halfLength, 0).applyMatrix4(handle.matrixWorld);
+    const axis = end.clone().sub(start);
+    const axisLengthSq = axis.lengthSq();
+    const parameters = [];
+
+    const surfaceDistance = (object) => {
+      const point = object.getWorldPosition(object.position.clone());
+      const parameter = Math.min(1, Math.max(0, point.clone().sub(start).dot(axis) / axisLengthSq));
+      parameters.push(parameter);
+      return point.distanceTo(start.clone().addScaledVector(axis, parameter));
+    };
+
+    for (let index = 1; index <= 4; index++) {
+      const distance = surfaceDistance(model.getObjectByName(`right-finger-${index}-tip`));
+      assert.ok(
+        distance >= 0.039 && distance <= 0.057,
+        `${progress}: finger ${index} misses the handle surface (${distance})`,
+      );
+    }
+    assert.ok(
+      parameters.every((value, index) => index === 0 || value > parameters[index - 1]),
+      `${progress}: fingers must stack along the handle`,
+    );
+
+    parameters.length = 0;
+    const thumbDistance = surfaceDistance(model.getObjectByName('right-thumb-tip'));
+    assert.ok(
+      thumbDistance >= 0.038 && thumbDistance <= 0.056,
+      `${progress}: thumb penetrates or floats off the handle (${thumbDistance})`,
+    );
+  }
+});
+
+test('knife guard hand counterbalances the strike instead of following the blade pivot', () => {
+  const model = buildKnifeModel();
+  const { arms } = model.userData.viewmodel;
+  const point = arms.right.position.clone().set(0, 0, 0);
+
+  applyKnifeMeleePose(model, meleeAnimationState(0.18));
+  model.updateMatrixWorld(true);
+  const dominantReady = arms.right.getWorldPosition(point.clone());
+  const guardReady = arms.left.getWorldPosition(point.clone());
+
+  applyKnifeMeleePose(model, meleeAnimationState(0.43));
+  model.updateMatrixWorld(true);
+  const dominantStrike = arms.right.getWorldPosition(point.clone());
+  const guardStrike = arms.left.getWorldPosition(point.clone());
+  const dominantTravel = dominantReady.distanceTo(dominantStrike);
+  const guardTravel = guardReady.distanceTo(guardStrike);
+
+  assert.ok(dominantTravel > 0.28, 'dominant hand must drive a readable slash');
+  assert.ok(guardTravel < dominantTravel * 0.35, 'guard hand is still rigidly attached to the blade');
+});
+
+test('knife draw arc keeps both elbows outside the collapsed anatomical range', () => {
+  const model = buildKnifeModel();
+  const { arms, attackPivot, guardPivot } = model.userData.viewmodel;
+  for (let step = 0; step <= 100; step++) {
+    const progress = step / 100;
+    applyKnifeMeleePose(model, meleeAnimationState(progress));
+    for (const side of ['right', 'left']) {
+      const chain = arms.chains[side];
+      const angle = elbowAngle(chain);
+      assert.ok(angle >= 0.65 && angle <= 3.05, `${progress}: ${side} elbow folded unnaturally (${angle})`);
+      const pivot = side === 'right' ? attackPivot : guardPivot;
+      const anchoredShoulder = chain.shoulder.clone().applyMatrix4(pivot.matrix);
+      assert.ok(
+        anchoredShoulder.distanceTo(chain.baseShoulder) < 1e-9,
+        `${progress}: ${side} shoulder moved to satisfy IK`,
+      );
+    }
+  }
 });
 
 test('ADS and recoil preserve finger contact without teleporting either hand', () => {
@@ -319,13 +403,13 @@ test('two-bone arms keep human proportions during reload and the knife swing', (
   const knife = buildKnifeModel();
   const arms = knife.userData.viewmodel.arms;
   const pose = meleeAnimationState(0.43);
-  knife.position.set(pose.position.x, pose.position.y, pose.position.z);
-  knife.rotation.set(pose.rotation.x, pose.rotation.y, pose.rotation.z);
-  knife.updateMatrix();
-  arms.update(knife.matrix);
+  applyKnifeMeleePose(knife, pose);
   for (const side of ['right', 'left']) {
     const chain = arms.chains[side];
-    const anchoredShoulder = chain.shoulder.clone().applyMatrix4(knife.matrix);
+    const pivot = side === 'right'
+      ? knife.userData.viewmodel.attackPivot
+      : knife.userData.viewmodel.guardPivot;
+    const anchoredShoulder = chain.shoulder.clone().applyMatrix4(pivot.matrix);
     assert.ok(
       anchoredShoulder.distanceTo(chain.baseShoulder) < 1e-9,
       `knife: ${side} shoulder followed the blade instead of the body`,

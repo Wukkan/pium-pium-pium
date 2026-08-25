@@ -29,17 +29,17 @@ const supportFingers = ({ compact = false } = {}) => ({
 });
 
 const knifeFingers = () => ({
-  index: digit([0.58, 0.70, 0.62], { splay: 0.025 }),
-  middle: digit([0.68, 0.80, 0.72], { splay: 0.008 }),
-  ring: digit([0.72, 0.84, 0.76], { splay: -0.012 }),
-  pinky: digit([0.76, 0.88, 0.80], { splay: -0.035 }),
+  index: digit([0.56, 0.68, 0.60], { splay: 0.032, twist: -0.018 }),
+  middle: digit([0.65, 0.78, 0.69], { splay: 0.01 }),
+  ring: digit([0.70, 0.82, 0.74], { splay: -0.014 }),
+  pinky: digit([0.74, 0.86, 0.78], { splay: -0.04, twist: 0.02 }),
 });
 
 const guardFingers = () => ({
-  index: digit([0.12, 0.16, 0.12], { contact: false, splay: 0.12 }),
-  middle: digit([0.16, 0.20, 0.15], { contact: false, splay: 0.04 }),
-  ring: digit([0.20, 0.24, 0.18], { contact: false, splay: -0.035 }),
-  pinky: digit([0.25, 0.30, 0.22], { contact: false, splay: -0.12 }),
+  index: digit([0.18, 0.24, 0.18], { contact: false, splay: 0.14, twist: -0.025 }),
+  middle: digit([0.22, 0.29, 0.22], { contact: false, splay: 0.052 }),
+  ring: digit([0.27, 0.34, 0.26], { contact: false, splay: -0.045 }),
+  pinky: digit([0.34, 0.42, 0.32], { contact: false, splay: -0.14, twist: 0.025 }),
 });
 
 const triggerHand = (position, rotation) => ({
@@ -99,17 +99,19 @@ export const HAND_GRIP_PROFILES = deepFreeze({
   knife: {
     right: {
       role: 'knife',
-      position: [0.034, -0.108, 0.070],
-      rotation: [-0.05, 1.48, 0.06],
+      // La palma queda fuera del volumen del mango; son las yemas las que
+      // alcanzan la goma y no el centro de los dedos.
+      position: [0.020, -0.106, 0.070],
+      rotation: [-0.09, 1.48, 0.035],
       fingers: knifeFingers(),
-      thumb: digit([0.50, 0.68], { splay: 0.015, twist: -0.04 }),
+      thumb: digit([0.48, 0.62], { splay: 0.025, twist: -0.055 }),
     },
     left: {
       role: 'guard',
-      position: [-0.125, -0.155, 0.070],
-      rotation: [-0.30, -0.46, -0.30],
+      position: [-0.155, -0.132, 0.012],
+      rotation: [-0.42, -0.34, -0.36],
       fingers: guardFingers(),
-      thumb: digit([0.22, 0.28], { contact: false, splay: -0.14 }),
+      thumb: digit([0.28, 0.36], { contact: false, splay: -0.16, twist: 0.035 }),
     },
   },
 });
@@ -188,7 +190,7 @@ export function handGripState({
 
   // El arma y las manos comparten rig. ADS no cambia sus anclajes; solamente
   // refuerza la presión de agarre. El disparo aprieta los dedos sin despegarlos.
-  const pressure = (ads ? 0.012 : 0) + shotPressure * 0.018;
+  const pressure = (ads ? 0.012 : 0) + shotPressure * (safeKind === 'knife' ? 0.07 : 0.018);
   if (pressure > 0) {
     tightenHand(right, pressure);
     if (left.role !== 'reload') tightenHand(left, pressure * 0.7);
