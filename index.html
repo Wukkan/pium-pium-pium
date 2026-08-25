@@ -18,7 +18,9 @@
     body { font-family: 'Arial Black', 'Segoe UI', Arial, sans-serif; }
     #app { position: fixed; inset: 0; }
     canvas { display: block; }
-    body.fallback-controls #app > canvas { cursor: crosshair; touch-action: none; }
+    /* En modo compatible ya existe una mira fija: ocultar el cursor evita que
+       aparezcan dos referencias de apuntado moviéndose de forma independiente. */
+    body.fallback-controls #app > canvas { cursor: none; touch-action: none; }
 
     /* ---------- HUD ---------- */
     #hud { position: fixed; inset: 0; pointer-events: none; display: none; }
@@ -667,8 +669,8 @@
     .crosshair-preview-panel { min-width: 0; }
     .crosshair-preview-stage { position: relative; display: grid; place-items: center; overflow: hidden; min-height: 270px; border: 1px solid rgba(91,148,207,.24); border-radius: 8px; background: radial-gradient(circle at center, rgba(79,121,160,.18), transparent 42%), linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px), #08111d; background-size: auto, 20px 20px, 20px 20px, auto; }
     .crosshair-preview-stage::before { content: 'VISTA PREVIA EN TIEMPO REAL'; position: absolute; left: 12px; top: 11px; color: #587391; font: 900 8px Arial, sans-serif; letter-spacing: 1.1px; }
-    .crosshair-preview-stage::after { content: 'MIRA DESACTIVADA'; position: absolute; opacity: 0; padding: 7px 9px; border: 1px solid rgba(255,120,101,.35); border-radius: 4px; background: rgba(78,22,20,.7); color: #ffab9e; font: 900 9px Arial, sans-serif; letter-spacing: 1px; transition: opacity .15s; }
-    .crosshair-preview-stage.is-hidden::after { opacity: 1; }
+    .crosshair-preview-stage::after { content: none; position: absolute; opacity: 0; padding: 7px 9px; border: 1px solid rgba(255,120,101,.35); border-radius: 4px; background: rgba(78,22,20,.7); color: #ffab9e; font: 900 9px Arial, sans-serif; letter-spacing: 1px; transition: opacity .15s; }
+    .crosshair-preview-stage.is-hidden::after { content: 'MIRA DESACTIVADA'; opacity: 1; }
     .crosshair-preview-stage.is-hidden #crosshair-preview { opacity: .16 !important; }
     #crosshair-preview { left: 50%; top: 50%; }
     .crosshair-presets-title { margin: 15px 0 8px; color: #7389a7; font: 900 8px Arial, sans-serif; letter-spacing: 1.2px; }
@@ -717,6 +719,9 @@
     @media (max-width: 900px) { #menu-content { width: min(100% - 30px, 700px); } #menu-topbar { flex-wrap: wrap; gap: 14px; padding: 14px 0; } #menu-nav { order: 3; width: 100%; min-height: 48px; } .menu-nav-btn { flex: 1; padding: 0 6px; } #menu-screen-play.active { display: block; } .lobby-deployment { width: 100%; } .menu-hero-side { margin-top: 28px; } .menu-info-grid, .options-layout { grid-template-columns: 1fr; } .options-group.full-width { grid-column: auto; } .menu-arsenal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); height: min(537px, 62dvh); } .settings-shell { grid-template-columns: 1fr; } .settings-tabs { position: sticky; top: 0; z-index: 2; display: flex; overflow-x: auto; padding: 7px; backdrop-filter: blur(10px); scrollbar-width: thin; scrollbar-color: #ffc34d rgba(255,255,255,.07); } .settings-tabs::-webkit-scrollbar { display: block; height: 5px; } .settings-tabs::-webkit-scrollbar-track { background: rgba(255,255,255,.07); } .settings-tabs::-webkit-scrollbar-thumb { border-radius: 5px; background: #ffc34d; } .settings-tab { flex: 0 0 auto; min-height: 44px; } .crosshair-studio { grid-template-columns: 1fr; } .crosshair-preview-stage { min-height: 230px; } }
     @media (max-width: 640px) { .lobby-deployment { grid-template-columns: 1fr; } .lobby-choice-section + .lobby-choice-section { padding: 11px 0 0; border-top: 1px solid rgba(255,255,255,.075); border-left: 0; } #lobby-room-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 520px) { #menu-content { width: calc(100% - 22px); } #menu-main { padding-top: 28px; } #menu-screen-play h1 { font-size: 42px; } .hero-actions { align-items: stretch; flex-direction: column; } .lobby-name-field, #name-input, #play-btn { width: 100%; } .menu-arsenal-grid { grid-template-columns: minmax(0, 320px); grid-auto-rows: 270px; justify-content: center; } .screen-heading { align-items: start; flex-direction: column; } .settings-heading-actions { width: 100%; justify-content: stretch; } .settings-heading-actions button { flex: 1; } .settings-tabs { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; } .settings-tab { width: 100%; padding: 0 9px; font-size: 9px; } .settings-tab:last-child { grid-column: 1 / -1; } .option-row { align-items: start; flex-direction: column; gap: 10px; } .option-toggle { min-height: 66px; } .option-control { width: 100%; text-align: left; } .option-control input[type="range"], .option-control select { width: 100%; } .menu-footer { font-size: 8px; } #quick-mute { min-width: 48px; padding: 8px; margin-left: auto; } #quick-mute-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); } .audio-hero { grid-template-columns: 1fr; } .keybinding-toolbar { align-items: stretch; flex-direction: column; } .keybinding-toolbar .secondary-action { width: 100%; } #keybinding-list { grid-template-columns: 1fr; } .keybind-group-title { grid-column: auto; } .keybind-button { min-width: 102px; } .crosshair-studio-header { align-items: stretch; flex-direction: column; } .crosshair-editor { grid-template-columns: 1fr; } .crosshair-editor .option-row { align-items: center; flex-direction: row; } .crosshair-editor .option-control { width: auto; text-align: right; } .crosshair-editor .option-control input[type="range"], .crosshair-editor .option-control select { width: 128px; } }
+    @media (max-width: 520px) {
+      #menu-nav .menu-nav-btn { min-width: 0; padding-inline: 3px; font-size: 9px; letter-spacing: .4px; }
+    }
     @media (max-width: 390px) { #lobby-room-grid { grid-template-columns: 1fr; } .lobby-choice-heading small { display: none; } }
     @media (max-width: 900px) {
       #menu { overflow: hidden; padding-bottom: 112px; }
@@ -1493,7 +1498,7 @@
                       <label class="option-toggle"><span><b>Mostrar mira</b><small>Activa la mira central.</small></span><input id="option-crosshair-visible" type="checkbox" /></label>
                       <label class="option-row"><span><b>Estilo</b><small>Clásica, táctica o punto.</small></span><span class="option-control"><select id="option-crosshair-style"><option value="classic">CLÁSICA</option><option value="tactical">TÁCTICA</option><option value="dot">SOLO PUNTO</option></select></span></label>
                       <label class="option-row"><span><b>Color</b><small>Selecciona cualquier tono.</small></span><span class="option-control color-control"><output id="option-crosshair-color-value">#FFFFFF</output><input id="option-crosshair-color" type="color" value="#ffffff" /></span></label>
-                      <label class="option-row"><span><b>Tamaño</b><small>Longitud de los brazos.</small></span><span class="option-control"><output id="option-crosshair-scale-value">100%</output><input id="option-crosshair-scale" type="range" min="0.6" max="1.8" step="0.05" /></span></label>
+                      <label class="option-row"><span><b>Longitud de brazos</b><small>Tamaño de las líneas de la mira.</small></span><span class="option-control"><output id="option-crosshair-scale-value">100%</output><input id="option-crosshair-scale" type="range" min="0.6" max="1.8" step="0.05" /></span></label>
                       <label class="option-row"><span><b>Grosor</b><small>Anchura de las líneas.</small></span><span class="option-control"><output id="option-crosshair-thickness-value">2.0 px</output><input id="option-crosshair-thickness" type="range" min="1" max="6" step="0.5" /></span></label>
                       <label class="option-row"><span><b>Apertura</b><small>Separación desde el centro.</small></span><span class="option-control"><output id="option-crosshair-gap-value">6 px</output><input id="option-crosshair-gap" type="range" min="0" max="20" step="1" /></span></label>
                       <label class="option-row"><span><b>Opacidad</b><small>Transparencia total.</small></span><span class="option-control"><output id="option-crosshair-opacity-value">100%</output><input id="option-crosshair-opacity" type="range" min="0.2" max="1" step="0.05" /></span></label>
@@ -1532,7 +1537,7 @@
       <div class="screen-footer">Configuración guardada automáticamente en este navegador · Las opciones mostradas modifican funciones reales del juego.</div>
     </section>
     </main>
-    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v1.7.0 // KNIFE &amp; HARDENING</span></footer>
+    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v1.7.1 // PRECISION &amp; RELIABILITY</span></footer>
     </div>
   </div>
 

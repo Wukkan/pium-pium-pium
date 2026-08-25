@@ -209,6 +209,7 @@ test('selection UI exposes a deterministic join decision for available and full 
 test('authoritative room errors always return to the lobby instead of changing game type', () => {
   assert.equal(lobbyJoinFailureAction('ROOM_FULL'), 'lobby');
   assert.equal(lobbyJoinFailureAction('INVALID_SELECTION'), 'lobby');
+  assert.equal(lobbyJoinFailureAction('PROTOCOL_MISMATCH'), 'lobby');
   assert.equal(lobbyJoinFailureAction('network', { serverAvailable: true }), 'lobby');
   assert.equal(lobbyJoinFailureAction('network', { serverAvailable: false }), 'offline');
   assert.equal(lobbyJoinFailureAction('network', {

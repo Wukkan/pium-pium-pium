@@ -59,8 +59,11 @@ export class HUD {
     this._crosshairSpread = 0;
     this._crosshairVisual = crosshairPresentation(this._crosshairPreferences, 0);
     this._crosshairRenderedGap = null;
+    this._crosshairRenderedDotSize = null;
     this._scopeVisible = false;
+    this._scopeRendered = null;
     this._combatActive = true;
+    this._crosshairBlocked = false;
     this._showPing = true;
     this._grenadeCount = 0;
     this._weapons = null;
@@ -94,14 +97,29 @@ export class HUD {
     const expansion = preferences.crosshairDynamic
       ? this._crosshairSpread * preferences.crosshairDynamicAmount
       : 0;
-    const gap = Math.min(52, preferences.crosshairGap + expansion);
-    if (Math.abs(gap - (this._crosshairRenderedGap ?? -1)) < 0.04) return;
-    this._crosshairRenderedGap = gap;
-    this.el.crosshair.style.setProperty('--crosshair-gap', `${gap.toFixed(2)}px`);
-    this.el.crosshair.style.setProperty(
-      '--crosshair-negative-extent',
-      `${(-gap - this._crosshairVisual.length).toFixed(2)}px`,
+    const gap = Math.min(84, preferences.crosshairGap + expansion);
+    const dotSize = preferences.crosshairDotSize + (
+      preferences.crosshairStyle === 'dot' ? Math.min(12, (gap - preferences.crosshairGap) * 0.18) : 0
     );
+    const gapChanged = Math.abs(gap - (this._crosshairRenderedGap ?? -1)) >= 0.04;
+    const dotChanged = preferences.crosshairStyle === 'dot' &&
+      Math.abs(dotSize - (this._crosshairRenderedDotSize ?? -1)) >= 0.04;
+    if (!gapChanged && !dotChanged) return;
+    if (gapChanged) {
+      this._crosshairRenderedGap = gap;
+      if (preferences.crosshairStyle !== 'dot') {
+        this.el.crosshair.style.setProperty('--crosshair-gap', `${gap.toFixed(2)}px`);
+        this.el.crosshair.style.setProperty(
+          '--crosshair-negative-extent',
+          `${(-gap - this._crosshairVisual.length).toFixed(2)}px`,
+        );
+      }
+    }
+    if (dotChanged) {
+      this._crosshairRenderedDotSize = dotSize;
+      this.el.crosshair.style.setProperty('--crosshair-dot-size', `${dotSize.toFixed(2)}px`);
+      this.el.crosshair.style.setProperty('--crosshair-half-dot', `${(-dotSize / 2).toFixed(2)}px`);
+    }
   }
 
   // Compatibilidad con integraciones anteriores: ahora el valor representa expansión por dispersión.
@@ -114,14 +132,21 @@ export class HUD {
     );
     this._crosshairVisual = visual;
     this._crosshairRenderedGap = visual.gap;
+    this._crosshairRenderedDotSize = visual.dotSize;
     this._crosshairVisible = visual.visible;
     this._syncCrosshairDisplay();
   }
 
   _syncCrosshairDisplay() {
-    this.el.crosshair.style.display = this._scopeVisible || !this._crosshairVisible || !this._combatActive
+    this.el.crosshair.style.display = this._scopeVisible || this._crosshairBlocked ||
+      !this._crosshairVisible || !this._combatActive
       ? 'none'
       : 'block';
+  }
+
+  setCrosshairBlocked(blocked) {
+    this._crosshairBlocked = !!blocked;
+    this._syncCrosshairDisplay();
   }
 
   setBindingLabels({ grenade, reload, slots } = {}) {
@@ -146,7 +171,10 @@ export class HUD {
   }
 
   setScope(on) {
-    this._scopeVisible = !!on;
+    const next = !!on;
+    this._scopeVisible = next;
+    if (this._scopeRendered === next) return;
+    this._scopeRendered = next;
     this.el.scope.style.display = this._scopeVisible ? 'block' : 'none';
     this._syncCrosshairDisplay();
   }
@@ -159,6 +187,11 @@ export class HUD {
   }
 
   updateAmmo(weapons) {
+    if (weapons.knifeEquipped) {
+      this.el.ammo.textContent = '∞';
+      this.el.weaponName.textContent = 'CUCHILLO';
+      return;
+    }
     const st = weapons.ammo;
     this.el.ammo.innerHTML = `${st.ammo} <span class="reserve">/ ${st.reserve}</span>`;
     this.el.weaponName.textContent = weapons.def.name;

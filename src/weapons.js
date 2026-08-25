@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { ammoAfterPickup, weaponSelectionAction, weaponAnimationState } from './ui-models.js';
+import {
+  ammoAfterPickup, crosshairFeedbackPixels, projectSpreadToPixels,
+  weaponSelectionAction, weaponAnimationState,
+} from './ui-models.js';
 import { DEFAULT_BINDINGS, bindingSlotIndex, keyCodeLabel } from './input-bindings.js';
 import { roundedBoxGeometry } from './rounded-geometry.js';
 import { handGripState } from './hand-grip.js';
@@ -125,6 +128,31 @@ const smooth01 = (value) => {
   const t = clamp01(value);
   return t * t * (3 - 2 * t);
 };
+
+// Aplica la dispersión en los ejes locales de la cámara. Sumar ruido a X/Y/Z
+// del mundo hace que un arma cambie de precisión al girar o inclinar la vista.
+export function shotDirectionWithSpread(quaternion, spread, random = Math.random) {
+  const amount = Math.max(0, Number(spread) || 0);
+  const sample = () => {
+    const value = Number(random());
+    const normalized = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0.5;
+    return normalized * 2 - 1;
+  };
+  const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+  if (amount === 0) return direction.normalize();
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
+  return direction
+    .addScaledVector(right, sample() * amount)
+    .addScaledVector(up, sample() * amount)
+    .normalize();
+}
+
+export function equippedCrosshairSpread(spreadPixels, knifeEquipped = false, meleeActive = false) {
+  if (knifeEquipped || meleeActive) return 0;
+  const value = Number(spreadPixels);
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
 const smoothRange = (start, end, value) => smooth01((value - start) / (end - start));
 const windowPulse = (value, start, peak, end) => {
   if (value <= start || value >= end) return 0;
@@ -1140,6 +1168,7 @@ export class WeaponSystem {
 
     this.triggerDown = false;
     this.ads = false;
+    this.aimButtonDown = false;
     this.lastShot = 0;
     this.reloading = false;
     this.reloadEnd = 0;
@@ -1181,13 +1210,17 @@ export class WeaponSystem {
       if (e.button === 0) {
         this.primaryAction();
       }
-      if (e.button === 2 && !this.knifeEquipped) {
-        this.ads = this.aimMode === 'toggle' ? !this.ads : true;
+      if (e.button === 2) {
+        this.aimButtonDown = true;
+        if (!this.knifeEquipped) this.ads = this.aimMode === 'toggle' ? !this.ads : true;
       }
     });
     addEventListener('mouseup', (e) => {
       if (e.button === 0) this.triggerDown = false;
-      if (e.button === 2 && this.aimMode === 'hold') this.ads = false;
+      if (e.button === 2) {
+        this.aimButtonDown = false;
+        if (this.aimMode === 'hold') this.ads = false;
+      }
     });
     addEventListener('contextmenu', (e) => {
       if (this.hasGameplayControl(e)) e.preventDefault();
@@ -1241,11 +1274,12 @@ export class WeaponSystem {
   setPreferences({ aimMode = 'hold', weaponBob = 1 } = {}) {
     this.aimMode = aimMode === 'toggle' ? 'toggle' : 'hold';
     this.weaponBob = Math.min(1, Math.max(0, Number(weaponBob) || 0));
-    if (this.aimMode === 'hold' && !this.hasGameplayControl()) this.ads = false;
+    if (this.aimMode === 'hold' && (!this.hasGameplayControl() || !this.aimButtonDown)) this.ads = false;
   }
 
   clearInput() {
     this.triggerDown = false;
+    this.aimButtonDown = false;
     this.ads = false;
     if (this.meleeActive) this.cancelMelee();
   }
@@ -1354,6 +1388,7 @@ export class WeaponSystem {
     if (leavingKnife) this.unequipKnife(false);
     if (key === this.current) {
       if (!leavingKnife) return;
+      this.ads = false;
       this.equipProgress = 0;
       this.equipDuration = 0.28;
       this.kickPos = 0.06;
@@ -1362,6 +1397,10 @@ export class WeaponSystem {
       this._syncViewmodelVisibility();
       return;
     }
+    // El ADS pertenece al arma anterior. Durante el cambio se cierra la mira;
+    // en modo mantener, update() la recupera al terminar el desenfunde si RMB
+    // continúa pulsado.
+    this.ads = false;
     const previous = this.models[this.current];
     previous.userData.flash.visible = false;
     previous.userData.muzzleLight.intensity = 0;
@@ -1468,6 +1507,7 @@ export class WeaponSystem {
     this.hud.setScope(false);
     applyKnifeMeleePose(this.knifeModel, meleeAnimationState(KNIFE_READY_PROGRESS));
     this._syncViewmodelVisibility(false);
+    this.hud.updateAmmo(this);
     return true;
   }
 
@@ -1485,6 +1525,7 @@ export class WeaponSystem {
       this.kickPos = 0.06;
     }
     this._syncViewmodelVisibility();
+    this.hud.updateAmmo(this);
     return true;
   }
 
@@ -1632,11 +1673,7 @@ export class WeaponSystem {
     let impactSound = null;
 
     for (let i = 0; i < pellets; i++) {
-      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-      dir.x += (Math.random() - 0.5) * 2 * spread;
-      dir.y += (Math.random() - 0.5) * 2 * spread;
-      dir.z += (Math.random() - 0.5) * 2 * spread;
-      dir.normalize();
+      const dir = shotDirectionWithSpread(this.camera.quaternion, spread);
       this.raycaster.set(origin, dir);
       this.raycaster.far = 300;
 
@@ -1744,6 +1781,8 @@ export class WeaponSystem {
     const st = this.ammo;
     this.animationTime += Math.max(0, dt);
     this.equipProgress = Math.min(1, this.equipProgress + dt / Math.max(0.1, this.equipDuration));
+    if (this.aimMode === 'hold' && this.aimButtonDown && inputEnabled &&
+        !this.knifeEquipped && this.equipProgress >= EQUIP_READY_PROGRESS) this.ads = true;
     this.firePulse = Math.max(0, this.firePulse - dt * 4.8);
     this._updateMelee(dt);
 
@@ -1820,7 +1859,15 @@ export class WeaponSystem {
     activeModel.userData.muzzleLight.intensity *= Math.max(0, 1 - dt * 28);
     this._applyViewmodelPose(activeModel, firstPerson);
 
-    // separación del punto de mira según dispersión
-    this.hud.setCrosshairSpread(this.meleeActive ? 0 : this.currentSpread() * 900);
+    // La apertura visual usa la misma proyección de perspectiva que el raycast,
+    // por lo que conserva precisión al cambiar resolución, FOV o entrar en ADS.
+    const viewportHeight = Number(globalThis.innerHeight) || 720;
+    const projectedSpread = projectSpreadToPixels(this.currentSpread(), this.camera.fov, viewportHeight);
+    const spreadPixels = crosshairFeedbackPixels(projectedSpread, def.recoil, this.firePulse, this.ads);
+    this.hud.setCrosshairSpread(equippedCrosshairSpread(
+      spreadPixels,
+      this.knifeEquipped,
+      this.meleeActive,
+    ));
   }
 }

@@ -17,6 +17,18 @@ const HEADERS = {
 
 const pending = new Map(); // name -> {kills, deaths, streak}
 let topCache = { at: 0, rows: [] };
+let flushInFlight = null;
+let topInFlight = null;
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function entry(name) {
   if (!pending.has(name)) pending.set(name, { kills: 0, deaths: 0, streak: 0 });
@@ -33,13 +45,13 @@ export function addDeath(name) {
   entry(name).deaths++;
 }
 
-async function flush() {
+async function runFlush() {
   if (pending.size === 0) return;
   const batch = [...pending.entries()];
   pending.clear();
   for (const [name, e] of batch) {
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/pium_bump`, {
+      const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/rpc/pium_bump`, {
         method: 'POST',
         headers: HEADERS,
         body: JSON.stringify({ p_name: name, p_kills: e.kills, p_deaths: e.deaths, p_streak: e.streak }),
@@ -56,27 +68,37 @@ async function flush() {
   }
 }
 
+export function flush() {
+  if (flushInFlight) return flushInFlight;
+  flushInFlight = runFlush().finally(() => { flushInFlight = null; });
+  return flushInFlight;
+}
+
 export async function top(limit = 20) {
   const now = Date.now();
   if (now - topCache.at < 15000) return topCache.rows;
-  try {
-    const res = await fetch(
+  if (topInFlight) return topInFlight;
+  topInFlight = (async () => {
+    try {
+      const res = await fetchWithTimeout(
       `${SUPABASE_URL}/rest/v1/pium_ranking?select=name,kills,deaths,best_streak&order=kills.desc&limit=${limit}`,
       { headers: HEADERS },
-    );
-    if (!res.ok) throw new Error(`http ${res.status}`);
-    topCache = { at: now, rows: await res.json() };
-  } catch (err) {
-    console.error('ranking: fallo al leer,', err.message);
-    topCache.at = now; // no martillear si está caído
-  }
-  return topCache.rows;
+      );
+      if (!res.ok) throw new Error(`http ${res.status}`);
+      topCache = { at: now, rows: await res.json() };
+    } catch (err) {
+      console.error('ranking: fallo al leer,', err.message);
+      topCache.at = now; // no martillear si está caído
+    }
+    return topCache.rows;
+  })().finally(() => { topInFlight = null; });
+  return topInFlight;
 }
 
 // bajas totales históricas de un jugador (para su insignia de nivel)
 export async function getTotalKills(name) {
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${SUPABASE_URL}/rest/v1/pium_ranking?select=kills&name=eq.${encodeURIComponent(name)}`,
       { headers: HEADERS },
     );

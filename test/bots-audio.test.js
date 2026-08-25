@@ -1,7 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { playLocalBotShot } from '../src/bots.js';
+import { BotManager, playLocalBotShot } from '../src/bots.js';
+
+function canvasDocument() {
+  return {
+    createElement() {
+      return {
+        width: 0,
+        height: 0,
+        getContext() {
+          return {
+            font: '', textAlign: '', textBaseline: '', lineWidth: 0,
+            strokeStyle: '', fillStyle: '', strokeText() {}, fillText() {},
+          };
+        },
+      };
+    },
+  };
+}
 
 test('local bot shots use the bot origin and the real player listener orientation', () => {
   const calls = [];
@@ -40,4 +57,40 @@ test('local bot audio keeps the centered fallback for legacy mocks', () => {
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], 'smg');
   assert.ok(Math.abs(calls[0][1] - 0.28) < 1e-10);
+});
+
+test('local bots render toward logical +Z while preserving their combat yaw', () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = canvasDocument();
+  let manager;
+  try {
+    const floor = { minX: -5, maxX: 5, minY: -1, maxY: 0, minZ: -5, maxZ: 5 };
+    manager = new BotManager(
+      { add() {}, remove() {} },
+      {
+        botSpawns: [new THREE.Vector3(0, 0, 0)],
+        colliders: [floor],
+        occluders: [],
+        waypoints: [new THREE.Vector3(0, 0, 2)],
+      },
+      { dead: true, pos: new THREE.Vector3(20, 0, 20) },
+      {},
+      null,
+      1,
+    );
+
+    const bot = manager.bots[0];
+    bot.group.updateMatrixWorld(true);
+    const renderedForward = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      bot.rig.visualRoot.getWorldQuaternion(new THREE.Quaternion()),
+    );
+    assert.equal(bot.yaw, 0);
+    assert.equal(bot.group.rotation.y, 0);
+    assert.ok(Math.abs(renderedForward.x) < 1e-9);
+    assert.ok(Math.abs(renderedForward.z - 1) < 1e-9);
+  } finally {
+    manager?.setCount(0);
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
 });

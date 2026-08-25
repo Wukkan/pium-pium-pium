@@ -5,6 +5,7 @@ import {
   disposeHumanoid,
   makeHumanoid,
   resetHumanoidPose,
+  setHumanoidFacingConvention,
   triggerHumanoidHit,
   triggerHumanoidShot,
 } from './humanoid.js';
@@ -43,6 +44,7 @@ class RemoteEnt {
     this.aiming = kind === 'pl';
     this.health = 100;
     this.hasState = false;
+    this.hasPosition = false;
     this.hitSerial = 0;
     this.walkRef = { t: Math.random() * 10 };
     this.target = new THREE.Vector3();
@@ -54,12 +56,17 @@ class RemoteEnt {
       part,
       react: (intensity = 1) => this.reactToHit(intensity),
     }), undefined, hat);
+    setHumanoidFacingConvention(this.rig, kind);
     scene.add(this.rig.group);
   }
 
   applyState(p, ry, rx, s, al, hp = this.health) {
     if (Array.isArray(p) && p.length === 3 && p.every((value) => Number.isFinite(value) && Math.abs(value) <= 10000)) {
       this.target.set(p[0], p[1], p[2]);
+      if (!this.hasPosition) {
+        this.rig.group.position.copy(this.target);
+        this.hasPosition = true;
+      }
     }
     this.targetYaw = normalizeRemoteYaw(ry, this.targetYaw);
     this.aimPitch = Number.isFinite(rx) ? Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rx)) : 0;

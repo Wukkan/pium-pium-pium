@@ -138,7 +138,9 @@ export class ServerBot {
       this.targetYaw = Math.atan2(dx, dz);
       const fl = Math.hypot(dx, dz) || 1;
       moveX = dx / fl; moveZ = dz / fl;
-      if (targetDist < 1.9 && t >= this.nextMeleeAt) {
+      const meleeTarget = { x: target.pos.x, y: target.pos.y + 1, z: target.pos.z };
+      if (targetDist < 1.9 && t >= this.nextMeleeAt &&
+          !segmentBlocked(this.eyePos(), meleeTarget, ctx.colliders)) {
         this.nextMeleeAt = t + 0.8;
         ctx.onHitTarget(this, targetKind, target, this.meleeDmg);
       }

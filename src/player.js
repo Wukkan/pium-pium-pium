@@ -142,6 +142,20 @@ export class Player {
     this._jumpWasHeld = false;
   }
 
+  correctPosition(point) {
+    const values = Array.isArray(point)
+      ? point
+      : [point?.x, point?.y, point?.z];
+    if (values.length !== 3 || values.some((value) =>
+      !Number.isFinite(Number(value)) || Math.abs(Number(value)) > 10000)) return false;
+    this.pos.set(Number(values[0]), Number(values[1]), Number(values[2]));
+    this.vel.set(0, 0, 0);
+    this.sliding = false;
+    this.slideTime = 0;
+    this.onGround = false;
+    return true;
+  }
+
   eyePosition(target = new THREE.Vector3()) {
     return target.set(this.pos.x, this.pos.y + this.eyeHeight, this.pos.z);
   }

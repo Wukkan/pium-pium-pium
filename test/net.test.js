@@ -59,6 +59,26 @@ test('state messages carry the accepted spawn sequence and stop while dead', () 
   assert.equal(sent.length, 1);
 });
 
+test('state cadence preserves fractional frame time instead of drifting below 15 Hz', () => {
+  const simulate = (fps) => {
+    const sent = [];
+    const net = new Net();
+    net.connected = true;
+    net.ws = { readyState: 1, send: (raw) => sent.push(JSON.parse(raw)) };
+    const player = {
+      dead: false,
+      pos: { x: 0, y: 0.1, z: 0 }, yaw: 0, pitch: 0, sliding: false,
+      horizontalSpeed: () => 0,
+    };
+    for (let frame = 0; frame < fps; frame++) net.tickState(1 / fps, player);
+    return sent.length;
+  };
+
+  assert.equal(simulate(60), 15);
+  assert.equal(simulate(20), 15);
+  assert.equal(simulate(10), 10, 'a frame emits at most one fresh state packet');
+});
+
 test('network heartbeat has one owner and restarting it clears the previous timer', () => {
   const originalSetInterval = globalThis.setInterval;
   const originalClearInterval = globalThis.clearInterval;
@@ -90,5 +110,32 @@ test('network heartbeat has one owner and restarting it clears the previous time
   } finally {
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+test('heartbeat closes a connection that stops acknowledging pings', () => {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const originalNow = Date.now;
+  let callback = null;
+  let clock = 1000;
+  globalThis.setInterval = (fn) => { callback = fn; return 1; };
+  globalThis.clearInterval = () => {};
+  Date.now = () => clock;
+  try {
+    const closed = [];
+    const net = new Net();
+    net.connected = true;
+    net.ws = { close: (...args) => closed.push(args) };
+    net.sendPing = () => {};
+    net.startHeartbeat(3000);
+
+    clock += 10501;
+    callback();
+    assert.deepEqual(closed, [[4000, 'Servidor sin respuesta']]);
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+    Date.now = originalNow;
   }
 });

@@ -298,6 +298,27 @@ test('mix graph provides headroom, compression, and a final safety limiter', () 
   }
 });
 
+test('unsupported or suspended WebAudio never blocks entering the game', async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+  try {
+    const unsupported = new AudioSys();
+    assert.equal(unsupported.ensure(), false);
+    assert.equal(unsupported.ctx, null);
+
+    const suspended = new AudioSys();
+    suspended.ctx = {
+      state: 'suspended',
+      resume: () => Promise.reject(new Error('autoplay denied')),
+    };
+    assert.equal(suspended.ensure(), true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else delete globalThis.window;
+  }
+});
+
 test('shot always schedules the branded PIUM and its consonant through one spatial contract', () => {
   const audio = new AudioSys();
   const calls = [];

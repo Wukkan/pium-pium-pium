@@ -12,6 +12,25 @@ test('gameplay control remains active with Pointer Lock or the compatible fallba
   assert.equal(gameplayControlActive(null, true), true);
 });
 
+test('compatible mouse mode hides the free cursor instead of drawing a second crosshair', () => {
+  assert.match(indexSource, /body\.fallback-controls #app > canvas\s*\{\s*cursor: none;/);
+  assert.doesNotMatch(indexSource, /body\.fallback-controls #app > canvas\s*\{\s*cursor: crosshair;/);
+});
+
+test('crosshair preview only exposes the disabled label when the setting is actually off', () => {
+  assert.match(indexSource, /\.crosshair-preview-stage::after\s*\{\s*content: none;/);
+  assert.match(indexSource, /\.crosshair-preview-stage\.is-hidden::after\s*\{\s*content: 'MIRA DESACTIVADA';/);
+});
+
+test('dot-only editor reflects its mandatory point and disables line-only controls', () => {
+  assert.match(mainSource, /checked\('option-crosshair-dot', settings\.crosshairStyle === 'dot' \|\| settings\.crosshairDot\);/);
+  assert.match(
+    mainSource,
+    /'option-crosshair-scale', 'option-crosshair-thickness', 'option-crosshair-gap',[\s\S]*?settings\.crosshairStyle === 'dot'/,
+  );
+  assert.match(indexSource, /<b>Longitud de brazos<\/b>/);
+});
+
 test('Pointer Lock absence and synchronous errors never abort room entry', async () => {
   for (const target of [null, {}, { requestPointerLock() { throw new Error('blocked'); } }]) {
     const attempt = requestPointerLockSafe(target);
@@ -46,6 +65,13 @@ test('the room entry CTA stays fixed and visible on compact viewports', () => {
   assert.match(indexSource, /@media \(max-width: 900px\)[\s\S]*?#menu-screen-play\.active #play-btn\s*\{[\s\S]*?position: fixed;/);
   assert.match(indexSource, /#menu\s*\{\s*overflow: hidden; padding-bottom: 112px;/);
   assert.match(indexSource, /#menu-content\s*\{\s*height: 100%; overflow-y: auto;/);
+});
+
+test('compact navigation buttons can shrink without horizontal overflow', () => {
+  assert.match(
+    indexSource,
+    /@media \(max-width: 520px\)\s*\{\s*#menu-nav \.menu-nav-btn\s*\{[^}]*min-width:\s*0;[^}]*font-size:\s*9px;/,
+  );
 });
 
 test('a late Pointer Lock grant cannot capture the cursor over an overlay', () => {
@@ -85,6 +111,12 @@ test('disconnect removes callbacks and overlays that belonged to the online sess
   assert.match(teardown, /setTeamPicker\(false\);/);
   assert.match(teardown, /weapons\.clearInput\(\);/);
   assert.match(teardown, /hud\.showMenu\(true\);/);
+});
+
+test('online grenade damage is server authoritative and client feedback uses acknowledgements', () => {
+  assert.match(mainSource, /net\.on\('hitok'/);
+  assert.match(mainSource, /grenades\.onExplode = \(\) => \{\};/);
+  assert.doesNotMatch(mainSource, /net\.sendHit\([^\n]*'nade'/);
 });
 
 test('a previously established online session keeps later failures in the reconnectable lobby', () => {

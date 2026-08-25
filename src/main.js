@@ -53,6 +53,8 @@ import {
   sanitizeLobbySelection,
 } from './lobby-catalog.js';
 import { gameplayControlActive, requestPointerLockSafe } from './game-entry.js';
+import { frameSimulationPlan } from './frame-timing.js';
+import { segmentBlocked } from './shared/physics.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — shooter multijugador original para navegador.
@@ -195,6 +197,7 @@ function syncOnlineCrate(id, alive) {
 function loadWorldMap(mapId) {
   if (!mapId || mapId === world.mapId) return;
   clearOnlineCrateRestores();
+  grenades.clear();
   world.load(mapId);
 }
 
@@ -693,7 +696,7 @@ function renderSettings() {
   checked('option-show-ping', settings.showPing);
   checked('option-bunny-hop', settings.bunnyHopEnabled);
   checked('option-crosshair-visible', settings.crosshairVisible);
-  checked('option-crosshair-dot', settings.crosshairDot);
+  checked('option-crosshair-dot', settings.crosshairStyle === 'dot' || settings.crosshairDot);
   checked('option-crosshair-outline', settings.crosshairOutline);
   checked('option-crosshair-dynamic', settings.crosshairDynamic);
   checked('option-damage-flash', settings.damageFlash);
@@ -754,6 +757,9 @@ function renderSettings() {
     'option-crosshair-dot-size',
     !settings.crosshairVisible || (!settings.crosshairDot && settings.crosshairStyle !== 'dot'),
   );
+  for (const id of [
+    'option-crosshair-scale', 'option-crosshair-thickness', 'option-crosshair-gap',
+  ]) setDisabled(id, !settings.crosshairVisible || settings.crosshairStyle === 'dot');
   setDisabled('option-crosshair-dot', !settings.crosshairVisible || settings.crosshairStyle === 'dot');
   setDisabled('option-crosshair-outline-thickness', !settings.crosshairVisible || !settings.crosshairOutline);
   setDisabled('option-crosshair-outline-color', !settings.crosshairVisible || !settings.crosshairOutline);
@@ -1187,10 +1193,7 @@ function setTeamPicker(open) {
 
 // --- economía y rachas: se activan con cada baja mía ---
 let streak = 0;
-let lastKnifeHitAt = -9999;
-let lastNadeHitAt = -9999;
-
-function onMyKill(isHead, victimName) {
+function onMyKill(isHead, victimName, weaponKind = '') {
   const earned = 100 + (isHead ? 50 : 0);
   streak++;
   let bonus = 0;
@@ -1204,9 +1207,8 @@ function onMyKill(isHead, victimName) {
   missions.event('kill');
   if (isHead) missions.event('headshot');
   if (streak === 5) missions.event('streak5');
-  const nowMs = performance.now();
-  if (nowMs - lastKnifeHitAt < 600) missions.event('knifekill');
-  if (nowMs - lastNadeHitAt < 600) missions.event('nadekill');
+  if (weaponKind === 'knife') missions.event('knifekill');
+  if (weaponKind === 'nade') missions.event('nadekill');
 }
 
 function resetStreak() { streak = 0; }
@@ -1240,6 +1242,11 @@ function doKnife() {
       return new THREE.Vector3(dx, 0, dz).normalize().dot(fwd) > 0.5;
     };
     const calcDmg = (pos, yaw, kind) => knifeDamageLimit(player.pos, pos, yaw, kind);
+    const visibleTarget = (pos) => !segmentBlocked(
+      { x: player.pos.x, y: player.pos.y + 1.45, z: player.pos.z },
+      { x: pos.x, y: pos.y + 1, z: pos.z },
+      world.colliders,
+    );
 
     if (online && remotes) {
       const grupos = [['pl', remotes.players], ['bot', remotes.bots]];
@@ -1247,19 +1254,18 @@ function doKnife() {
         for (const ent of map.values()) {
           if (!ent.alive) continue;
           const pos = ent.rig.group.position;
-          if (!enRango(pos)) continue;
+          if (!enRango(pos) || !visibleTarget(pos)) continue;
           const dmg = calcDmg(pos, ent.rig.group.rotation.y, kind);
           effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
           hud.hitmarker(false);
           playCombatSound('hit', dmg >= 100);
-          lastKnifeHitAt = performance.now();
           net.sendHit(kind, ent.id, dmg, dmg >= 100, 'knife');
           return;
         }
       }
     } else if (botsLocal) {
       for (const bot of botsLocal.bots) {
-        if (bot.dead || !enRango(bot.pos)) continue;
+        if (bot.dead || !enRango(bot.pos) || !visibleTarget(bot.pos)) continue;
         const dmg = calcDmg(bot.pos, bot.yaw, 'bot');
         const killed = bot.takeDamage(dmg, player.pos);
         effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
@@ -1334,6 +1340,7 @@ let lobbySelection = sanitizeLobbySelection(null);
 let lobbyRooms = [];
 let lobbyCatalogReady = false;
 let lobbyRefreshSerial = 0;
+let lobbyRefreshController = null;
 let connecting = false;
 
 try {
@@ -1450,8 +1457,12 @@ function chooseLobbyRoom(room) {
 
 async function refreshLobbyRooms({ announce = false } = {}) {
   const requestId = ++lobbyRefreshSerial;
+  lobbyRefreshController?.abort();
+  const controller = new AbortController();
+  lobbyRefreshController = controller;
+  const timeout = setTimeout(() => controller.abort(), 4500);
   try {
-    const response = await fetch('/salas', { cache: 'no-store' });
+    const response = await fetch('/salas', { cache: 'no-store', signal: controller.signal });
     if (!response.ok) throw new Error(`lobby-${response.status}`);
     const data = await response.json();
     if (!data || !Array.isArray(data.rooms)) throw new Error('lobby-invalid');
@@ -1462,8 +1473,9 @@ async function refreshLobbyRooms({ announce = false } = {}) {
     if (!net.connected) hud.setNetStatus('🟢 Servidor online — selecciona modo, sala y JUGAR', true);
     renderLobbySelector();
     return true;
-  } catch {
+  } catch (error) {
     if (requestId !== lobbyRefreshSerial) return false;
+    if (error?.name === 'AbortError' && lobbyRefreshController !== controller) return false;
     lobbyRooms = [];
     lobbyCatalogReady = false;
     serverAvailable = false;
@@ -1475,6 +1487,9 @@ async function refreshLobbyRooms({ announce = false } = {}) {
     if (announce) hud.info('No se pudo actualizar la lista de salas');
     renderLobbySelector();
     return false;
+  } finally {
+    clearTimeout(timeout);
+    if (lobbyRefreshController === controller) lobbyRefreshController = null;
   }
 }
 
@@ -1510,7 +1525,10 @@ const lobbyPollTimer = setInterval(() => {
   if (!joined && state === 'menu' && !connecting) void refreshLobbyRooms();
 }, 3000);
 addEventListener('pagehide', (event) => {
-  if (!event.persisted) clearInterval(lobbyPollTimer);
+  if (!event.persisted) {
+    clearInterval(lobbyPollTimer);
+    lobbyRefreshController?.abort();
+  }
 }, { once: true });
 
 // --- cableado modo OFFLINE (bots locales) ---
@@ -1574,6 +1592,7 @@ function setupOffline() {
       const d = Math.hypot(bot.pos.x - pos.x, bot.pos.y + 1 - pos.y, bot.pos.z - pos.z);
       const dmg = explosionDamage(d);
       if (dmg <= 0) continue;
+      if (segmentBlocked(pos, { x: bot.pos.x, y: bot.pos.y + 1, z: bot.pos.z }, world.colliders)) continue;
       const killed = bot.takeDamage(dmg, player.pos);
       effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.4, 0)), String(dmg), false);
       if (killed) {
@@ -1582,7 +1601,12 @@ function setupOffline() {
       }
     }
     const dSelf = Math.hypot(player.pos.x - pos.x, player.pos.y + 1 - pos.y, player.pos.z - pos.z);
-    const dmgSelf = Math.round(explosionDamage(dSelf) / 2);
+    const selfBlocked = segmentBlocked(
+      pos,
+      { x: player.pos.x, y: player.pos.y + 1, z: player.pos.z },
+      world.colliders,
+    );
+    const dmgSelf = selfBlocked ? 0 : Math.round(explosionDamage(dSelf) / 2);
     if (dmgSelf > 0) player.damage(dmgSelf, 'tu propia granada');
   };
   offlineBotKilled = localBotKilled;
@@ -1617,7 +1641,7 @@ function setupOffline() {
 const ONLINE_NET_EVENTS = Object.freeze([
   'snap', 'match', 'podium', 'podiumStage', 'votes', 'chat', 'pong', 'ammo',
   'botcfg', 'cbox', 'gun', 'fire', 'kill', 'nade', 'ouch', 'spawn', 'med',
-  'aviso', 'botbye',
+  'aviso', 'botbye', 'corr', 'hitok',
 ]);
 const ignoreOnlineMessage = () => {};
 
@@ -1642,6 +1666,7 @@ function teardownOnlineSession(sessionToken = onlineSessionToken) {
   net.stopHeartbeat();
   clearOnlineSessionBindings();
   clearOnlineCrateRestores();
+  grenades.clear();
   remotes?.dispose();
   remotes = null;
   kitsMgr.sync([]);
@@ -1861,6 +1886,15 @@ function setupOnline() {
     playCombatSound('shotAt', m.k, a, playerEye, remoteAudioForward, 0.7);
   });
 
+  net.on('hitok', (m) => {
+    const ent = remotes?.find(m.kind, m.id);
+    if (!ent || !ent.alive || !Number.isFinite(Number(m.d))) return;
+    const point = ent.rig.group.position.clone().add(new THREE.Vector3(0, 1.4, 0));
+    effects.popup(point, String(Math.max(0, Math.round(m.d))), false);
+    hud.hitmarker(false);
+    playCombatSound('hit', false);
+  });
+
   net.on('kill', (m) => {
     const soyYo = m.kn === net.name;
     hud.killfeed(m.kn, m.vid === net.id ? 'Tú' : m.vn, soyYo);
@@ -1868,7 +1902,7 @@ function setupOnline() {
       hud.hitmarker(true);
       hud.announce(m.h ? `☠ HEADSHOT — ${m.vn}` : `☠ Eliminaste a ${m.vn}`);
       playCombatSound('kill');
-      onMyKill(!!m.h, m.vn);
+      onMyKill(!!m.h, m.vn, m.w);
     }
     if (m.vid === net.id) {
       if (botPanelOpen) setBotPanel(false, false);
@@ -1886,21 +1920,9 @@ function setupOnline() {
   net.on('nade', (m) => grenades.spawnRemote(m.p, m.v, !!m.im));
   grenades.onThrow = (pos, vel, impact) => net.sendNade(pos, vel, impact);
 
-  // explosión de granada propia: daño a entidades remotas vía servidor
-  grenades.onExplode = (pos) => {
-    const aplicar = (ent, kind) => {
-      if (!ent.alive) return;
-      const ep = ent.rig.group.position;
-      const d = Math.hypot(ep.x - pos.x, ep.y + 1 - pos.y, ep.z - pos.z);
-      const dmg = explosionDamage(d);
-      if (dmg <= 0) return;
-      effects.popup(ep.clone().add(new THREE.Vector3(0, 1.4, 0)), String(dmg), false);
-      lastNadeHitAt = performance.now();
-      net.sendHit(kind, ent.id, dmg, false, 'nade');
-    };
-    for (const ent of remotes.players.values()) aplicar(ent, 'pl');
-    for (const ent of remotes.bots.values()) aplicar(ent, 'bot');
-  };
+  // El servidor simula trayectoria, cobertura, daño propio y multihit. El
+  // cliente conserva solo el proyectil/efecto visual y espera `hitok`/`ouch`.
+  grenades.onExplode = () => {};
 
   net.on('ouch', (m) => {
     player.health = m.hp;
@@ -1930,6 +1952,11 @@ function setupOnline() {
   net.on('botbye', (m) => remotes?.removeBot(m.id));
   net.onClose(() => {
     teardownOnlineSession(sessionToken);
+  });
+
+  net.on('corr', (m) => {
+    if (m.sid !== net.spawnSequence || player.dead) return;
+    player.correctPosition(m.p);
   });
   net.startHeartbeat(3000);
 
@@ -1977,6 +2004,8 @@ async function joinAndPlay() {
     nameInput.disabled = true;
     if (hi.map) loadWorldMap(hi.map);
     player.spawn(safePlayerSpawn(new THREE.Vector3(hi.spawn[0], hi.spawn[1], hi.spawn[2])));
+    weapons.refill();
+    grenades.refill();
   } catch (error) {
     if (lobbyJoinFailureAction(error?.code, {
       serverAvailable,
@@ -1988,11 +2017,15 @@ async function joinAndPlay() {
       hud.showHud(false);
       hud.info(error?.code === 'ROOM_FULL'
         ? 'Sala online llena · elige la otra sala'
-        : 'No se pudo confirmar esa sala · vuelve a intentarlo');
+        : error?.code === 'PROTOCOL_MISMATCH'
+          ? 'El servidor fue actualizado · recarga la página para continuar'
+          : 'No se pudo confirmar esa sala · vuelve a intentarlo');
       await refreshLobbyRooms({ announce: error?.code !== 'ROOM_FULL' });
     } else {
       setupOffline();
       player.spawn(safePlayerSpawn(null, botsLocal?.bots || []));
+      weapons.refill();
+      grenades.refill();
     }
   }
   connecting = false;
@@ -2184,6 +2217,7 @@ function refreshWeaponInputBlock() {
   const blocked = chatOpen || buyOpen || botPanelOpen || podiumOpen || teamPickerOpen;
   if (blocked && !weapons.inputBlocked) weapons.clearInput();
   weapons.inputBlocked = blocked;
+  hud.setCrosshairBlocked(blocked);
 }
 
 function isFiniteVectorPayload(value) {
@@ -2624,16 +2658,8 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-function tick(now) {
-  fitViewport();
-  const rawDt = Math.max(0, (now - lastTime) / 1000);
-  const dt = Math.min(0.05, rawDt);
-  lastTime = now;
-
+function simulateStep(dt) {
   const playing = state === 'playing';
-  const combatAudioActive = combatAudioIsActive();
-  if (combatAudioWasActive && !combatAudioActive) audio.stopCombat();
-  combatAudioWasActive = combatAudioActive;
   const inputEnabled = playing && hasGameplayControl() && !connecting && !player.dead &&
     !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;
 
@@ -2667,6 +2693,19 @@ function tick(now) {
   if (playing || state === 'dead') {
     hud.updateHealth(player.health, player.maxHealth);
   }
+}
+
+function tick(now) {
+  fitViewport();
+  const rawDt = Math.max(0, (now - lastTime) / 1000);
+  const simulation = frameSimulationPlan(rawDt);
+  lastTime = now;
+
+  const combatAudioActive = combatAudioIsActive();
+  if (combatAudioWasActive && !combatAudioActive) audio.stopCombat();
+  combatAudioWasActive = combatAudioActive;
+
+  for (let step = 0; step < simulation.steps; step++) simulateStep(simulation.step);
 
   if (!document.hidden) {
     fpsCount++;
@@ -2678,7 +2717,7 @@ function tick(now) {
   }
 
   if (state !== 'menu') renderer.render(scene, camera);
-  renderOperatorPreview(dt);
+  renderOperatorPreview(simulation.elapsed);
 }
 
 function loop(now) {

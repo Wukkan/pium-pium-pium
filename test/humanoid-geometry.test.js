@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 
 import {
   animateHumanoid,
   disposeHumanoid,
+  humanoidFacingOffset,
   makeHat,
   makeHumanoid,
   OPERATOR_HAND_PROFILE,
+  setHumanoidFacingConvention,
 } from '../src/humanoid.js';
 
 function canvasDocument() {
@@ -26,6 +29,32 @@ function canvasDocument() {
     },
   };
 }
+
+test('bot facing uses an internal visual pivot without changing logical yaw', () => {
+  assert.equal(humanoidFacingOffset('pl'), 0);
+  assert.equal(humanoidFacingOffset('bot'), Math.PI);
+
+  const previousDocument = globalThis.document;
+  globalThis.document = canvasDocument();
+  let rig;
+  try {
+    rig = makeHumanoid('#4a78aa', 'BOT', (part) => ({ part }));
+    rig.group.rotation.y = Math.PI / 2;
+    assert.equal(setHumanoidFacingConvention(rig, 'bot'), true);
+    rig.group.updateMatrixWorld(true);
+
+    const renderedForward = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      rig.visualRoot.getWorldQuaternion(new THREE.Quaternion()),
+    );
+    assert.ok(Math.abs(renderedForward.x - 1) < 1e-9);
+    assert.ok(Math.abs(renderedForward.z) < 1e-9);
+    assert.equal(rig.group.rotation.y, Math.PI / 2, 'visual conversion mutated combat yaw');
+  } finally {
+    if (rig) disposeHumanoid(rig);
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});
 
 test('operator and hats keep their hitbox dimensions while rounding visible boxes', () => {
   const previousDocument = globalThis.document;

@@ -57,6 +57,7 @@ export const LOBBY_MODE_IDS = Object.freeze(LOBBY_MODES.map(({ id }) => id));
 export const LOBBY_TOTAL_ROOMS = LOBBY_MODES.length * LOBBY_ROOMS_PER_MODE;
 export const LOBBY_JOIN_ERROR_CODES = Object.freeze([
   'ROOM_FULL', 'INVALID_ROOM', 'INVALID_SELECTION', 'ROOM_MISMATCH', 'ROOM_NOT_FOUND',
+  'PROTOCOL_MISMATCH',
 ]);
 
 const MODE_BY_ID = new Map(LOBBY_MODES.map((mode) => [mode.id, mode]));

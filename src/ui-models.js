@@ -194,9 +194,11 @@ const clamp = (value, min, max, fallback) => {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 };
 
-const readBoolean = (value, fallback) => value === undefined
-  ? fallback
-  : value === true || value === 1;
+const readBoolean = (value, fallback) => {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  return fallback;
+};
 
 const readHexColor = (value, fallback) => {
   if (typeof value !== 'string') return fallback;
@@ -267,8 +269,12 @@ export function crosshairPresentation(settings, spreadPx = 0) {
   const requestedExpansion = normalized.crosshairDynamic
     ? spread * normalized.crosshairDynamicAmount
     : 0;
-  const gap = Math.min(52, normalized.crosshairGap + requestedExpansion);
+  // El máximo cubre toda la combinación válida (gap 20 + spread 32 × 2),
+  // de modo que los ajustes extremos aún conservan feedback al disparar.
+  const gap = Math.min(84, normalized.crosshairGap + requestedExpansion);
+  const dynamicExpansion = gap - normalized.crosshairGap;
   const showLines = style !== 'dot';
+  const dotExpansion = style === 'dot' ? Math.min(12, dynamicExpansion * 0.18) : 0;
 
   return {
     visible: normalized.crosshairVisible,
@@ -278,19 +284,51 @@ export function crosshairPresentation(settings, spreadPx = 0) {
     thickness: normalized.crosshairThickness,
     gap,
     baseGap: normalized.crosshairGap,
-    dynamicExpansion: gap - normalized.crosshairGap,
+    dynamicExpansion,
     showTop: showLines && style !== 'tactical',
     showBottom: showLines,
     showLeft: showLines,
     showRight: showLines,
     showDot: style === 'dot' || normalized.crosshairDot,
-    dotSize: normalized.crosshairDotSize,
+    dotSize: normalized.crosshairDotSize + dotExpansion,
+    dotExpansion,
     outlineThickness: normalized.crosshairOutline
       ? normalized.crosshairOutlineThickness
       : 0,
     outlineColor: normalized.crosshairOutlineColor,
     opacity: normalized.crosshairOpacity,
   };
+}
+
+// Proyecta la desviación direccional usada por el raycast al mismo espacio de
+// píxeles en el que se dibuja la mira. Un multiplicador fijo se desajusta al
+// cambiar FOV, resolución o al entrar en ADS.
+export function projectSpreadToPixels(spread, verticalFov = DEFAULT_SETTINGS.fov, viewportHeight = 720) {
+  const numericSpread = Number(spread);
+  const safeSpread = Number.isFinite(numericSpread) ? Math.max(0, numericSpread) : 0;
+  const numericFov = Number(verticalFov);
+  const safeFov = Number.isFinite(numericFov) && numericFov > 0 && numericFov < 180
+    ? numericFov
+    : DEFAULT_SETTINGS.fov;
+  const numericHeight = Number(viewportHeight);
+  const safeHeight = Number.isFinite(numericHeight) && numericHeight > 0
+    ? Math.min(16384, numericHeight)
+    : 720;
+  const focalLength = safeHeight / (2 * Math.tan((safeFov * Math.PI) / 360));
+  return Math.min(32, safeSpread * focalLength);
+}
+
+export function shotCrosshairKickPixels(recoil, firePulse, ads = false) {
+  const safeRecoil = Math.max(0, Number(recoil) || 0);
+  const safePulse = Math.min(1, Math.max(0, Number(firePulse) || 0));
+  const fullKick = Math.min(12, 4 + safeRecoil * 120);
+  return safePulse * fullKick * (ads ? 0.6 : 1);
+}
+
+export function crosshairFeedbackPixels(baseSpreadPixels, recoil, firePulse, ads = false) {
+  const numericBase = Number(baseSpreadPixels);
+  const safeBase = Number.isFinite(numericBase) ? Math.min(20, Math.max(0, numericBase)) : 0;
+  return Math.min(32, safeBase + shotCrosshairKickPixels(recoil, firePulse, ads));
 }
 
 export function applyCrosshairPreset(settings, presetId) {

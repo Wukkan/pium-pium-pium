@@ -110,45 +110,64 @@ export class AudioSys {
 
   ensure() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume();
-      return;
+      if (this.ctx.state === 'suspended') {
+        try {
+          const resumed = this.ctx.resume();
+          if (resumed?.catch) resumed.catch(() => {});
+        } catch { /* el juego continúa en silencio */ }
+      }
+      return true;
     }
-    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    this.master = this.ctx.createGain();
-    this.master.gain.value = this.masterVolume;
-    this.mix = this.ctx.createGain();
-    this.mix.gain.value = AUDIO_MIX_PROFILE.headroom;
-    this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = AUDIO_MIX_PROFILE.compressorThreshold;
-    this.compressor.knee.value = AUDIO_MIX_PROFILE.compressorKnee;
-    this.compressor.ratio.value = AUDIO_MIX_PROFILE.compressorRatio;
-    this.compressor.attack.value = AUDIO_MIX_PROFILE.compressorAttack;
-    this.compressor.release.value = AUDIO_MIX_PROFILE.compressorRelease;
-    this.limiter = this.ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = AUDIO_MIX_PROFILE.limiterThreshold;
-    this.limiter.knee.value = 0;
-    this.limiter.ratio.value = AUDIO_MIX_PROFILE.limiterRatio;
-    this.limiter.attack.value = AUDIO_MIX_PROFILE.limiterAttack;
-    this.limiter.release.value = AUDIO_MIX_PROFILE.limiterRelease;
-    this.mix.connect(this.compressor).connect(this.limiter).connect(this.master).connect(this.ctx.destination);
+    const AudioContextCtor = globalThis.window?.AudioContext || globalThis.window?.webkitAudioContext;
+    if (typeof AudioContextCtor !== 'function') return false;
+    try {
+      this.ctx = new AudioContextCtor();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = this.masterVolume;
+      this.mix = this.ctx.createGain();
+      this.mix.gain.value = AUDIO_MIX_PROFILE.headroom;
+      this.compressor = this.ctx.createDynamicsCompressor();
+      this.compressor.threshold.value = AUDIO_MIX_PROFILE.compressorThreshold;
+      this.compressor.knee.value = AUDIO_MIX_PROFILE.compressorKnee;
+      this.compressor.ratio.value = AUDIO_MIX_PROFILE.compressorRatio;
+      this.compressor.attack.value = AUDIO_MIX_PROFILE.compressorAttack;
+      this.compressor.release.value = AUDIO_MIX_PROFILE.compressorRelease;
+      this.limiter = this.ctx.createDynamicsCompressor();
+      this.limiter.threshold.value = AUDIO_MIX_PROFILE.limiterThreshold;
+      this.limiter.knee.value = 0;
+      this.limiter.ratio.value = AUDIO_MIX_PROFILE.limiterRatio;
+      this.limiter.attack.value = AUDIO_MIX_PROFILE.limiterAttack;
+      this.limiter.release.value = AUDIO_MIX_PROFILE.limiterRelease;
+      this.mix.connect(this.compressor).connect(this.limiter).connect(this.master).connect(this.ctx.destination);
 
-    this.buses = {
-      weapons: this.ctx.createGain(),
-      impacts: this.ctx.createGain(),
-      movement: this.ctx.createGain(),
-      ui: this.ctx.createGain(),
-    };
-    this.buses.weapons.gain.value = 0.92;
-    this.buses.impacts.gain.value = 0.82;
-    this.buses.movement.gain.value = 0.72;
-    this.buses.ui.gain.value = 0.78;
-    for (const bus of Object.values(this.buses)) bus.connect(this.mix);
+      this.buses = {
+        weapons: this.ctx.createGain(),
+        impacts: this.ctx.createGain(),
+        movement: this.ctx.createGain(),
+        ui: this.ctx.createGain(),
+      };
+      this.buses.weapons.gain.value = 0.92;
+      this.buses.impacts.gain.value = 0.82;
+      this.buses.movement.gain.value = 0.72;
+      this.buses.ui.gain.value = 0.78;
+      for (const bus of Object.values(this.buses)) bus.connect(this.mix);
 
-    const len = Math.ceil(this.ctx.sampleRate * 1.25);
-    this.noiseBuffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
-    const data = this.noiseBuffer.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-
+      const len = Math.ceil(this.ctx.sampleRate * 1.25);
+      this.noiseBuffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const data = this.noiseBuffer.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      return true;
+    } catch {
+      try { this.ctx?.close?.(); } catch { /* inicialización parcial */ }
+      this.ctx = null;
+      this.master = null;
+      this.mix = null;
+      this.compressor = null;
+      this.limiter = null;
+      this.buses = null;
+      this.noiseBuffer = null;
+      return false;
+    }
   }
 
   setMasterVolume(value) {

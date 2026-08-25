@@ -1,14 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 
 import {
   applyKnifeMeleePose,
   buildGunModel,
   buildKnifeModel,
+  equippedCrosshairSpread,
   firstPersonAnimationState,
   MAX_ARSENAL_MONEY,
   meleeAnimationState,
   sanitizeArsenalState,
+  shotDirectionWithSpread,
   viewmodelVisibilityState,
   WeaponSystem,
 } from '../src/weapons.js';
@@ -94,17 +97,18 @@ function economyHarness() {
 }
 
 function meleeHarness() {
-  const calls = { reloading: [], scope: [], shots: 0 };
+  const calls = { reloading: [], scope: [], shots: 0, ammo: 0 };
   const pistol = buildGunModel('pistol');
   const ar = buildGunModel('ar');
+  const sniper = buildGunModel('sniper');
   const knife = buildKnifeModel();
   const weapon = Object.create(WeaponSystem.prototype);
   Object.assign(weapon, {
     current: 'pistol',
     forcedKey: null,
-    slots: ['pistol', 'ar'],
-    owned: { pistol: true, ar: true },
-    models: { pistol, ar },
+    slots: ['pistol', 'ar', 'sniper'],
+    owned: { pistol: true, ar: true, sniper: true },
+    models: { pistol, ar, sniper },
     knifeModel: knife,
     rig: { visible: true },
     player: { dead: false },
@@ -123,11 +127,12 @@ function meleeHarness() {
     state: {
       pistol: { ammo: 5, reserve: 20 },
       ar: { ammo: 30, reserve: 120 },
+      sniper: { ammo: 5, reserve: 25 },
     },
     hud: {
       setReloading(value) { calls.reloading.push(value); },
       setScope(value) { calls.scope.push(value); },
-      updateAmmo() {},
+      updateAmmo() { calls.ammo++; },
       updateSlots() {},
       announce() {},
     },
@@ -174,6 +179,52 @@ test('firearm and knife viewmodels are mutually exclusive in every visibility mo
   for (const state of [normal, melee, knifeIdle, scoped, dead]) {
     assert.equal(state.firearm && state.knife, false, 'gun and knife must never render together');
   }
+});
+
+test('shot spread stays camera-local at every yaw and pitch', () => {
+  const spread = 0.07;
+  const rotations = [
+    [0, 0],
+    [Math.PI / 4, 0],
+    [Math.PI / 4, Math.PI / 4],
+    [-Math.PI / 3, Math.PI / 6],
+  ];
+
+  for (const [yaw, pitch] of rotations) {
+    const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+    const direction = shotDirectionWithSpread(quaternion, spread, () => 1);
+    const local = direction.clone().applyQuaternion(quaternion.clone().invert());
+    assert.ok(Math.abs(local.x / -local.z - spread) < 1e-9, `right spread at yaw=${yaw}, pitch=${pitch}`);
+    assert.ok(Math.abs(local.y / -local.z - spread) < 1e-9, `up spread at yaw=${yaw}, pitch=${pitch}`);
+  }
+
+  const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.7, -1.1, 0, 'YXZ'));
+  const centered = shotDirectionWithSpread(quaternion, spread, () => 0.5)
+    .applyQuaternion(quaternion.clone().invert());
+  assert.ok(centered.distanceTo(new THREE.Vector3(0, 0, -1)) < 1e-9);
+});
+
+test('knife crosshair never inherits the hidden firearm spread', () => {
+  assert.equal(equippedCrosshairSpread(7.1, true, false), 0);
+  assert.equal(equippedCrosshairSpread(20, true, false), 0);
+  assert.equal(equippedCrosshairSpread(12, false, true), 0);
+  assert.equal(equippedCrosshairSpread(7.1, false, false), 7.1);
+});
+
+test('weapon switching closes stale toggle ADS without changing ADS on a no-op slot', () => {
+  const { weapon, calls } = meleeHarness();
+  weapon.aimMode = 'toggle';
+  weapon.ads = true;
+
+  weapon._equip('pistol');
+  assert.equal(weapon.ads, true, 'selecting the already active slot is a no-op');
+
+  weapon._equip('sniper');
+  assert.equal(weapon.current, 'sniper');
+  assert.equal(weapon.ads, false, 'the next weapon must start unscoped');
+  assert.equal(calls.scope.at(-1), false);
+  assert.equal(weapon.models.sniper.visible, true);
+  assert.equal(weapon.models.pistol.visible, false);
 });
 
 test('melee animation is clamped, strikes once and recovers continuously to the ready pose', () => {
@@ -310,6 +361,7 @@ test('equipped knife persists after an attack until a firearm is selected', () =
   assert.equal(weapon.models.pistol.visible, false);
   assert.equal(weapon.models.ar.visible, false);
   assert.equal(weapon.knifeModel.visible, true);
+  assert.equal(calls.ammo, 1, 'equipping the knife refreshes the HUD identity');
   assert.notDeepEqual(attackPivot.position.toArray(), [9, 9, 9]);
   const readyPosition = attackPivot.position.toArray();
 
@@ -347,6 +399,7 @@ test('equipped knife persists after an attack until a firearm is selected', () =
   assert.equal(weapon.knifeEquipped, false);
   assert.equal(weapon.current, 'ar');
   assert.equal(weapon.knifeModel.visible, false);
+  assert.ok(calls.ammo >= 2, 'returning to a firearm restores its ammo HUD');
   assert.equal(weapon.models.pistol.visible, false);
   assert.equal(weapon.models.ar.visible, true);
   assert.equal(weapon.equipProgress, 0, 'selected firearm must play its draw animation');

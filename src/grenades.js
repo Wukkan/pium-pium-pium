@@ -12,6 +12,7 @@ const RADIUS = 6;
 const MAX_DMG = 90;
 const GRAVITY = 22;
 const PER_LIFE = 2;
+const MAX_SIMULATION_STEP = 1 / 60;
 export const MAX_REMOTE_GRENADES = 48;
 
 export function validRemoteGrenadePayload(position, velocity) {
@@ -109,8 +110,21 @@ export class GrenadeManager {
   }
 
   refill() {
+    // El respawn solo invalida nuestros proyectiles. Las granadas remotas
+    // pertenecen a otras vidas y deben completar su animación normalmente.
+    this.clear({ mineOnly: true });
     this.count = PER_LIFE;
     if (this.onCount) this.onCount(this.count);
+  }
+
+  clear({ mineOnly = false } = {}) {
+    for (let index = this.grenades.length - 1; index >= 0; index--) {
+      const grenade = this.grenades[index];
+      if (mineOnly && !grenade.mine) continue;
+      this.scene.remove(grenade.mesh);
+      disposeGrenadeMesh(grenade.mesh);
+      this.grenades.splice(index, 1);
+    }
   }
 
   // lanzar desde la cámara del jugador
@@ -173,6 +187,20 @@ export class GrenadeManager {
   }
 
   update(dt, playerEye, listenerForward = { x: 0, z: -1 }) {
+    const elapsed = Number(dt);
+    if (!Number.isFinite(elapsed) || elapsed <= 0) return;
+
+    let remaining = elapsed;
+    while (remaining > 0 && this.grenades.length > 0) {
+      const step = Math.min(MAX_SIMULATION_STEP, remaining);
+      this._updateStep(step, playerEye, listenerForward);
+      remaining -= step;
+      // Evita una iteración residual causada únicamente por redondeo flotante.
+      if (remaining < Number.EPSILON) remaining = 0;
+    }
+  }
+
+  _updateStep(dt, playerEye, listenerForward) {
     for (let i = this.grenades.length - 1; i >= 0; i--) {
       const g = this.grenades[i];
       g.fuse -= dt;

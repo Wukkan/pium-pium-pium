@@ -39,6 +39,20 @@ export const OPERATOR_HAND_PROFILE = Object.freeze({
   meshBudgetPerHand: 13,
 });
 
+// El modelo se construye mirando hacia -Z, igual que la camara/jugadores.
+// La IA de bots conserva por compatibilidad un yaw cuyo frente es +Z. El
+// desfase vive en un pivote visual interno para que `group.rotation.y` siga
+// siendo el yaw logico usado por red, impactos y backstabs.
+export function humanoidFacingOffset(kind = 'pl') {
+  return kind === 'bot' ? Math.PI : 0;
+}
+
+export function setHumanoidFacingConvention(rig, kind = 'pl') {
+  if (!rig?.visualRoot) return false;
+  rig.visualRoot.rotation.y = humanoidFacingOffset(kind);
+  return true;
+}
+
 export function makeNameSprite(name, color = '#ffffff') {
   const canvas = document.createElement('canvas');
   canvas.width = 256; canvas.height = 48;
@@ -109,8 +123,11 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   const flashMaterial = new THREE.MeshBasicMaterial({ color: 0xffd66b, transparent: true, opacity: 0.9 });
 
   const group = new THREE.Group();
+  const visualRoot = new THREE.Group();
+  visualRoot.name = 'visualRoot';
+  group.add(visualRoot);
   const torso = new THREE.Group();
-  group.add(torso);
+  visualRoot.add(torso);
   const parts = [];
   const profile = humanoidModelProfile();
   const armorGroup = new THREE.Group();
@@ -149,7 +166,7 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   const legR = new THREE.Group(); legR.position.set(0.15, 0.8, 0);
   legL.name = 'legL';
   legR.name = 'legR';
-  group.add(legL, legR);
+  visualRoot.add(legL, legR);
   box(...profile.leg, pants, 0, -0.4, 0, 'leg', legL);
   box(...profile.leg, pants, 0, -0.4, 0, 'leg', legR);
   box(0.22, 0.12, 0.38, boot, 0, -0.82, -0.08, 'leg', legL);
@@ -441,7 +458,7 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   torso.add(nameSprite);
 
   return {
-    group, parts, torso, body, legL, legR, armL, armR, forearmL, forearmR, handL, handR,
+    group, visualRoot, parts, torso, body, legL, legR, armL, armR, forearmL, forearmR, handL, handR,
     head, headPivot, gun, gunGrip, gunHandguard, muzzleFlash, nameSprite,
     gripTargets: { left: leftGripTarget, right: rightGripTarget }, syncOperatorGrip,
     armor: armorGroup, headgear, equipment,

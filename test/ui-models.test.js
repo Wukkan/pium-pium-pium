@@ -15,6 +15,9 @@ import {
   readSettings,
   CROSSHAIR_PRESETS,
   crosshairPresentation,
+  crosshairFeedbackPixels,
+  projectSpreadToPixels,
+  shotCrosshairKickPixels,
   applyCrosshairPreset,
   effectiveMasterVolume,
   effectivePixelRatio,
@@ -258,6 +261,34 @@ test('custom crosshair rejects unsafe CSS colors, unknown styles, and non-finite
   assert.equal(settings.crosshairOpacity, 1);
 });
 
+test('settings booleans accept only canonical values and repair corrupt storage', () => {
+  const corrupt = readSettings({
+    crosshairVisible: 'true',
+    crosshairOutline: null,
+    crosshairDynamic: {},
+    highContrast: 'false',
+    bunnyHopEnabled: '0',
+    invertY: '1',
+  });
+  assert.equal(corrupt.crosshairVisible, true);
+  assert.equal(corrupt.crosshairOutline, true);
+  assert.equal(corrupt.crosshairDynamic, true);
+  assert.equal(corrupt.highContrast, false);
+  assert.equal(corrupt.bunnyHopEnabled, true);
+  assert.equal(corrupt.invertY, false);
+
+  const explicit = readSettings({
+    crosshairVisible: false,
+    crosshairOutline: 0,
+    invertY: true,
+    highContrast: 1,
+  });
+  assert.equal(explicit.crosshairVisible, false);
+  assert.equal(explicit.crosshairOutline, false);
+  assert.equal(explicit.invertY, true);
+  assert.equal(explicit.highContrast, true);
+});
+
 test('crosshair presentation separates dimensions and limits dynamic expansion', () => {
   const staticPresentation = crosshairPresentation({
     crosshairScale: 1.5,
@@ -275,8 +306,36 @@ test('crosshair presentation separates dimensions and limits dynamic expansion',
     crosshairDynamic: true,
     crosshairDynamicAmount: 2,
   }, 500);
-  assert.equal(dynamicPresentation.gap, 52);
-  assert.equal(dynamicPresentation.dynamicExpansion, 42);
+  assert.equal(dynamicPresentation.gap, 74);
+  assert.equal(dynamicPresentation.dynamicExpansion, 64);
+});
+
+test('weapon spread projects to the real screen radius for FOV and resolution', () => {
+  const at720p = projectSpreadToPixels(0.016, 78, 720);
+  const at1080p = projectSpreadToPixels(0.016, 78, 1080);
+  const wideFov = projectSpreadToPixels(0.016, 110, 720);
+
+  assert.ok(Math.abs(at720p - 7.11) < 0.02);
+  assert.ok(Math.abs(at1080p - at720p * 1.5) < 0.02);
+  assert.ok(wideFov < at720p);
+  assert.equal(projectSpreadToPixels(999, 78, 720), 32);
+  assert.equal(projectSpreadToPixels(Number.NaN, Number.NaN, 0), 0);
+});
+
+test('dynamic crosshair receives a short ADS-aware shot impulse without changing accuracy', () => {
+  assert.ok(Math.abs(shotCrosshairKickPixels(0.011, 1, false) - 5.32) < 0.001);
+  assert.ok(Math.abs(shotCrosshairKickPixels(0.011, 1, true) - 3.192) < 0.001);
+  assert.ok(Math.abs(shotCrosshairKickPixels(0.011, 0.5, false) - 2.66) < 0.001);
+  assert.equal(shotCrosshairKickPixels(0.08, 1, false), 12);
+  assert.equal(shotCrosshairKickPixels(Number.NaN, Number.NaN), 0);
+
+  const cappedBase = crosshairFeedbackPixels(32, 0.05, 0, false);
+  const shotgunShot = crosshairFeedbackPixels(32, 0.05, 1, false);
+  const sniperShot = crosshairFeedbackPixels(32, 0.06, 1, false);
+  assert.equal(cappedBase, 20, 'base spread leaves visual room for firing feedback');
+  assert.ok(shotgunShot - cappedBase >= 9.9);
+  assert.ok(sniperShot - cappedBase >= 11.1);
+  assert.equal(crosshairFeedbackPixels(Number.NaN, 0, 0), 0);
 });
 
 test('crosshair styles expose the correct arms and center dot', () => {
@@ -300,6 +359,24 @@ test('crosshair styles expose the correct arms and center dot', () => {
     [false, false, false, false, true],
   );
   assert.equal(dot.outlineThickness, 0);
+
+  const dynamicDot = crosshairPresentation({
+    crosshairStyle: 'dot', crosshairDotSize: 2,
+    crosshairDynamic: true, crosshairDynamicAmount: 1,
+  }, 10);
+  assert.equal(dynamicDot.dotSize, 3.8);
+  assert.ok(Math.abs(dynamicDot.dotExpansion - 1.8) < 0.001);
+
+  const extremeDotBase = crosshairPresentation({
+    crosshairStyle: 'dot', crosshairGap: 20,
+    crosshairDynamic: true, crosshairDynamicAmount: 2,
+  }, 20);
+  const extremeDotShot = crosshairPresentation({
+    crosshairStyle: 'dot', crosshairGap: 20,
+    crosshairDynamic: true, crosshairDynamicAmount: 2,
+  }, 32);
+  assert.ok(extremeDotShot.dotSize > extremeDotBase.dotSize);
+  assert.ok(extremeDotShot.gap > extremeDotBase.gap);
 });
 
 test('crosshair presets are complete, immutable, and preserve unrelated settings', () => {

@@ -102,7 +102,7 @@ async function openClient(port) {
 
 async function connectClient(port, name, mode = 'ffa', room = 1) {
   const client = await openClient(port);
-  client.send({ t: 'hola', name, mode, room });
+  client.send({ t: 'hola', pv: 2, name, mode, room });
   const hi = await client.waitFor((message) => message.t === 'hi');
   client.hi = hi;
   return client;
@@ -145,12 +145,12 @@ test('server exposes eight isolated fixed-mode rooms with strict ten-player admi
   await waitForServer(child);
 
   const health = await fetch(`http://127.0.0.1:${port}/salud`).then((response) => response.json());
-  assert.deepEqual(health, { ok: true, version: '1.7.0' });
+  assert.deepEqual(health, { ok: true, version: '1.7.1' });
 
   const roomsResponse = await fetch(`http://127.0.0.1:${port}/salas`);
   assert.equal(roomsResponse.headers.get('cache-control'), 'no-store');
   const lobby = await roomsResponse.json();
-  assert.equal(lobby.version, '1.7.0');
+  assert.equal(lobby.version, '1.7.1');
   assert.equal(lobby.capacity, LOBBY_ROOM_CAPACITY);
   assert.equal(lobby.totalRooms, LOBBY_TOTAL_ROOMS);
   assert.equal(lobby.rooms.length, LOBBY_TOTAL_ROOMS);
@@ -175,6 +175,13 @@ test('server exposes eight isolated fixed-mode rooms with strict ten-player admi
   invalid.send({ t: 'hola', name: 'SIN_SALA' });
   assert.deepEqual(await invalid.waitFor((message) => message.t === 'joinerr'), {
     t: 'joinerr', code: 'INVALID_SELECTION',
+  });
+
+  const staleClient = await openClient(port);
+  clients.push(staleClient);
+  staleClient.send({ t: 'hola', pv: 1, name: 'VERSION_VIEJA', mode: 'ffa', room: 1 });
+  assert.deepEqual(await staleClient.waitFor((message) => message.t === 'joinerr'), {
+    t: 'joinerr', code: 'PROTOCOL_MISMATCH', expected: 2,
   });
 
   // El reloj de una sala aún vacía no consume la ronda.
@@ -207,8 +214,13 @@ test('server exposes eight isolated fixed-mode rooms with strict ten-player admi
     [assigned[0].x, assigned[0].y, assigned[0].z], 'a stale spawn sequence moved the player');
 
   nextSnapshot = observer.waitForNext((message) => message.t === 'snap');
+  const correctionPromise = victim.waitForNext((message) => message.t === 'corr');
   victim.send(stateMessage([assigned[1].x, assigned[1].y, assigned[1].z], victim.hi.sid));
-  snapshot = await nextSnapshot;
+  [snapshot] = await Promise.all([nextSnapshot, correctionPromise.then((correction) => {
+    assert.equal(correction.sid, victim.hi.sid);
+    assert.deepEqual(correction.p, [assigned[0].x, assigned[0].y, assigned[0].z]);
+    return correction;
+  })]);
   assert.deepEqual(snapshot.pl.find((player) => player.id === victim.hi.id).p,
     [assigned[0].x, assigned[0].y, assigned[0].z], 'an impossible movement jump was accepted');
 
@@ -247,7 +259,7 @@ test('server exposes eight isolated fixed-mode rooms with strict ten-player admi
 
   const overflow = await openClient(port);
   clients.push(overflow);
-  overflow.send({ t: 'hola', name: 'QA_FULL', mode: 'ffa', room: 1 });
+  overflow.send({ t: 'hola', pv: 2, name: 'QA_FULL', mode: 'ffa', room: 1 });
   assert.deepEqual(await overflow.waitFor((message) => message.t === 'full'), {
     t: 'full', code: 'ROOM_FULL', mode: 'ffa', room: 1,
     slots: TOTAL_SLOTS, players: TOTAL_SLOTS,
@@ -390,6 +402,17 @@ test('server rejects forged combat, incremental flight, and sustained message fl
   next = await attacker.waitForNext((message) => message.t === 'snap');
   assert.equal(next.pl.find(({ id }) => id === farVictim.id).hp, beforeNade);
   assert.equal(farClient.messages.filter((message) => message.t === 'ouch').length, farOuchBefore);
+
+  // La explosión se resuelve sin confiar en un mensaje hit del cliente e
+  // incluye medio daño propio, igual que el entrenamiento local.
+  const selfDamage = attacker.waitForNext((message) =>
+    message.t === 'ouch' && message.by === 'tu propia granada');
+  attacker.send({
+    t: 'nade', p: [eye.x, eye.y, eye.z], v: [0, 10, 0], im: 0,
+  });
+  const selfOuch = await selfDamage;
+  assert.ok(selfOuch.d > 0 && selfOuch.d <= 45);
+  assert.ok(selfOuch.hp < 100);
 
   // Muchos micro-estados no pueden fabricar vuelo y, al dejar de enviar,
   // la posición autoritativa cae a una superficie válida.

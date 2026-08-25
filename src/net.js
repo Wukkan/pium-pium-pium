@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { isLobbyMode, isLobbyRoom } from './lobby-catalog.js';
+import { PROTOCOL_VERSION } from './shared/protocol.js';
 
 export function isProtocolMessage(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value) && typeof value.t === 'string';
@@ -15,7 +16,7 @@ export function lobbyHelloMessage(name, skin, selection) {
     throw error;
   }
   return {
-    t: 'hola', pv: 2, name, skin,
+    t: 'hola', pv: PROTOCOL_VERSION, name, skin,
     mode: selection.mode,
     room: selection.room,
   };
@@ -34,6 +35,7 @@ export class Net {
     this.handlers = {};   // t -> callback(msg)
     this._sendTimer = 0;
     this._heartbeatTimer = null;
+    this._lastPongAt = 0;
   }
 
   on(type, cb) { this.handlers[type] = cb; }
@@ -73,6 +75,7 @@ export class Net {
         let m;
         try { m = JSON.parse(ev.data); } catch { return; }
         if (!isProtocolMessage(m)) return;
+        if (m.t === 'pong') this._lastPongAt = Date.now();
         if (m.t === 'hi' && !settled) {
           if (m.mode !== hello.mode || m.room !== hello.room) {
             settled = true;
@@ -91,6 +94,7 @@ export class Net {
           this.room = m.room;
           this.slots = m.slots || 10;
           this.acceptSpawn(m.sid);
+          this._sendTimer = 0;
           this.connected = true;
           resolve(m);
           return;
@@ -129,8 +133,15 @@ export class Net {
   startHeartbeat(intervalMs = 3000) {
     this.stopHeartbeat();
     const delay = Math.max(1000, Math.min(30000, Math.round(Number(intervalMs) || 3000)));
+    const timeoutMs = Math.max(9000, delay * 3.5);
+    this._lastPongAt = Date.now();
     this._heartbeatTimer = setInterval(() => {
-      if (this.connected) this.sendPing();
+      if (!this.connected) return;
+      if (Date.now() - this._lastPongAt > timeoutMs) {
+        try { this.ws?.close(4000, 'Servidor sin respuesta'); } catch { /* cierre local */ }
+        return;
+      }
+      this.sendPing();
     }, delay);
     return this._heartbeatTimer;
   }
@@ -152,9 +163,14 @@ export class Net {
   // llamar cada frame; emite el estado a ~15 Hz
   tickState(dt, player) {
     if (!this.connected || !player || player.dead) return;
-    this._sendTimer -= dt;
-    if (this._sendTimer > 0) return;
-    this._sendTimer = 1 / 15;
+    const elapsed = Number(dt);
+    if (!Number.isFinite(elapsed) || elapsed <= 0) return;
+    const interval = 1 / 15;
+    this._sendTimer += elapsed;
+    if (this._sendTimer + Number.EPSILON < interval) return;
+    // Conservar el sobrante evita que 60 FPS terminen enviando a 12 Hz. Se
+    // limita a un paquete por update para no crear ráfagas de estados viejos.
+    this._sendTimer %= interval;
     this._send({
       t: 'st',
       p: [+player.pos.x.toFixed(2), +player.pos.y.toFixed(2), +player.pos.z.toFixed(2)],

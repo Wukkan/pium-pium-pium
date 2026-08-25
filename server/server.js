@@ -28,6 +28,7 @@ import {
   selectSafeSpawn,
 } from '../src/shared/spawn-safety.js';
 import { segmentBlocked } from '../src/shared/physics.js';
+import { PROTOCOL_VERSION } from '../src/shared/protocol.js';
 import {
   COMBAT_LIMITS,
   FIREARM_RULES,
@@ -49,7 +50,7 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.7.0';
+const GAME_VERSION = '1.7.1';
 const ZOMBIE_WAVES = 8;
 const MAX_ZOMBIES_PER_WAVE = 4 + 2 * ZOMBIE_WAVES;
 const MIN_ZOMBIE_SPAWNS = MAX_ZOMBIES_PER_WAVE + TOTAL_SLOTS;
@@ -830,45 +831,69 @@ function acceptNade(player, message) {
     explodedAt: null,
     explosionPos: null,
     impact,
-    targets: new Set(),
-    hits: 0,
+    damageApplied: false,
   };
   player._nades = player._nades.filter((candidate) => time - candidate.at <= 4.5).slice(-3);
   player._nades.push(nade);
   return nade;
 }
 
-function consumeNadeHit(player, targetKey, target, claimedDamage) {
-  const time = now();
-  player._nades = player._nades.filter((nade) => time - nade.at <= (nade.impact ? 5 : 3.3));
-  for (const nade of player._nades) {
-    advanceNadeTo(nade, time);
-    if (nade.explodedAt === null || time - nade.explodedAt > 1 || nade.targets.has(targetKey) ||
-        nade.hits >= COMBAT_LIMITS.nadeMaxTargets) continue;
-    const targetPoint = entityCenter(target);
-    const blastOrigin = {
-      x: nade.explosionPos.x,
-      y: nade.explosionPos.y + 0.2,
-      z: nade.explosionPos.z,
-    };
-    const blastDistance = Math.hypot(
-      blastOrigin.x - targetPoint.x,
-      blastOrigin.y - targetPoint.y,
-      blastOrigin.z - targetPoint.z,
+function authoritativeNadeDamage(blastOrigin, target) {
+  const targetPoint = entityCenter(target);
+  const distance = Math.hypot(
+    blastOrigin.x - targetPoint.x,
+    blastOrigin.y - targetPoint.y,
+    blastOrigin.z - targetPoint.z,
+  );
+  if (distance > COMBAT_LIMITS.nadeRadius || !hasLineOfSight(blastOrigin, targetPoint)) return 0;
+  return Math.max(15, Math.round(COMBAT_LIMITS.nadeDamage *
+    (1 - distance / COMBAT_LIMITS.nadeRadius)));
+}
+
+function resolveNadeExplosion(owner, nade) {
+  if (nade.damageApplied || nade.explodedAt === null) return;
+  nade.damageApplied = true;
+  if (match.state !== 'playing' || !nade.explosionPos) return;
+  const blastOrigin = {
+    x: nade.explosionPos.x,
+    y: nade.explosionPos.y + 0.2,
+    z: nade.explosionPos.z,
+  };
+
+  for (const victim of players.values()) {
+    if (match.state !== 'playing') break;
+    if (!victim.alive) continue;
+    if (victim !== owner && match.mode === 'teams' && victim.team === owner.team) continue;
+    let damage = authoritativeNadeDamage(blastOrigin, victim);
+    if (victim === owner) damage = Math.round(damage / 2);
+    if (damage <= 0) continue;
+    const previousHealth = victim.hp;
+    damagePlayer(
+      victim,
+      damage,
+      victim === owner ? 'tu propia granada' : owner.name,
+      false,
+      victim === owner ? null : owner,
+      'nade',
     );
-    if (blastDistance > COMBAT_LIMITS.nadeRadius + 0.75 ||
-        !hasLineOfSight(blastOrigin, targetPoint)) continue;
-    const declared = Math.round(Number(claimedDamage));
-    if (!Number.isFinite(declared) || declared <= 0) return 0;
-    nade.targets.add(targetKey);
-    nade.hits++;
-    const distanceDamage = blastDistance >= COMBAT_LIMITS.nadeRadius
-      ? 15
-      : Math.max(15, Math.round(COMBAT_LIMITS.nadeDamage *
-        (1 - blastDistance / COMBAT_LIMITS.nadeRadius)));
-    return Math.min(declared, distanceDamage);
+    if (victim !== owner && victim.hp < previousHealth) {
+      send(owner, { t: 'hitok', w: 'nade', kind: 'pl', id: victim.id, d: damage });
+    }
   }
-  return 0;
+
+  for (const bot of bots) {
+    if (match.state !== 'playing') break;
+    if (bot.dead || (match.mode === 'teams' && bot.team === owner.team)) continue;
+    const damage = authoritativeNadeDamage(blastOrigin, bot);
+    if (damage <= 0) continue;
+    const died = bot.takeDamage(damage, owner.pos);
+    send(owner, { t: 'hitok', w: 'nade', kind: 'bot', id: bot.id, d: damage });
+    if (died) {
+      spawnKit(bot.pos);
+      broadcast({ t: 'kill', vn: bot.name, vid: null, kn: owner.name, h: false, w: 'nade' });
+      creditKill(owner, 'nade');
+    }
+  }
 }
 
 function resetMovementBudget(player) {
@@ -990,8 +1015,12 @@ function send(p, msg) {
 
 function broadcast(msg, exceptId = null) {
   const raw = JSON.stringify(msg);
+  const isSnapshot = msg?.t === 'snap';
   for (const p of players.values()) {
-    if (p.id !== exceptId && p.ws.readyState === 1) p.ws.send(raw);
+    if (p.id === exceptId || p.ws.readyState !== 1) continue;
+    // Un cliente lento no debe acumular segundos de snapshots obsoletos.
+    if (isSnapshot && Number(p.ws.bufferedAmount) > 256 * 1024) continue;
+    p.ws.send(raw);
   }
 }
 
@@ -1044,7 +1073,7 @@ function creditKill(killer, weaponKind) {
   }
 }
 
-function killPlayer(victim, killerName, isHead) {
+function killPlayer(victim, killerName, isHead, weaponKind = '') {
   victim.alive = false;
   const respawnToken = (victim.respawnToken || 0) + 1;
   victim.respawnToken = respawnToken;
@@ -1053,7 +1082,10 @@ function killPlayer(victim, killerName, isHead) {
   victim.curStreak = 0;
   ranking.addDeath(victim.name);
   spawnKit(victim.pos);
-  broadcast({ t: 'kill', vn: victim.name, vid: victim.id, kn: killerName, h: !!isHead });
+  broadcast({
+    t: 'kill', vn: victim.name, vid: victim.id, kn: killerName,
+    h: !!isHead, w: String(weaponKind || '').slice(0, 10),
+  });
   setTimeout(() => {
     if (!players.has(victim.id) || victim.respawnToken !== respawnToken ||
         victim.alive || match.state !== 'playing') return;
@@ -1067,8 +1099,9 @@ function damagePlayer(victim, dmg, sourceName, isHead, killerPlayer = null, weap
   victim.lastDmg = now();
   send(victim, { t: 'ouch', d: dmg, hp: Math.max(0, victim.hp), by: sourceName });
   if (victim.hp <= 0) {
+    killPlayer(victim, sourceName, isHead, weaponKind);
+    // La baja debe llegar antes que el podio de una muerte que cierra ronda.
     if (killerPlayer) creditKill(killerPlayer, weaponKind);
-    killPlayer(victim, sourceName, isHead);
     return true;
   }
   return false;
@@ -1164,6 +1197,11 @@ function attach(ws, hello) {
         const nextPos = { x: m.p[0], y: m.p[1], z: m.p[2] };
         if (playerPositionAllowed(me, nextPos)) {
           me.pos = nextPos;
+        } else {
+          send(me, {
+            t: 'corr', sid: me.spawnSeq,
+            p: [+me.pos.x.toFixed(2), +me.pos.y.toFixed(2), +me.pos.z.toFixed(2)],
+          });
         }
       }
       if (Number.isFinite(m.ry)) me.ry = Math.atan2(Math.sin(m.ry), Math.cos(m.ry));
@@ -1185,29 +1223,30 @@ function attach(ws, hello) {
         const bot = bots.find((b) => b.id === m.id);
         if (bot && !bot.dead && distOk(me.pos, bot.pos) &&
             !(match.mode === 'teams' && bot.team === me.team)) {
-          const targetKey = `bot:${bot.id}`;
           const dmg = weapon === 'knife'
             ? consumeKnifeHit(me, bot, m.d, 'bot')
             : weapon === 'nade'
-              ? consumeNadeHit(me, targetKey, bot, m.d)
+              ? 0 // daño de explosión resuelto por la simulación autoritativa
               : consumeFirearmHit(me, weapon, entityCenter(bot, !!m.h), m.d, !!m.h);
           if (dmg <= 0) return;
           const died = bot.takeDamage(dmg, me.pos);
           if (died) {
-            creditKill(me, weapon);
             spawnKit(bot.pos);
-            broadcast({ t: 'kill', vn: bot.name, vid: null, kn: me.name, h: !!m.h });
+            broadcast({
+              t: 'kill', vn: bot.name, vid: null, kn: me.name,
+              h: !!m.h, w: weapon,
+            });
+            creditKill(me, weapon);
           }
         }
       } else if (m.kind === 'pl') {
         const victim = players.get(+m.id);
         if (victim && victim.id !== me.id && distOk(me.pos, victim.pos)) {
           if (match.mode === 'teams' && victim.team === me.team) return; // fuego amigo desactivado
-          const targetKey = `pl:${victim.id}`;
           const dmg = weapon === 'knife'
             ? consumeKnifeHit(me, victim, m.d, 'pl')
             : weapon === 'nade'
-              ? consumeNadeHit(me, targetKey, victim, m.d)
+              ? 0
               : consumeFirearmHit(me, weapon, entityCenter(victim, !!m.h), m.d, !!m.h);
           if (dmg <= 0) return;
           damagePlayer(victim, dmg, me.name, !!m.h, me, weapon);
@@ -1337,9 +1376,9 @@ const botCtx = {
     } else {
       const died = target.takeDamage(dmg, bot.pos);
       if (died) {
-        scoreTeamKill(bot.team);
         spawnKit(target.pos);
         broadcast({ t: 'kill', vn: target.name, vid: null, kn: bot.name, h: false });
+        scoreTeamKill(bot.team);
       }
     }
   },
@@ -1373,7 +1412,10 @@ function tick(t, dt, elapsed = dt) {
   const nadeColliders = activeMovementColliders();
   for (const player of players.values()) {
     player._nades = (player._nades || []).filter((nade) => t - nade.at <= (nade.impact ? 5 : 3.3));
-    for (const nade of player._nades) advanceNadeTo(nade, t, nadeColliders);
+    for (const nade of player._nades) {
+      advanceNadeTo(nade, t, nadeColliders);
+      resolveNadeExplosion(player, nade);
+    }
   }
   if (match.state === 'playing') {
     for (const b of bots) {
@@ -1534,6 +1576,11 @@ wss.on('connection', (ws) => {
         message.t !== 'hola' || !validMode || !validRoom) {
       clearTimeout(helloTimeout);
       rejectJoin(ws, 'INVALID_SELECTION');
+      return;
+    }
+    if (message.pv !== PROTOCOL_VERSION) {
+      clearTimeout(helloTimeout);
+      rejectJoin(ws, 'PROTOCOL_MISMATCH', { expected: PROTOCOL_VERSION });
       return;
     }
     const room = roomRegistry.get(lobbyRoomKey(message.mode, message.room));

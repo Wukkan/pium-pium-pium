@@ -7,6 +7,7 @@ import {
   disposeHumanoid,
   makeHumanoid,
   resetHumanoidPose,
+  setHumanoidFacingConvention,
   triggerHumanoidHit,
   triggerHumanoidShot,
 } from './humanoid.js';
@@ -77,6 +78,7 @@ class Bot {
     this.walkRef = { t: 0 };
 
     this.rig = makeHumanoid(color, name, (part) => ({ bot: this, part }));
+    setHumanoidFacingConvention(this.rig, 'bot');
     this.group = this.rig.group;
     this.parts = this.rig.parts;
   }
