@@ -12,6 +12,8 @@ La actualización **Rounded World 1.3** suaviza de forma proporcional todas las 
 
 El parche **Live 3D Arsenal 1.4.0** convierte las tarjetas de Arsenal y Compra en vitrinas 3D interactivas. La equipada gira automáticamente y cualquier arma toma la vista en vivo al pasar el cursor o enfocarla; un único renderer compartido conserva los FPS, respeta reducción de movimiento y mantiene la imagen real como fallback seguro.
 
+La actualización **Online Rooms 1.5.0** lleva la elección al menú previo: antes de jugar se seleccionan uno de cuatro modos y una de sus dos salas online. Cada una admite hasta 10 jugadores humanos y mantiene aislados su mapa, cajas, respawns, bots, configuración, marcador y votación. El servidor publica ocupación en vivo, rechaza de forma autoritativa una sala llena y conserva el modo elegido; al terminar solo se vota el próximo mapa.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.
@@ -24,7 +26,7 @@ node server/server.js
 
 (o con el Node portable del proyecto: `tools\node-v22.14.0-win-x64\node.exe server\server.js`)
 
-y abre **http://localhost:5173**. Escribe tu nombre y pulsa **JUGAR**.
+y abre **http://localhost:5173**. Elige modo y sala, escribe tu nombre y pulsa **JUGAR**.
 
 > Si abres el juego sin servidor Node (por ejemplo con `python serve.py`), funciona en modo local: tú contra 5 bots.
 
@@ -81,13 +83,13 @@ Empiezas con la pistola. Cada baja da **$100** (+$50 headshot, + bonus por racha
 
 **Extras**: `V` cuchillo (100 de daño por la espalda), `G` granadas, `C` chat rápido, daño por caída, y las piernas reciben menos daño que el cuerpo. Armas extra: revólver ($450) y lanzagranadas ($2000, dispara granadas de impacto).
 
-**Mapas**: Arena (clásico) y Ciudad (calles y azoteas) — se vota junto al modo al final de cada partida (teclas 5/6). Ambos con **saltadores** (plataformas amarillas que te lanzan por los aires) y **cajas destruibles** (80 pv, reaparecen a los 45 s).
+**Mapas**: Arena (clásico) y Ciudad (calles y azoteas) — al final de cada partida la sala conserva su modo y vota el siguiente mapa (teclas 1/2). Ambos tienen **saltadores** (plataformas amarillas que te lanzan por los aires) y **cajas destruibles** (80 pv, reaparecen a los 45 s).
 
 **Personalización y progresión**: en el menú puedes comprar **sombreros** (gorra/chistera/corona) y **colores** para tu muñeco con el dinero de las bajas — los ven todos los jugadores. Hay **3 misiones diarias** (+$300 cada una) y tu **insignia de nivel** (🥉🥈🥇👑 según tus bajas totales del ranking mundial) aparece junto a tu nombre.
 
 ## Modos de juego (online)
 
-Al final de cada partida hay **podio y votación** del siguiente modo (teclas 1-4). Si están activados, los bots ocupan las plazas configuradas que queden libres.
+Antes de entrar eliges el modo y una de sus **dos salas online independientes**, cada una con máximo de 10 jugadores humanos. Al final hay podio y votación del siguiente mapa (teclas 1/2); el modo de la sala no cambia. Si están activados, los bots ocupan las plazas configuradas que queden libres.
 
 - **Todos contra todos** — primero a 30 bajas o 5 minutos.
 - **Equipos** 🔴🔵 — eliges bando al empezar (y cambias con `M`); los bots equilibran los equipos; sin fuego amigo.
@@ -100,10 +102,11 @@ Al final de cada partida hay **podio y votación** del siguiente modo (teclas 1-
 
 ## Arquitectura
 
-- `server/server.js` — HTTP estático + WebSocket. Estado autoritativo: vida, muertes, respawns, marcador y nº de bots.
+- `server/server.js` — HTTP estático + WebSocket, catálogo `/salas` y ocho motores de partida aislados. Estado autoritativo: vida, muertes, respawns, marcador y nº de bots.
 - `server/botai.js` — IA de los bots en el servidor (patrulla, combate, ráfagas con probabilidad de acierto).
 - `src/shared/` — mapa, física y selector de respawn seguro compartidos entre cliente y servidor.
-- `src/net.js` — cliente WebSocket (estado a 15 Hz, disparos, impactos).
+- `src/lobby-catalog.js` — contrato compartido de modos, salas, capacidad, selección y ocupación.
+- `src/net.js` — cliente WebSocket con selección estricta de sala (estado a 15 Hz, disparos, impactos).
 - `src/remotes.js` — marionetas interpoladas de jugadores remotos y bots.
 - `src/main.js` — arranque; modo online o local según haya servidor.
 - El daño lo declara el cliente que dispara (suficiente para partidas entre amigos); el servidor valida rangos y lleva la puntuación.

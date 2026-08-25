@@ -341,13 +341,14 @@ test('buy menu categories expose one selected filter for mouse navigation', () =
   ]);
 });
 
-test('podium stages expose a clear mode phase followed by a map phase', () => {
+test('podium keeps legacy mode metadata but defaults fixed rooms to a map vote', () => {
   assert.deepEqual(podiumStageState('mode'), {
     stage: 'mode', phase: 'FASE 1 / 2', title: 'ELIGE EL MODO DE JUEGO', voteType: 'mode',
   });
   assert.deepEqual(podiumStageState('map'), {
-    stage: 'map', phase: 'FASE 2 / 2', title: 'ELIGE EL MAPA', voteType: 'map',
+    stage: 'map', phase: 'MAPA DE LA SALA', title: 'ELIGE EL MAPA', voteType: 'map',
   });
+  assert.equal(podiumStageState().stage, 'map');
 });
 
 test('bot panel distinguishes desired and active bots while clamping server data', () => {

@@ -1,12 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Net, isProtocolMessage } from '../src/net.js';
+import { Net, isProtocolMessage, lobbyHelloMessage } from '../src/net.js';
 
 test('protocol messages reject null, arrays, and messages without a type', () => {
   assert.equal(isProtocolMessage(null), false);
   assert.equal(isProtocolMessage([]), false);
   assert.equal(isProtocolMessage({}), false);
   assert.equal(isProtocolMessage({ t: 'snap' }), true);
+});
+
+test('lobby hello carries the exact protocol version, mode, and room', () => {
+  assert.deepEqual(lobbyHelloMessage('Ana', { h: 'cap', c: 123 }, { mode: 'teams', room: 2 }), {
+    t: 'hola', pv: 2, name: 'Ana', skin: { h: 'cap', c: 123 }, mode: 'teams', room: 2,
+  });
+  assert.throws(
+    () => lobbyHelloMessage('Ana', {}, { mode: 'unknown', room: 1 }),
+    (error) => error.code === 'INVALID_SELECTION',
+  );
+  assert.throws(
+    () => lobbyHelloMessage('Ana', {}, { mode: 'ffa', room: 3 }),
+    (error) => error.code === 'INVALID_SELECTION',
+  );
 });
 
 test('bot configuration messages include the request id used for acknowledgements', () => {

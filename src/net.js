@@ -2,8 +2,23 @@
 // Cliente WebSocket: conexión, protocolo y envío periódico del estado local.
 // ---------------------------------------------------------------------------
 
+import { isLobbyMode, isLobbyRoom } from './lobby-catalog.js';
+
 export function isProtocolMessage(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value) && typeof value.t === 'string';
+}
+
+export function lobbyHelloMessage(name, skin, selection) {
+  if (!selection || !isLobbyMode(selection.mode) || !isLobbyRoom(selection.room)) {
+    const error = new TypeError('invalid-lobby-selection');
+    error.code = 'INVALID_SELECTION';
+    throw error;
+  }
+  return {
+    t: 'hola', pv: 2, name, skin,
+    mode: selection.mode,
+    room: selection.room,
+  };
 }
 
 export class Net {
@@ -11,6 +26,8 @@ export class Net {
     this.ws = null;
     this.id = null;
     this.name = null;
+    this.mode = null;
+    this.room = null;
     this.slots = 10;
     this.connected = false;
     this.spawnSequence = 0;
@@ -20,8 +37,15 @@ export class Net {
 
   on(type, cb) { this.handlers[type] = cb; }
 
-  connect(name, skin) {
+  connect(name, skin, selection) {
     return new Promise((resolve, reject) => {
+      let hello;
+      try {
+        hello = lobbyHelloMessage(name, skin, selection);
+      } catch (error) {
+        reject(error);
+        return;
+      }
       let settled = false;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       let ws;
@@ -35,28 +59,41 @@ export class Net {
       }, 4000);
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ t: 'hola', name, skin }));
+        ws.send(JSON.stringify(hello));
       };
       ws.onmessage = (ev) => {
         let m;
         try { m = JSON.parse(ev.data); } catch { return; }
         if (!isProtocolMessage(m)) return;
         if (m.t === 'hi' && !settled) {
+          if (m.mode !== hello.mode || m.room !== hello.room) {
+            settled = true;
+            clearTimeout(timeout);
+            const error = new Error('room-mismatch');
+            error.code = 'ROOM_MISMATCH';
+            reject(error);
+            ws.close(1008, 'Sala no confirmada');
+            return;
+          }
           settled = true;
           clearTimeout(timeout);
           this.id = m.id;
           this.name = m.name;
+          this.mode = m.mode;
+          this.room = m.room;
           this.slots = m.slots || 10;
           this.acceptSpawn(m.sid);
           this.connected = true;
           resolve(m);
           return;
         }
-        if (m.t === 'full' && !settled) {
+        if ((m.t === 'full' || m.t === 'joinerr') && !settled) {
           settled = true;
           clearTimeout(timeout);
-          const error = new Error('room-full');
-          error.code = 'ROOM_FULL';
+          const error = new Error(m.t === 'full' ? 'room-full' : 'join-error');
+          error.code = m.code || (m.t === 'full' ? 'ROOM_FULL' : 'INVALID_ROOM');
+          error.mode = m.mode;
+          error.room = m.room;
           reject(error);
           ws.close();
           return;

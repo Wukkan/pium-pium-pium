@@ -11,6 +11,14 @@ import {
   DEFAULT_BOT_CONFIG, effectiveBotCount, sanitizeBotConfigUpdate,
 } from '../src/shared/bot-config.js';
 import {
+  LOBBY_MODE_IDS,
+  LOBBY_ROOM_CAPACITY,
+  LOBBY_ROOM_IDS,
+  LOBBY_ROOMS_PER_MODE,
+  LOBBY_TOTAL_ROOMS,
+  lobbyRoomKey,
+} from '../src/lobby-catalog.js';
+import {
   BOT_BODY,
   PLAYER_BODY,
   bodyOverlapsCollider,
@@ -19,7 +27,7 @@ import {
   requireSafeSpawnPoints,
   selectSafeSpawn,
 } from '../src/shared/spawn-safety.js';
-import { ServerBot, setBotMap } from './botai.js';
+import { ServerBot } from './botai.js';
 import * as ranking from './ranking.js';
 
 // ---------------------------------------------------------------------------
@@ -31,7 +39,7 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.4.0';
+const GAME_VERSION = '1.5.0';
 const ZOMBIE_WAVES = 8;
 const MAX_ZOMBIES_PER_WAVE = 4 + 2 * ZOMBIE_WAVES;
 const MIN_ZOMBIE_SPAWNS = MAX_ZOMBIES_PER_WAVE + TOTAL_SLOTS;
@@ -41,6 +49,12 @@ const MOVEMENT_VERTICAL_RATE = 25;
 const MOVEMENT_VERTICAL_CAP = 4;
 const MOVEMENT_INITIAL_HORIZONTAL = 1.5;
 const MOVEMENT_INITIAL_VERTICAL = 1.5;
+
+if (TOTAL_SLOTS !== LOBBY_ROOM_CAPACITY) {
+  throw new Error(`Capacidad incoherente: mapa=${TOTAL_SLOTS}, lobby=${LOBBY_ROOM_CAPACITY}`);
+}
+
+let roomRegistry = new Map();
 
 function isFiniteVectorPayload(value, maxAbs = 10000) {
   return Array.isArray(value) && value.length === 3 &&
@@ -71,6 +85,29 @@ const server = http.createServer((req, res) => {
   if (urlPath === '/salud') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({ ok: true, version: GAME_VERSION }));
+    return;
+  }
+  if (urlPath === '/salas') {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.writeHead(405, { Allow: 'GET, HEAD', 'Cache-Control': 'no-store' });
+      res.end('método no permitido');
+      return;
+    }
+    const rooms = [...roomRegistry.values()].map((room) => room.summary());
+    const body = JSON.stringify({
+      version: GAME_VERSION,
+      roomsPerMode: LOBBY_ROOMS_PER_MODE,
+      capacity: LOBBY_ROOM_CAPACITY,
+      totalRooms: LOBBY_TOTAL_ROOMS,
+      rooms,
+    });
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    res.end(req.method === 'HEAD' ? undefined : body);
     return;
   }
   if (urlPath === '/ranking') {
@@ -123,7 +160,8 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
-// --- estado de la partida ---
+function createRoomEngine(roomMode, roomNumber) {
+// --- estado aislado de esta sala ---
 const colliders = [];
 const crates = new Map(); // id -> {hp, collider, alive, respawnAt}
 let mapData = null;
@@ -185,7 +223,6 @@ function loadMap(mapId) {
   botSpawnPoints = nextBotSpawns;
   zombieSpawnPoints = nextZombieSpawns;
   playBounds = nextPlayBounds;
-  setBotMap(mapData);
   crates.clear();
   for (const c of colliders) {
     if (c.crate) crates.set(c.crate, { hp: 80, collider: c, alive: true, respawnAt: 0 });
@@ -206,25 +243,22 @@ function spawnKit(pos) {
 }
 
 // --- modos de partida ---
-const MODES = ['ffa', 'teams', 'gun', 'zombies'];
 const MODE_NAMES = { ffa: 'TODOS CONTRA TODOS', teams: 'EQUIPOS', gun: 'BÚSQUEDA DEL ARMA', zombies: 'ZOMBIS' };
 const GUN_LADDER = ['pistol', 'shotgun', 'smg', 'ar', 'sniper'];
 const TEAM_COLORS = { r: 0xd84a3a, b: 0x3a6ad8 };
 const MATCH_TIME = 300;   // 5 minutos
 const KILL_LIMIT = 30;    // ffa y equipos
 const PODIUM_STAGE_TIME = 15;
-const PODIUM_TIME = PODIUM_STAGE_TIME * 2;
 
 const match = {
   roundId: 1,
-  mode: 'ffa',
+  mode: roomMode,
   map: 'arena',
   state: 'playing', // playing | podium
   endAt: Date.now() / 1000 + MATCH_TIME,
   podiumEndAt: 0,
   podiumStageEndAt: 0,
-  podiumStage: 'mode',
-  votes: new Map(),           // playerId -> modo votado
+  podiumStage: 'map',
   mapVotes: new Map(),        // playerId -> mapa votado
   teamScores: { r: 0, b: 0 },
   wave: 0,
@@ -253,7 +287,7 @@ function botConfigMsg(reason = null, requestId = null) {
 
 function matchMsg() {
   return {
-    t: 'match', mode: match.mode, map: match.map, st: match.state,
+    t: 'match', mode: roomMode, room: roomNumber, map: match.map, st: match.state,
     rid: match.roundId,
     tl: Math.max(0, Math.round((match.state === 'playing' ? match.endAt : match.podiumStageEndAt) - now())),
     ps: match.podiumStage,
@@ -273,18 +307,16 @@ function assignTeam() {
   return r <= b ? 'r' : 'b';
 }
 
-function startMatch(mode, mapId = match.map) {
+function startMatch(mapId = match.map) {
   match.roundId++;
-  match.mode = mode;
   match.state = 'playing';
-  match.podiumStage = 'mode';
+  match.podiumStage = 'map';
   match.podiumStageEndAt = 0;
   match.endAt = now() + MATCH_TIME;
-  match.votes = new Map();
   match.mapVotes = new Map();
   match.teamScores = { r: 0, b: 0 };
   match.wave = 0;
-  match.waveBreakAt = mode === 'zombies' ? now() + 5 : 0;
+  match.waveBreakAt = roomMode === 'zombies' ? now() + 5 : 0;
   bots.length = 0;
   kits.length = 0;
   if (mapId !== match.map) {
@@ -305,14 +337,14 @@ function startMatch(mode, mapId = match.map) {
   }
   for (const p of players.values()) {
     p.kills = 0; p.deaths = 0; p.curStreak = 0; p.gunIdx = 0;
-    p.team = mode === 'teams' ? assignTeam() : null;
+    p.team = roomMode === 'teams' ? assignTeam() : null;
     spawnPlayer(p);
   }
   rebalanceBots();
   broadcast(matchMsg());
   broadcast(botConfigMsg());
-  broadcast({ t: 'aviso', txt: `▶ Nuevo modo: ${MODE_NAMES[mode]}` });
-  console.log(`modo: ${mode}`);
+  broadcast({ t: 'aviso', txt: `▶ Nueva ronda: ${MODE_NAMES[roomMode]}` });
+  console.log(`[${roomMode}:${roomNumber}] nueva ronda en ${match.map}`);
 }
 
 function podiumRows() {
@@ -327,8 +359,8 @@ function podiumRows() {
 function endMatch(reasonTxt) {
   if (match.state !== 'playing') return;
   match.state = 'podium';
-  match.podiumEndAt = now() + PODIUM_TIME;
-  match.podiumStage = 'mode';
+  match.podiumEndAt = now() + PODIUM_STAGE_TIME;
+  match.podiumStage = 'map';
   match.podiumStageEndAt = now() + PODIUM_STAGE_TIME;
   const rows = podiumRows();
   let winner = rows.length ? rows[0].n : '—';
@@ -339,19 +371,10 @@ function endMatch(reasonTxt) {
   }
   broadcast({
     t: 'podium', winner, txt: reasonTxt || '', rows,
-    ts: match.teamScores, mode: match.mode, secs: PODIUM_STAGE_TIME, stage: match.podiumStage, modes: MODES,
+    ts: match.teamScores, mode: roomMode, room: roomNumber,
+    secs: PODIUM_STAGE_TIME, stage: 'map',
     maps: Object.keys(MAPS), map: match.map,
   });
-}
-
-function nextMode() {
-  const tally = {};
-  for (const m of match.votes.values()) tally[m] = (tally[m] || 0) + 1;
-  let best = null, bestN = 0;
-  for (const m of MODES) {
-    if ((tally[m] || 0) > bestN) { best = m; bestN = tally[m]; }
-  }
-  return best || MODES[(MODES.indexOf(match.mode) + 1) % MODES.length];
 }
 
 function nextMap() {
@@ -388,13 +411,7 @@ function spawnWave(n) {
 
 function modeTick(t) {
   if (match.state === 'podium') {
-    if (t >= match.podiumStageEndAt && match.podiumStage === 'mode') {
-      match.podiumStage = 'map';
-      match.podiumStageEndAt = t + PODIUM_STAGE_TIME;
-      broadcast({ t: 'podiumStage', stage: 'map', secs: PODIUM_STAGE_TIME, map: match.map });
-      return;
-    }
-    if (t >= match.podiumStageEndAt && match.podiumStage === 'map') startMatch(nextMode(), nextMap());
+    if (t >= match.podiumStageEndAt) startMatch(nextMap());
     return;
   }
   // reaparición de cajas destruidas (45 s)
@@ -675,22 +692,37 @@ function damagePlayer(victim, dmg, sourceName, isHead, killerPlayer = null, weap
   return false;
 }
 
-wss.on('connection', (ws) => {
+function attach(ws, hello) {
   const id = nextId++;
   let me = null;
   const helloTimeout = setTimeout(() => {
     if (!me && ws.readyState === 1) ws.close(1008, 'Saludo requerido');
   }, 5000);
 
-  ws.on('message', (raw) => {
+  const handleMessage = (raw) => {
     let m;
-    try { m = JSON.parse(raw); } catch { return; }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && !Buffer.isBuffer(raw)) {
+      m = raw;
+    } else {
+      try { m = JSON.parse(raw); } catch { return; }
+    }
     if (!m || typeof m !== 'object' || Array.isArray(m)) return;
 
     if (m.t === 'hola' && !me) {
-      if (players.size >= TOTAL_SLOTS) {
+      if (m.mode !== roomMode || m.room !== roomNumber) {
         clearTimeout(helloTimeout);
-        if (ws.readyState === 1) ws.send(JSON.stringify({ t: 'full', slots: TOTAL_SLOTS }));
+        if (ws.readyState === 1) ws.send(JSON.stringify({
+          t: 'joinerr', code: 'ROOM_MISMATCH', mode: roomMode, room: roomNumber,
+        }));
+        ws.close(1008, 'Selección de sala inválida');
+        return;
+      }
+      if (players.size >= LOBBY_ROOM_CAPACITY) {
+        clearTimeout(helloTimeout);
+        if (ws.readyState === 1) ws.send(JSON.stringify({
+          t: 'full', code: 'ROOM_FULL', mode: roomMode, room: roomNumber,
+          slots: LOBBY_ROOM_CAPACITY, players: players.size,
+        }));
         ws.close(1013, 'Sala llena');
         return;
       }
@@ -719,7 +751,8 @@ wss.on('connection', (ws) => {
       });
       rebalanceBots();
       send(me, {
-        t: 'hi', id, name: me.name, spawn: [sp.x, sp.y, sp.z], slots: TOTAL_SLOTS,
+        t: 'hi', id, name: me.name, spawn: [sp.x, sp.y, sp.z], slots: LOBBY_ROOM_CAPACITY,
+        mode: roomMode, room: roomNumber,
         sid: me.spawnSeq, rid: match.roundId, map: match.map,
         bc: botConfigData(),
       });
@@ -727,7 +760,7 @@ wss.on('connection', (ws) => {
       broadcast(botConfigMsg());
       if (match.mode === 'gun') send(me, { t: 'gun', gi: 0 });
       broadcast({ t: 'aviso', txt: `${me.name} entró a la partida` }, id);
-      console.log(`+ ${me.name} (${players.size} jugadores, ${bots.length} bots)`);
+      console.log(`[${roomMode}:${roomNumber}] + ${me.name} (${players.size} jugadores, ${bots.length} bots)`);
       return;
     }
     if (!me) return;
@@ -816,12 +849,6 @@ wss.on('connection', (ws) => {
         rebalanceBots();
         broadcast({ t: 'aviso', txt: `${me.name} → equipo ${me.team === 'r' ? 'ROJO' : 'AZUL'}` });
       }
-    } else if (m.t === 'modo') {
-      // cambio de modo a mano (cualquier jugador; partidas entre amigos)
-      if (MODES.includes(m.m) && m.m !== match.mode) {
-        broadcast({ t: 'aviso', txt: `${me.name} cambió el modo` });
-        startMatch(m.m);
-      }
     } else if (m.t === 'botcfg') {
       const t = now();
       const requestId = Number.isSafeInteger(m.rid) && m.rid >= 0 ? m.rid : null;
@@ -852,33 +879,34 @@ wss.on('connection', (ws) => {
       broadcast({ t: 'aviso', txt: `${me.name}: ${description}` });
     } else if (m.t === 'vote') {
       if (match.state === 'podium') {
-        if (match.podiumStage === 'mode' && MODES.includes(m.m)) match.votes.set(me.id, m.m);
-        if (match.podiumStage === 'map' && MAPS[m.map]) match.mapVotes.set(me.id, m.map);
-        const tally = {};
-        for (const v of match.votes.values()) tally[v] = (tally[v] || 0) + 1;
+        if (MAPS[m.map]) match.mapVotes.set(me.id, m.map);
         const mapTally = {};
         for (const v of match.mapVotes.values()) mapTally[v] = (mapTally[v] || 0) + 1;
-        broadcast({ t: 'votes', stage: match.podiumStage, tally, mapTally });
+        broadcast({ t: 'votes', stage: 'map', tally: {}, mapTally });
       }
     }
-  });
+  };
+  ws.on('message', handleMessage);
+  handleMessage(hello);
 
   ws.on('close', () => {
     clearTimeout(helloTimeout);
     if (me) {
       players.delete(me.id);
       broadcast({ t: 'aviso', txt: `${me.name} salió de la partida` });
-      console.log(`- ${me.name} (${players.size} jugadores)`);
+      console.log(`[${roomMode}:${roomNumber}] - ${me.name} (${players.size} jugadores)`);
       rebalanceBots();
       broadcast(botConfigMsg());
     }
   });
   ws.on('error', () => {});
-});
+  return me !== null;
+}
 
 // --- bucle de simulación ---
 const botCtx = {
   colliders,
+  get waypoints() { return mapData?.waypoints || []; },
   get players() { return [...players.values()]; },
   get bots() { return bots; },
   onShoot(bot, from, to) {
@@ -899,11 +927,29 @@ const botCtx = {
   },
 };
 
-let last = now();
-setInterval(() => {
-  const t = now();
-  const dt = Math.min(0.1, t - last);
-  last = t;
+function pauseRoomTimers(dt) {
+  if (match.state === 'playing') match.endAt += dt;
+  else {
+    match.podiumEndAt += dt;
+    match.podiumStageEndAt += dt;
+  }
+  if (match.waveBreakAt > 0) match.waveBreakAt += dt;
+  for (const crate of crates.values()) {
+    if (!crate.alive && crate.respawnAt > 0) crate.respawnAt += dt;
+  }
+  for (const kit of kits) kit.expireAt += dt;
+  for (const bot of bots) {
+    if (bot.dead && bot.respawnAt > 0) bot.respawnAt += dt;
+  }
+}
+
+function tick(t, dt, elapsed = dt) {
+  // Una sala vacía queda totalmente congelada: ni el reloj de ronda/podio ni
+  // cajas, kits, oleadas o respawns consumen tiempo hasta que vuelva alguien.
+  if (players.size === 0) {
+    pauseRoomTimers(elapsed);
+    return;
+  }
 
   modeTick(t);
   if (match.state === 'playing') {
@@ -971,8 +1017,6 @@ setInterval(() => {
     if (taken) kits.splice(i, 1);
   }
 
-  if (players.size === 0) return; // nadie conectado: no hace falta emitir
-
   const snap = {
     t: 'snap',
     m: matchMsg(),
@@ -998,6 +1042,97 @@ setInterval(() => {
     kits: kits.map((k) => ({ id: k.id, k: k.k, a: k.a, p: [+k.x.toFixed(2), +k.y.toFixed(2), +k.z.toFixed(2)] })),
   };
   broadcast(snap);
+}
+
+function summary() {
+  const humanCount = players.size;
+  const available = Math.max(0, LOBBY_ROOM_CAPACITY - humanCount);
+  const deadline = match.state === 'playing' ? match.endAt : match.podiumStageEndAt;
+  return {
+    key: lobbyRoomKey(roomMode, roomNumber),
+    mode: roomMode,
+    room: roomNumber,
+    players: humanCount,
+    capacity: LOBBY_ROOM_CAPACITY,
+    available,
+    full: available === 0,
+    joinable: available > 0,
+    bots: bots.length,
+    map: match.map,
+    state: match.state,
+    timeLeft: Math.max(0, Math.round(deadline - now())),
+  };
+}
+
+return {
+  mode: roomMode,
+  room: roomNumber,
+  key: lobbyRoomKey(roomMode, roomNumber),
+  attach,
+  tick,
+  summary,
+};
+}
+
+roomRegistry = new Map();
+for (const mode of LOBBY_MODE_IDS) {
+  for (const roomNumber of LOBBY_ROOM_IDS) {
+    const engine = createRoomEngine(mode, roomNumber);
+    roomRegistry.set(engine.key, engine);
+  }
+}
+
+function rejectJoin(ws, code, details = {}) {
+  if (ws.readyState === 1) ws.send(JSON.stringify({ t: 'joinerr', code, ...details }));
+  ws.close(1008, code);
+}
+
+wss.on('connection', (ws) => {
+  let routed = false;
+  const helloTimeout = setTimeout(() => {
+    if (!routed && ws.readyState === 1) rejectJoin(ws, 'HELLO_REQUIRED');
+  }, 5000);
+
+  const routeHello = (raw) => {
+    if (routed) return;
+    let message;
+    try { message = JSON.parse(raw); } catch {
+      clearTimeout(helloTimeout);
+      rejectJoin(ws, 'INVALID_HELLO');
+      return;
+    }
+    const validMode = typeof message?.mode === 'string' && LOBBY_MODE_IDS.includes(message.mode);
+    const validRoom = Number.isSafeInteger(message?.room) && LOBBY_ROOM_IDS.includes(message.room);
+    if (!message || typeof message !== 'object' || Array.isArray(message) ||
+        message.t !== 'hola' || !validMode || !validRoom) {
+      clearTimeout(helloTimeout);
+      rejectJoin(ws, 'INVALID_SELECTION');
+      return;
+    }
+    const room = roomRegistry.get(lobbyRoomKey(message.mode, message.room));
+    if (!room) {
+      clearTimeout(helloTimeout);
+      rejectJoin(ws, 'ROOM_NOT_FOUND', { mode: message.mode, room: message.room });
+      return;
+    }
+    routed = true;
+    clearTimeout(helloTimeout);
+    ws.off('message', routeHello);
+    room.attach(ws, message);
+  };
+
+  ws.on('message', routeHello);
+  ws.on('close', () => clearTimeout(helloTimeout));
+  ws.on('error', () => clearTimeout(helloTimeout));
+});
+
+let last = Date.now() / 1000;
+setInterval(() => {
+  const time = Date.now() / 1000;
+  const elapsed = Math.max(0, time - last);
+  const dt = Math.min(0.1, elapsed);
+  last = time;
+  for (const room of roomRegistry.values()) room.tick(time, dt, elapsed);
 }, TICK * 1000);
 
 server.listen(PORT, () => {

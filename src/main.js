@@ -36,6 +36,12 @@ import {
   LiveWeaponPreviewManager,
   WeaponPreviewManager,
 } from './weapon-previews.js';
+import {
+  lobbyCatalogState,
+  lobbyJoinFailureAction,
+  lobbySelectionState,
+  sanitizeLobbySelection,
+} from './lobby-catalog.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — shooter multijugador original para navegador.
@@ -210,13 +216,12 @@ weapons.onCrateHit = (id, dmg, kind) => {
 };
 
 // --- estado de la partida (modo, podio, equipo) ---
-const MODES = ['ffa', 'teams', 'gun', 'zombies'];
 let matchInfo = { mode: 'ffa', st: 'playing', tl: 0, ts: { r: 0, b: 0 }, wv: 0, zl: 0 };
 let myGunIdx = 0;
 let podiumOpen = false;
 let teamPickerOpen = false;
 let podiumTimer = null;
-let podiumStage = 'mode';
+let podiumStage = 'map';
 
 function startPodiumCountdown(secs = 15) {
   let remaining = Math.max(0, Number(secs) || 0);
@@ -516,9 +521,8 @@ function renderMenuControlSummary() {
   }
   const podiumHint = document.getElementById('podium-key-hint');
   if (podiumHint) {
-    const modeKeys = Array.from({ length: 4 }, (_, index) => bindingLabel(`slot${index + 1}`)).join(' / ');
-    const mapKeys = [bindingLabel('slot5'), bindingLabel('slot6')].join(' / ');
-    podiumHint.textContent = `${modeKeys} MODO · ${mapKeys} MAPA`;
+    const mapKeys = [bindingLabel('slot1'), bindingLabel('slot2')].join(' / ');
+    podiumHint.textContent = `${mapKeys} · VOTAR MAPA`;
   }
 }
 
@@ -1272,6 +1276,158 @@ const remoteAudioForward = new THREE.Vector3();
 // --- interfaz del menú ---
 const playBtn = document.getElementById('play-btn');
 const nameInput = document.getElementById('name-input');
+const lobbyModeGrid = document.getElementById('lobby-mode-grid');
+const lobbyRoomGrid = document.getElementById('lobby-room-grid');
+const LOBBY_SELECTION_STORAGE_KEY = 'pium_lobby_selection_v1';
+let lobbySelection = sanitizeLobbySelection(null);
+let lobbyRooms = [];
+let lobbyCatalogReady = false;
+let lobbyRefreshSerial = 0;
+let connecting = false;
+
+try {
+  lobbySelection = sanitizeLobbySelection(JSON.parse(safeStorageGet(LOBBY_SELECTION_STORAGE_KEY)));
+} catch { /* se conserva la selección segura por defecto */ }
+
+function saveLobbySelection() {
+  safeStorageSet(LOBBY_SELECTION_STORAGE_KEY, JSON.stringify(lobbySelection));
+}
+
+function syncJoinedRoomOccupancy(rawHumans) {
+  if (!net.mode || !Number.isFinite(Number(rawHumans))) return false;
+  const players = Math.min(net.slots || TOTAL_SLOTS, Math.max(0, Math.trunc(Number(rawHumans))));
+  const index = lobbyRooms.findIndex((entry) =>
+    entry?.mode === net.mode && entry?.room === net.room);
+  if (index >= 0 && lobbyRooms[index].players === players) return false;
+  if (index < 0) {
+    lobbyRooms = [...lobbyRooms, { mode: net.mode, room: net.room, players }];
+  } else {
+    lobbyRooms = lobbyRooms.map((entry, entryIndex) =>
+      entryIndex === index ? { ...entry, players } : entry);
+  }
+  return true;
+}
+
+function renderLobbySelector() {
+  const catalog = lobbyCatalogState({ selection: lobbySelection, occupancy: lobbyRooms });
+  for (const mode of catalog.modes) {
+    const button = lobbyModeGrid?.querySelector(`[data-lobby-mode="${mode.id}"]`);
+    if (!button) continue;
+    button.classList.toggle('selected', mode.selected);
+    button.dataset.selected = mode.selected ? 'true' : 'false';
+    button.setAttribute('aria-pressed', mode.selected ? 'true' : 'false');
+    button.setAttribute('aria-label', `${mode.label}, ${mode.players} de ${mode.capacity} jugadores${mode.selected ? ', seleccionado' : ''}`);
+    button.setAttribute('aria-disabled', joined ? 'true' : 'false');
+  }
+
+  for (const room of catalog.modes.find(({ id }) => id === lobbySelection.mode)?.rooms || []) {
+    const button = lobbyRoomGrid?.querySelector(`[data-lobby-room="${room.room}"]`);
+    if (!button) continue;
+    const snapshot = lobbyRooms.find((entry) =>
+      entry?.mode === room.mode && entry?.room === room.room);
+    const mapLabel = snapshot && MAPS[snapshot.map] ? MAPS[snapshot.map].toUpperCase() : 'MAPA ACTIVO';
+    const roomStatus = !lobbyCatalogReady
+      ? 'SIN DATOS DEL SERVIDOR'
+      : room.full ? 'COMPLETA' : `${room.statusLabel} · ${mapLabel}`;
+    button.classList.toggle('selected', room.selected);
+    button.classList.toggle('full', room.full);
+    button.classList.toggle('live', lobbyCatalogReady && !room.full);
+    button.dataset.live = lobbyCatalogReady && !room.full ? 'true' : 'false';
+    button.dataset.full = room.full ? 'true' : 'false';
+    button.dataset.selected = room.selected ? 'true' : 'false';
+    button.dataset.occupancy = String(room.players);
+    button.dataset.capacity = String(room.capacity);
+    button.setAttribute('aria-pressed', room.selected ? 'true' : 'false');
+    button.setAttribute('aria-disabled', room.full || joined ? 'true' : 'false');
+    button.setAttribute('aria-label', `${room.ariaLabel}${room.selected ? ', seleccionada' : ''}`);
+    const name = button.querySelector('.lobby-room-name strong');
+    const stateLabel = button.querySelector('.lobby-room-name small');
+    const capacity = button.querySelector('.lobby-room-capacity b');
+    const track = button.querySelector('.lobby-occupancy-track i');
+    if (name) name.textContent = room.label;
+    if (stateLabel) stateLabel.textContent = roomStatus;
+    if (capacity) capacity.textContent = room.occupancyLabel;
+    if (track) track.style.setProperty('--occupancy', `${room.players / room.capacity * 100}%`);
+  }
+
+  const selected = catalog.selection;
+  playBtn.disabled = connecting || (!joined && !botsLocal && serverAvailable && selected.full);
+  const label = connecting
+    ? 'CONECTANDO...'
+    : joined
+      ? 'VOLVER A LA PARTIDA'
+      : botsLocal
+        ? 'VOLVER A ENTRENAMIENTO'
+        : serverAvailable && selected.full
+          ? 'SALA LLENA'
+          : serverAvailable
+            ? `ENTRAR SALA ${selected.room}`
+            : 'JUGAR LOCAL';
+  playBtn.innerHTML = `${label} <span aria-hidden="true">→</span>`;
+  renderRoomSummary();
+}
+
+function chooseLobbyMode(mode) {
+  if (joined) return;
+  const next = sanitizeLobbySelection({ mode, room: lobbySelection.room }, lobbySelection);
+  const modeState = lobbyCatalogState({ selection: next, occupancy: lobbyRooms })
+    .modes.find(({ id }) => id === next.mode);
+  if (modeState?.rooms[next.room - 1]?.full) {
+    const available = modeState.rooms.find(({ joinable }) => joinable);
+    if (available) next.room = available.room;
+  }
+  lobbySelection = next;
+  saveLobbySelection();
+  renderLobbySelector();
+}
+
+function chooseLobbyRoom(room) {
+  if (joined) return;
+  const next = sanitizeLobbySelection({ mode: lobbySelection.mode, room }, lobbySelection);
+  const selected = lobbySelectionState(next, lobbyRooms);
+  if (selected.full) {
+    hud.info(`${selected.roomLabel} está llena · elige la otra sala`);
+    return;
+  }
+  lobbySelection = next;
+  saveLobbySelection();
+  renderLobbySelector();
+}
+
+async function refreshLobbyRooms({ announce = false } = {}) {
+  const requestId = ++lobbyRefreshSerial;
+  try {
+    const response = await fetch('/salas', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`lobby-${response.status}`);
+    const data = await response.json();
+    if (!data || !Array.isArray(data.rooms)) throw new Error('lobby-invalid');
+    if (requestId !== lobbyRefreshSerial) return false;
+    lobbyRooms = data.rooms;
+    lobbyCatalogReady = true;
+    serverAvailable = true;
+    if (!net.connected) hud.setNetStatus('🟢 Servidor online — selecciona modo, sala y JUGAR', true);
+    renderLobbySelector();
+    return true;
+  } catch {
+    if (requestId !== lobbyRefreshSerial) return false;
+    lobbyRooms = [];
+    lobbyCatalogReady = false;
+    serverAvailable = false;
+    if (!net.connected) hud.setNetStatus('🔴 Sin servidor — entrenamiento local disponible', false);
+    if (announce) hud.info('No se pudo actualizar la lista de salas');
+    renderLobbySelector();
+    return false;
+  }
+}
+
+lobbyModeGrid?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-lobby-mode]');
+  if (button) chooseLobbyMode(button.dataset.lobbyMode);
+});
+lobbyRoomGrid?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-lobby-room]');
+  if (button) chooseLobbyRoom(Number(button.dataset.lobbyRoom));
+});
 
 nameInput.value = safeStorageGet('pium_name') || '';
 document.querySelectorAll('[data-menu-screen]').forEach((button) => {
@@ -1290,17 +1446,14 @@ nameInput.addEventListener('input', () => {
 bindSettings();
 applySettings();
 
-// sondeo rápido: ¿hay servidor?
-fetch('/salud').then((r) => {
-  serverAvailable = r.ok;
-  if (r.ok) hud.setNetStatus('🟢 Servidor online — pon tu nombre y JUGAR', true);
-  else hud.setNetStatus('🔴 Sin servidor — jugarás contra bots locales', false);
-  renderRoomSummary();
-}).catch(() => {
-  serverAvailable = false;
-  hud.setNetStatus('🔴 Sin servidor — jugarás contra bots locales', false);
-  renderRoomSummary();
-});
+renderLobbySelector();
+void refreshLobbyRooms();
+const lobbyPollTimer = setInterval(() => {
+  if (!joined && state === 'menu' && !connecting) void refreshLobbyRooms();
+}, 3000);
+addEventListener('pagehide', (event) => {
+  if (!event.persisted) clearInterval(lobbyPollTimer);
+}, { once: true });
 
 // --- cableado modo OFFLINE (bots locales) ---
 function localBotStatus(count) {
@@ -1397,13 +1550,15 @@ function setupOffline() {
     }, 2600);
   };
   hud.setNetStatus(localBotStatus(botsLocal.bots.length), false);
-  renderRoomSummary();
+  renderLobbySelector();
 }
 
 // --- cableado modo ONLINE ---
 function setupOnline() {
   online = true;
   serverAvailable = true;
+  lobbySelection = sanitizeLobbySelection({ mode: net.mode, room: net.room }, lobbySelection);
+  saveLobbySelection();
   player.netMode = true;
   remotes = new Remotes(scene);
 
@@ -1454,7 +1609,7 @@ function setupOnline() {
       const returningFromPodium = podiumOpen;
       if (botPanelOpen && m.mode === 'teams') setBotPanel(false, false);
       podiumOpen = false;
-      podiumStage = 'mode';
+      podiumStage = 'map';
       hud.hidePodium();
       clearInterval(podiumTimer);
       resetStreak();
@@ -1477,7 +1632,7 @@ function setupOnline() {
     setChat(false);
     setTeamPicker(false);
     podiumOpen = true;
-    podiumStage = m.stage || 'mode';
+    podiumStage = m.stage || 'map';
     refreshWeaponInputBlock();
     if (document.pointerLockElement) document.exitPointerLock();
     hud.showPodium(m);
@@ -1489,7 +1644,7 @@ function setupOnline() {
 
   net.on('podiumStage', (m) => {
     if (!podiumOpen) return;
-    podiumStage = m.stage || 'mode';
+    podiumStage = m.stage || 'map';
     hud.setPodiumStage(podiumStage, m.secs || 15);
     startPodiumCountdown(m.secs || 15);
   });
@@ -1501,12 +1656,11 @@ function setupOnline() {
     const group = button.parentElement;
     group.querySelectorAll('.vote-option').forEach((option) => option.classList.remove('selected'));
     button.classList.add('selected');
-    if (podiumStage === 'mode') net.sendVote(button.dataset.vote);
     if (podiumStage === 'map') net.sendMapVote(button.dataset.vote);
   };
 
   net.on('votes', (m) => hud.setPodiumVotes(
-    podiumStage === 'mode' ? (m.tally || {}) : {},
+    {},
     podiumStage === 'map' ? (m.mapTally || {}) : {},
   ));
 
@@ -1641,26 +1795,43 @@ function setupOnline() {
     renderRoomSummary();
   });
 
-  renderRoomSummary();
+  renderLobbySelector();
 }
 
 // --- entrar al juego ---
-let connecting = false;
-
 async function joinAndPlay() {
   cancelBindingCapture('Asignación cancelada al iniciar la partida.');
   audio.ensure();
   if (joined || botsLocal) { tryLock(); return; }
   if (connecting) return;
+  const initialSelection = lobbySelectionState(lobbySelection, lobbyRooms);
+  if (serverAvailable && initialSelection.full) {
+    hud.info(`${initialSelection.roomLabel} está llena · elige la otra sala`);
+    void refreshLobbyRooms();
+    return;
+  }
   connecting = true;
+  renderLobbySelector();
   // La activación del usuario puede caducar mientras espera la conexión.
   // Pedir el pointer lock antes del await permite entrar con un solo clic.
   tryLock();
-  playBtn.textContent = 'CONECTANDO...';
   const name = nameInput.value.trim();
   if (name) safeStorageSet('pium_name', name);
   try {
-    const hi = await net.connect(name, { h: skin.hat, c: skin.color });
+    if (serverAvailable) {
+      await refreshLobbyRooms();
+      const currentSelection = lobbySelectionState(lobbySelection, lobbyRooms);
+      if (currentSelection.full) {
+        const error = new Error('room-full');
+        error.code = 'ROOM_FULL';
+        throw error;
+      }
+    }
+    const hi = await net.connect(
+      name,
+      { h: skin.hat, c: skin.color },
+      { ...lobbySelection },
+    );
     setupOnline();
     joined = true;
     if (hi.bc) receiveBotConfig(hi.bc, true);
@@ -1669,16 +1840,28 @@ async function joinAndPlay() {
     if (hi.map) loadWorldMap(hi.map);
     player.spawn(safePlayerSpawn(new THREE.Vector3(hi.spawn[0], hi.spawn[1], hi.spawn[2])));
   } catch (error) {
-    setupOffline();
-    player.spawn(safePlayerSpawn(null, botsLocal?.bots || []));
-    if (error?.code === 'ROOM_FULL') hud.info('Sala online llena · modo local activado');
+    if (lobbyJoinFailureAction(error?.code, { serverAvailable }) === 'lobby') {
+      if (document.pointerLockElement) document.exitPointerLock();
+      state = 'menu';
+      hud.showMenu(true);
+      hud.showHud(false);
+      hud.info(error?.code === 'ROOM_FULL'
+        ? 'Sala online llena · elige la otra sala'
+        : 'No se pudo confirmar esa sala · vuelve a intentarlo');
+      await refreshLobbyRooms({ announce: error?.code !== 'ROOM_FULL' });
+    } else {
+      setupOffline();
+      player.spawn(safePlayerSpawn(null, botsLocal?.bots || []));
+    }
   }
   connecting = false;
-  playBtn.textContent = 'JUGAR';
-  hud.updateHealth(player.health, player.maxHealth);
-  hud.updateAmmo(weapons);
-  hud.updateScore(kills, deaths);
-  tryLock();
+  renderLobbySelector();
+  if (joined || botsLocal) {
+    hud.updateHealth(player.health, player.maxHealth);
+    hud.updateAmmo(weapons);
+    hud.updateScore(kills, deaths);
+    tryLock();
+  }
 }
 
 function tryLock() {
@@ -1786,21 +1969,29 @@ function renderRoomSummary() {
   const title = document.getElementById('menu-room-state');
   const detail = document.getElementById('menu-room-detail');
   const status = document.getElementById('menu-room-status');
-  const modes = { ffa: 'TODOS CONTRA TODOS', teams: 'EQUIPOS', gun: 'BÚSQUEDA DEL ARMA', zombies: 'ZOMBIS' };
-  if (title) title.textContent = modes[matchInfo.mode] || 'LISTA PARA COMBATIR';
+  const selected = lobbySelectionState(lobbySelection, lobbyRooms);
+  if (net.connected) {
+    if (title) title.textContent = `${selected.modeLabel} · SALA ${net.room}`;
+    if (detail) {
+      detail.textContent = botControl.locked
+        ? 'Las oleadas controlan automáticamente a sus enemigos.'
+        : botControl.enabled
+          ? `${botControl.actual} bot${botControl.actual === 1 ? '' : 's'} activo${botControl.actual === 1 ? '' : 's'} · objetivo configurado: ${botControl.count}.`
+          : 'Bots desactivados para esta sala.';
+    }
+    if (status) status.textContent = `ONLINE · ${botControl.humans}/${botControl.slots} JUGADORES`;
+    return;
+  }
+  if (title) title.textContent = selected.title;
   if (detail) {
-    detail.textContent = botControl.locked
-      ? 'Las oleadas controlan automáticamente a sus enemigos.'
-      : botControl.enabled
-        ? `${botControl.actual} bot${botControl.actual === 1 ? '' : 's'} activo${botControl.actual === 1 ? '' : 's'} · objetivo configurado: ${botControl.count}.`
-        : 'Bots desactivados para la sala actual.';
+    detail.textContent = lobbyCatalogReady
+      ? `${selected.detail} · ${selected.availableSlots} plaza${selected.availableSlots === 1 ? '' : 's'} libre${selected.availableSlots === 1 ? '' : 's'}.`
+      : 'Elige tu modo y sala; si el servidor no responde podrás entrenar localmente.';
   }
   if (status) {
-    status.textContent = net.connected
-      ? 'SERVIDOR ONLINE'
-      : serverAvailable
-        ? 'SERVIDOR DISPONIBLE'
-        : 'ENTRENAMIENTO LOCAL';
+    status.textContent = serverAvailable
+      ? selected.full ? 'SALA COMPLETA' : 'SALA DISPONIBLE'
+      : 'ENTRENAMIENTO LOCAL';
   }
 }
 
@@ -1827,7 +2018,8 @@ function receiveBotConfig(raw, acknowledged = false) {
   const mode = hasExplicitLock ? (raw.locked === true || raw.locked === 1 ? 'zombies' : 'ffa') : matchInfo.mode;
   botControl = botPanelState(raw, mode);
   if (acknowledged) botDraftDirty = false;
-  renderRoomSummary();
+  if (online && syncJoinedRoomOccupancy(botControl.humans)) renderLobbySelector();
+  else renderRoomSummary();
   if (botPanelOpen) renderBotPanel(acknowledged || !botDraftDirty);
 }
 
@@ -2107,8 +2299,7 @@ document.getElementById('buy-close')?.addEventListener('click', () => setBuyMenu
 
 function handleMatchOverlaySlot(index) {
   if (podiumOpen && online) {
-    if (podiumStage === 'mode' && index < 4) net.sendVote(MODES[index]);
-    else if (podiumStage === 'map' && index >= 4) net.sendMapVote(index === 4 ? 'arena' : 'ciudad');
+    if (podiumStage === 'map' && index < 2) net.sendMapVote(index === 0 ? 'arena' : 'ciudad');
     else return false;
     return true;
   }

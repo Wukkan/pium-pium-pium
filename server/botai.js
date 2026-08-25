@@ -1,10 +1,5 @@
 import { moveBody, segmentBlocked } from '../src/shared/physics.js';
-import { buildMap } from '../src/shared/mapdata.js';
 import { BOT_BODY } from '../src/shared/spawn-safety.js';
-
-// mapa activo (el servidor lo cambia al votar mapa)
-let MAP = buildMap('arena');
-export function setBotMap(mapData) { MAP = mapData; }
 
 // ---------------------------------------------------------------------------
 // IA de los bots en el SERVIDOR. Es el mismo comportamiento que tenía el
@@ -57,7 +52,7 @@ export class ServerBot {
   }
 
   spawn() {
-    const sp = this.spawnPicker?.(this) || MAP.botSpawns[0];
+    const sp = this.spawnPicker?.(this);
     if (!sp) return false;
     this.pos = { ...sp };
     this.vel = { x: 0, y: 0, z: 0 };
@@ -100,7 +95,9 @@ export class ServerBot {
     return false;
   }
 
-  // ctx: { colliders, players, bots, onShoot(bot,from,to), onHitTarget(bot,kind,target,dmg) }
+  // ctx pertenece a una única sala. El mapa/waypoints nunca viven en estado
+  // global: dos salas pueden simular mapas distintos sin contaminar su IA.
+  // ctx: { colliders, waypoints, players, bots, onShoot, onHitTarget }
   update(dt, ctx) {
     const t = now();
 
@@ -173,7 +170,10 @@ export class ServerBot {
     } else {
       if (!this.waypoint || t > this.repathAt ||
           (this.pos.x - this.waypoint.x) ** 2 + (this.pos.z - this.waypoint.z) ** 2 < 2.5) {
-        this.waypoint = { ...MAP.waypoints[Math.floor(Math.random() * MAP.waypoints.length)] };
+        const waypoints = Array.isArray(ctx.waypoints) ? ctx.waypoints : [];
+        const nextWaypoint = waypoints[Math.floor(Math.random() * waypoints.length)];
+        if (!nextWaypoint) return;
+        this.waypoint = { ...nextWaypoint };
         this.repathAt = t + 6 + Math.random() * 5;
       }
       const dx = this.waypoint.x - this.pos.x, dz = this.waypoint.z - this.pos.z;

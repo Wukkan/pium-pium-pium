@@ -328,11 +328,11 @@ export function buyMenuCategoryState(active, categories = [
   return categories.map(([id, label]) => ({ id, label, active: id === active }));
 }
 
-export function podiumStageState(stage = 'mode') {
+export function podiumStageState(stage = 'map') {
   if (stage === 'map') {
     return {
       stage: 'map',
-      phase: 'FASE 2 / 2',
+      phase: 'MAPA DE LA SALA',
       title: 'ELIGE EL MAPA',
       voteType: 'map',
     };

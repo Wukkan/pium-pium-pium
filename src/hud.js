@@ -320,15 +320,10 @@ export class HUD {
         wrap.append(button);
       }
     };
-    renderOptions('mode-vote-options', [
-      { key: 1, kind: 'ffa', type: 'mode', label: 'TODOS CONTRA TODOS' },
-      { key: 2, kind: 'teams', type: 'mode', label: 'EQUIPOS' },
-      { key: 3, kind: 'gun', type: 'mode', label: 'BÚSQUEDA DEL ARMA' },
-      { key: 4, kind: 'zombies', type: 'mode', label: 'ZOMBIS' },
-    ]);
+    renderOptions('mode-vote-options', []);
     renderOptions('map-vote-options', [
-      { key: 5, kind: 'arena', type: 'map', label: 'ARENA' },
-      { key: 6, kind: 'ciudad', type: 'map', label: 'CIUDAD' },
+      { key: 1, kind: 'arena', type: 'map', label: 'ARENA' },
+      { key: 2, kind: 'ciudad', type: 'map', label: 'CIUDAD' },
     ]);
     document.getElementById('podium-votes').textContent = '';
   }
@@ -373,7 +368,7 @@ export class HUD {
     document.getElementById('podium-count').textContent = `Siguiente partida en ${secs}s...`;
   }
 
-  setPodiumStage(stage = 'mode', secs = 15) {
+  setPodiumStage(stage = 'map', secs = 15) {
     const state = podiumStageState(stage);
     const podium = document.getElementById('podium');
     podium.dataset.stage = state.stage;
@@ -381,7 +376,7 @@ export class HUD {
     document.getElementById('podium-stage-title').textContent = state.title;
     document.getElementById('podium-stage-help').textContent = state.voteType === 'mode'
       ? 'Selecciona el modo para la siguiente partida.'
-      : 'Modo confirmado. Ahora selecciona el mapa.';
+      : 'El modo de esta sala se mantiene. Selecciona el próximo mapa.';
     document.getElementById('podium-votes').textContent = '';
     this.setPodiumCountdown(secs);
   }
