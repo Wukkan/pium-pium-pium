@@ -33,12 +33,15 @@ export class Net {
     this.spawnSequence = 0;
     this.handlers = {};   // t -> callback(msg)
     this._sendTimer = 0;
+    this._heartbeatTimer = null;
   }
 
   on(type, cb) { this.handlers[type] = cb; }
 
   connect(name, skin, selection) {
     return new Promise((resolve, reject) => {
+      this.stopHeartbeat();
+      this.connected = false;
       let hello;
       try {
         hello = lobbyHelloMessage(name, skin, selection);
@@ -59,9 +62,14 @@ export class Net {
       }, 4000);
 
       ws.onopen = () => {
+        if (this.ws !== ws) {
+          ws.close(1000, 'Conexión reemplazada');
+          return;
+        }
         ws.send(JSON.stringify(hello));
       };
       ws.onmessage = (ev) => {
+        if (this.ws !== ws) return;
         let m;
         try { m = JSON.parse(ev.data); } catch { return; }
         if (!isProtocolMessage(m)) return;
@@ -102,11 +110,14 @@ export class Net {
         if (h) h(m);
       };
       ws.onerror = () => {
+        if (this.ws !== ws) return;
         if (!settled) { settled = true; clearTimeout(timeout); reject(new Error('error')); }
       };
       ws.onclose = () => {
+        if (this.ws !== ws) return;
         const wasConnected = this.connected;
         this.connected = false;
+        this.stopHeartbeat();
         if (!settled) { settled = true; clearTimeout(timeout); reject(new Error('cerrado')); }
         else if (wasConnected && this.handlers._close) this.handlers._close();
       };
@@ -114,6 +125,20 @@ export class Net {
   }
 
   onClose(cb) { this.handlers._close = cb; }
+
+  startHeartbeat(intervalMs = 3000) {
+    this.stopHeartbeat();
+    const delay = Math.max(1000, Math.min(30000, Math.round(Number(intervalMs) || 3000)));
+    this._heartbeatTimer = setInterval(() => {
+      if (this.connected) this.sendPing();
+    }, delay);
+    return this._heartbeatTimer;
+  }
+
+  stopHeartbeat() {
+    if (this._heartbeatTimer !== null) clearInterval(this._heartbeatTimer);
+    this._heartbeatTimer = null;
+  }
 
   acceptSpawn(sequence) {
     if (Number.isSafeInteger(sequence) && sequence >= 0) this.spawnSequence = sequence;

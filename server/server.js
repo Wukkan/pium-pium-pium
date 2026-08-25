@@ -27,6 +27,16 @@ import {
   requireSafeSpawnPoints,
   selectSafeSpawn,
 } from '../src/shared/spawn-safety.js';
+import { segmentBlocked } from '../src/shared/physics.js';
+import {
+  COMBAT_LIMITS,
+  FIREARM_RULES,
+  firearmCrateDamageLimit,
+  firearmDamageLimit,
+  firearmRule,
+  knifeDamageLimit,
+  minimumFireInterval,
+} from '../src/shared/combat-rules.js';
 import { ServerBot } from './botai.js';
 import * as ranking from './ranking.js';
 
@@ -39,7 +49,7 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.6.6';
+const GAME_VERSION = '1.7.0';
 const ZOMBIE_WAVES = 8;
 const MAX_ZOMBIES_PER_WAVE = 4 + 2 * ZOMBIE_WAVES;
 const MIN_ZOMBIE_SPAWNS = MAX_ZOMBIES_PER_WAVE + TOTAL_SLOTS;
@@ -49,6 +59,10 @@ const MOVEMENT_VERTICAL_RATE = 25;
 const MOVEMENT_VERTICAL_CAP = 4;
 const MOVEMENT_INITIAL_HORIZONTAL = 1.5;
 const MOVEMENT_INITIAL_VERTICAL = 1.5;
+const MESSAGE_BUCKET_CAPACITY = 120;
+const MESSAGE_BUCKET_REFILL = 80;
+const MESSAGE_ABUSE_STRIKES = 3;
+const GRAVITY = 24;
 
 if (TOTAL_SLOTS !== LOBBY_ROOM_CAPACITY) {
   throw new Error(`Capacidad incoherente: mapa=${TOTAL_SLOTS}, lobby=${LOBBY_ROOM_CAPACITY}`);
@@ -246,7 +260,10 @@ function spawnKit(pos) {
 const MODE_NAMES = { ffa: 'TODOS CONTRA TODOS', teams: 'EQUIPOS', gun: 'BÚSQUEDA DEL ARMA', zombies: 'ZOMBIS' };
 const GUN_LADDER = ['pistol', 'shotgun', 'smg', 'ar', 'sniper'];
 const TEAM_COLORS = { r: 0xd84a3a, b: 0x3a6ad8 };
-const MATCH_TIME = 300;   // 5 minutos
+const configuredMatchTime = Number(process.env.PIUM_MATCH_TIME_SECONDS);
+const MATCH_TIME = Number.isFinite(configuredMatchTime)
+  ? Math.max(1, Math.min(3600, configuredMatchTime))
+  : 300;                  // 5 minutos; reducible en integración
 const KILL_LIMIT = 30;    // ffa y equipos
 const PODIUM_STAGE_TIME = 15;
 
@@ -263,6 +280,7 @@ const match = {
   teamScores: { r: 0, b: 0 },
   wave: 0,
   waveBreakAt: 0,
+  podiumPayload: null,
 };
 
 function botConfigData(reason = null) {
@@ -317,6 +335,7 @@ function startMatch(mapId = match.map) {
   match.teamScores = { r: 0, b: 0 };
   match.wave = 0;
   match.waveBreakAt = roomMode === 'zombies' ? now() + 5 : 0;
+  match.podiumPayload = null;
   bots.length = 0;
   kits.length = 0;
   if (mapId !== match.map) {
@@ -369,12 +388,21 @@ function endMatch(reasonTxt) {
       ? 'EMPATE'
       : (match.teamScores.r > match.teamScores.b ? '🔴 EQUIPO ROJO' : '🔵 EQUIPO AZUL');
   }
-  broadcast({
+  match.podiumPayload = {
     t: 'podium', winner, txt: reasonTxt || '', rows,
     ts: match.teamScores, mode: roomMode, room: roomNumber,
     secs: PODIUM_STAGE_TIME, stage: 'map',
     maps: Object.keys(MAPS), map: match.map,
-  });
+  };
+  broadcast(match.podiumPayload);
+}
+
+function currentPodiumMsg() {
+  if (match.state !== 'podium' || !match.podiumPayload) return null;
+  return {
+    ...match.podiumPayload,
+    secs: Math.max(1, Math.round(match.podiumStageEndAt - now())),
+  };
 }
 
 function nextMap() {
@@ -522,6 +550,7 @@ function spawnPlayer(player, notify = true) {
   player.pos = { ...sp };
   player.lastSpawn = { ...sp };
   resetMovementBudget(player);
+  resetCombatState(player);
   if (notify) {
     send(player, {
       t: 'spawn',
@@ -532,14 +561,6 @@ function spawnPlayer(player, notify = true) {
     });
   }
   return sp;
-}
-
-// límite de golpes por jugador (anti-spam básico): 16 por segundo
-function hitAllowed(p) {
-  const t = now();
-  if (!p._hitWin || t - p._hitWin > 1) { p._hitWin = t; p._hitCount = 0; }
-  p._hitCount++;
-  return p._hitCount <= 16;
 }
 
 function eventAllowed(player, event, limit) {
@@ -556,6 +577,298 @@ function eventAllowed(player, event, limit) {
 
 function distOk(a, b, max = 130) {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= max;
+}
+
+function resetCombatState(player) {
+  player._weaponAmmo = Object.fromEntries(
+    Object.entries(FIREARM_RULES).map(([kind, rule]) => [kind, rule.mag]),
+  );
+  player._lastFireAt = -Infinity;
+  player._lastFireKind = null;
+  player._shots = [];
+  player._nades = [];
+  player._regularNadesUsed = 0;
+  player._lastRegularNadeAt = -Infinity;
+  player._lastKnifeAt = -Infinity;
+  player._verticalFlight = null;
+  player._lastAcceptedStateAt = now();
+}
+
+function resetMessageBudget(player) {
+  player._messageTokens = MESSAGE_BUCKET_CAPACITY;
+  player._messageBudgetAt = now();
+  player._messageAbuseAt = 0;
+  player._messageAbuseStrikes = 0;
+  player._closingForAbuse = false;
+}
+
+function messageAllowed(player) {
+  const time = now();
+  const previous = Number.isFinite(player._messageBudgetAt) ? player._messageBudgetAt : time;
+  player._messageBudgetAt = time;
+  player._messageTokens = Math.min(
+    MESSAGE_BUCKET_CAPACITY,
+    Math.max(0, Number(player._messageTokens) || 0) + Math.max(0, time - previous) * MESSAGE_BUCKET_REFILL,
+  );
+  if (player._messageTokens >= 1) {
+    player._messageTokens -= 1;
+    return true;
+  }
+  if (!player._messageAbuseAt || time - player._messageAbuseAt > 2) {
+    player._messageAbuseAt = time;
+    player._messageAbuseStrikes = 0;
+  }
+  player._messageAbuseStrikes++;
+  if (player._messageAbuseStrikes >= MESSAGE_ABUSE_STRIKES && !player._closingForAbuse) {
+    player._closingForAbuse = true;
+    player.ws.close(1008, 'Demasiados mensajes');
+  }
+  return false;
+}
+
+function vectorFromPayload(value) {
+  return { x: value[0], y: value[1], z: value[2] };
+}
+
+function entityCenter(entity, head = false) {
+  return {
+    x: entity.pos.x,
+    y: entity.pos.y + (head ? 1.55 : 0.9),
+    z: entity.pos.z,
+  };
+}
+
+function playerEye(player) {
+  return { x: player.pos.x, y: player.pos.y + 1.58, z: player.pos.z };
+}
+
+function pointSegmentDistance(point, start, end) {
+  const dx = end.x - start.x, dy = end.y - start.y, dz = end.z - start.z;
+  const lengthSquared = dx * dx + dy * dy + dz * dz;
+  if (lengthSquared <= 1e-9) return Infinity;
+  const ratio = Math.max(0, Math.min(1,
+    ((point.x - start.x) * dx + (point.y - start.y) * dy + (point.z - start.z) * dz) /
+      lengthSquared));
+  return Math.hypot(
+    point.x - (start.x + dx * ratio),
+    point.y - (start.y + dy * ratio),
+    point.z - (start.z + dz * ratio),
+  );
+}
+
+function hasLineOfSight(start, end, ignoredCollider = null) {
+  const blockers = ignoredCollider ? colliders.filter((collider) => collider !== ignoredCollider) : colliders;
+  return !segmentBlocked(start, end, blockers);
+}
+
+function consumeWeaponUse(player, kind, time) {
+  const rule = firearmRule(kind);
+  if (!rule) return false;
+  if (match.mode === 'gun' && kind !== GUN_LADDER[player.gunIdx]) return false;
+  const elapsed = time - player._lastFireAt;
+  const minimum = player._lastFireKind && player._lastFireKind !== kind
+    ? COMBAT_LIMITS.weaponSwitchDelay
+    : minimumFireInterval(kind);
+  if (elapsed < minimum) return false;
+
+  if (elapsed >= rule.reloadTime * 0.85) player._weaponAmmo[kind] = rule.mag;
+  const ammo = Number(player._weaponAmmo[kind]);
+  if (!Number.isFinite(ammo) || ammo <= 0) return false;
+  player._weaponAmmo[kind] = ammo - 1;
+  player._lastFireAt = time;
+  player._lastFireKind = kind;
+  return true;
+}
+
+function acceptFire(player, message) {
+  const kind = typeof message.k === 'string' ? message.k : '';
+  const rule = firearmRule(kind);
+  if (!rule || rule.projectile || !isFiniteVectorPayload(message.a, 1000) ||
+      !isFiniteVectorPayload(message.b, 1000)) return null;
+  const start = vectorFromPayload(message.a);
+  const end = vectorFromPayload(message.b);
+  const length = Math.hypot(end.x - start.x, end.y - start.y, end.z - start.z);
+  if (!distOk(player.pos, start, 6) || length < 0.05 || length > COMBAT_LIMITS.maxShotDistance) return null;
+  const time = now();
+  if (!consumeWeaponUse(player, kind, time)) return null;
+  const shot = {
+    kind,
+    at: time,
+    start,
+    end,
+    remainingHits: rule.pellets,
+    remainingBaseDamage: rule.damage * rule.pellets,
+    remainingHeadBonus: Math.max(0, Math.round(rule.damage * rule.headMult) - rule.damage) * rule.pellets,
+  };
+  player._shots = player._shots
+    .filter((candidate) => time - candidate.at <= COMBAT_LIMITS.shotHitWindow)
+    .slice(-3);
+  player._shots.push(shot);
+  return shot;
+}
+
+function matchingShot(player, weapon, targetPoint) {
+  const time = now();
+  player._shots = player._shots.filter((shot) =>
+    time - shot.at <= COMBAT_LIMITS.shotHitWindow && shot.remainingHits > 0 &&
+      shot.remainingBaseDamage + shot.remainingHeadBonus > 0);
+  for (let index = player._shots.length - 1; index >= 0; index--) {
+    const shot = player._shots[index];
+    if (shot.kind !== weapon) continue;
+    const distance = Math.hypot(
+      targetPoint.x - shot.start.x,
+      targetPoint.y - shot.start.y,
+      targetPoint.z - shot.start.z,
+    );
+    const tolerance = shot.kind === 'shotgun' ? 2.75 + distance * 0.14 : 3.25;
+    if (pointSegmentDistance(targetPoint, shot.start, shot.end) <= tolerance) return shot;
+  }
+  return null;
+}
+
+function consumeFirearmHit(player, weapon, targetPoint, claimedDamage, head, ignoredCollider = null) {
+  const shot = matchingShot(player, weapon, targetPoint);
+  if (!shot || !hasLineOfSight(playerEye(player), targetPoint, ignoredCollider)) return 0;
+  const maximum = ignoredCollider
+    ? firearmCrateDamageLimit(weapon)
+    : firearmDamageLimit(weapon, head);
+  const declared = Math.round(Number(claimedDamage));
+  if (!Number.isFinite(declared) || declared <= 0 || maximum <= 0) return 0;
+  const available = shot.remainingBaseDamage + (!ignoredCollider && head ? shot.remainingHeadBonus : 0);
+  const damage = Math.min(declared, maximum, available);
+  if (damage <= 0) return 0;
+  shot.remainingHits--;
+  const baseSpent = Math.min(shot.remainingBaseDamage, damage);
+  shot.remainingBaseDamage -= baseSpent;
+  shot.remainingHeadBonus -= Math.min(shot.remainingHeadBonus, damage - baseSpent);
+  return damage;
+}
+
+function consumeKnifeHit(player, target, claimedDamage, targetKind) {
+  const time = now();
+  if (time - player._lastKnifeAt < COMBAT_LIMITS.knifeCooldown) return 0;
+  const dx = target.pos.x - player.pos.x, dz = target.pos.z - player.pos.z;
+  if (Math.hypot(dx, dz) > COMBAT_LIMITS.knifeRange ||
+      Math.abs(target.pos.y - player.pos.y) > COMBAT_LIMITS.knifeVerticalRange) return 0;
+  const length = Math.hypot(dx, dz) || 1;
+  const forwardX = -Math.sin(player.ry), forwardZ = -Math.cos(player.ry);
+  if ((dx / length) * forwardX + (dz / length) * forwardZ < 0.15) return 0;
+  if (!hasLineOfSight(playerEye(player), entityCenter(target))) return 0;
+  const declared = Math.round(Number(claimedDamage));
+  if (!Number.isFinite(declared) || declared <= 0) return 0;
+  player._lastKnifeAt = time;
+  const yaw = targetKind === 'bot' ? target.yaw : target.ry;
+  return Math.min(declared, knifeDamageLimit(player.pos, target.pos, yaw, targetKind));
+}
+
+function nadeCollides(pos, activeColliders) {
+  const radius = 0.14;
+  for (const collider of activeColliders) {
+    if (pos.x + radius > collider.minX && pos.x - radius < collider.maxX &&
+        pos.y + radius > collider.minY && pos.y - radius < collider.maxY &&
+        pos.z + radius > collider.minZ && pos.z - radius < collider.maxZ) return true;
+  }
+  return false;
+}
+
+function advanceNadeTo(nade, time, activeColliders = activeMovementColliders()) {
+  if (nade.explodedAt !== null || time <= nade.simulatedAt) return;
+  let remaining = Math.min(5, time - nade.simulatedAt);
+  while (remaining > 1e-6 && nade.explodedAt === null) {
+    const dt = Math.min(1 / 60, remaining);
+    remaining -= dt;
+    nade.simulatedAt += dt;
+    nade.fuse -= dt;
+    if (nade.fuse <= 0) {
+      nade.explodedAt = nade.simulatedAt;
+      nade.explosionPos = { ...nade.pos };
+      break;
+    }
+    nade.vel.y -= COMBAT_LIMITS.nadeGravity * dt;
+    let touched = false;
+    for (const axis of ['x', 'y', 'z']) {
+      const previous = nade.pos[axis];
+      nade.pos[axis] += nade.vel[axis] * dt;
+      if (!nadeCollides(nade.pos, activeColliders)) continue;
+      touched = true;
+      nade.pos[axis] = previous;
+      nade.vel[axis] *= -0.45;
+      for (const other of ['x', 'y', 'z']) {
+        if (other !== axis) nade.vel[other] *= 0.75;
+      }
+    }
+    if (touched && nade.impact) {
+      nade.explodedAt = nade.simulatedAt;
+      nade.explosionPos = { ...nade.pos };
+    }
+  }
+}
+
+function acceptNade(player, message) {
+  if (!isFiniteVectorPayload(message.p, 1000) || !isFiniteVectorPayload(message.v, 80)) return null;
+  const origin = vectorFromPayload(message.p);
+  const velocity = vectorFromPayload(message.v);
+  if (!distOk(player.pos, origin, 6)) return null;
+  const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
+  const impact = !!message.im;
+  const time = now();
+  if (impact) {
+    if (speed < 20 || speed > 35 || !consumeWeaponUse(player, 'launcher', time)) return null;
+  } else {
+    if (speed < 10 || speed > 22 || player._regularNadesUsed >= 2 ||
+        time - player._lastRegularNadeAt < 0.25) return null;
+    player._regularNadesUsed++;
+    player._lastRegularNadeAt = time;
+  }
+  const nade = {
+    at: time,
+    origin,
+    pos: { ...origin },
+    vel: { ...velocity },
+    fuse: impact ? 4 : COMBAT_LIMITS.nadeFuse,
+    simulatedAt: time,
+    explodedAt: null,
+    explosionPos: null,
+    impact,
+    targets: new Set(),
+    hits: 0,
+  };
+  player._nades = player._nades.filter((candidate) => time - candidate.at <= 4.5).slice(-3);
+  player._nades.push(nade);
+  return nade;
+}
+
+function consumeNadeHit(player, targetKey, target, claimedDamage) {
+  const time = now();
+  player._nades = player._nades.filter((nade) => time - nade.at <= (nade.impact ? 5 : 3.3));
+  for (const nade of player._nades) {
+    advanceNadeTo(nade, time);
+    if (nade.explodedAt === null || time - nade.explodedAt > 1 || nade.targets.has(targetKey) ||
+        nade.hits >= COMBAT_LIMITS.nadeMaxTargets) continue;
+    const targetPoint = entityCenter(target);
+    const blastOrigin = {
+      x: nade.explosionPos.x,
+      y: nade.explosionPos.y + 0.2,
+      z: nade.explosionPos.z,
+    };
+    const blastDistance = Math.hypot(
+      blastOrigin.x - targetPoint.x,
+      blastOrigin.y - targetPoint.y,
+      blastOrigin.z - targetPoint.z,
+    );
+    if (blastDistance > COMBAT_LIMITS.nadeRadius + 0.75 ||
+        !hasLineOfSight(blastOrigin, targetPoint)) continue;
+    const declared = Math.round(Number(claimedDamage));
+    if (!Number.isFinite(declared) || declared <= 0) return 0;
+    nade.targets.add(targetKey);
+    nade.hits++;
+    const distanceDamage = blastDistance >= COMBAT_LIMITS.nadeRadius
+      ? 15
+      : Math.max(15, Math.round(COMBAT_LIMITS.nadeDamage *
+        (1 - blastDistance / COMBAT_LIMITS.nadeRadius)));
+    return Math.min(declared, distanceDamage);
+  }
+  return 0;
 }
 
 function resetMovementBudget(player) {
@@ -582,6 +895,48 @@ function activeMovementColliders() {
   return colliders.filter((collider) => !collider.crate || crates.get(collider.crate)?.alive !== false);
 }
 
+function bodySupportedAt(pos, activeColliders) {
+  for (const collider of activeColliders) {
+    const drop = pos.y - collider.maxY;
+    if (drop < -0.06 || drop > 0.28) continue;
+    if (pos.x + PLAYER_BODY.halfX > collider.minX && pos.x - PLAYER_BODY.halfX < collider.maxX &&
+        pos.z + PLAYER_BODY.halfZ > collider.minZ && pos.z - PLAYER_BODY.halfZ < collider.maxZ) return true;
+  }
+  return false;
+}
+
+function jumpPadPowerNear(start, end) {
+  let power = 0;
+  for (const pad of mapData?.jumpPads || []) {
+    const startDistance = Math.hypot(start.x - pad.x, start.z - pad.z);
+    const endDistance = Math.hypot(end.x - pad.x, end.z - pad.z);
+    if (Math.min(startDistance, endDistance) <= 1.8 &&
+        Math.min(Math.abs(start.y - pad.y), Math.abs(end.y - pad.y)) <= 1.2) {
+      power = Math.max(power, Number(pad.power) || 0);
+    }
+  }
+  return power;
+}
+
+function verticalMoveState(player, pos, activeColliders, time) {
+  if (bodySupportedAt(pos, activeColliders)) return { allowed: true, flight: null };
+  const currentSupported = bodySupportedAt(player.pos, activeColliders);
+  let flight = player._verticalFlight;
+  if (!flight || currentSupported) {
+    const padPower = jumpPadPowerNear(player.pos, pos);
+    const rising = pos.y > player.pos.y + 0.04;
+    flight = {
+      originY: player.pos.y,
+      startedAt: Math.min(time, Number(player._lastAcceptedStateAt) || time),
+      velocity: padPower > 0 ? padPower + 0.75 : rising ? 9.6 : 2.5,
+    };
+  }
+  const age = Math.max(0, time - flight.startedAt);
+  const ballisticCeiling = flight.originY + flight.velocity * age - 0.5 * GRAVITY * age * age + 0.7;
+  if (pos.y > ballisticCeiling) return { allowed: false, flight };
+  return { allowed: true, flight };
+}
+
 function playerPositionAllowed(player, pos) {
   if (!playBounds || !Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) return false;
   if (pos.x < playBounds.minX || pos.x > playBounds.maxX ||
@@ -594,12 +949,39 @@ function playerPositionAllowed(player, pos) {
       verticalCost > player._verticalBudget + 0.01) return false;
 
   const activeColliders = activeMovementColliders();
-  if (activeColliders.some((collider) => bodyOverlapsCollider(pos, collider, PLAYER_BODY)) ||
+  const vertical = verticalMoveState(player, pos, activeColliders, time);
+  if (!vertical.allowed ||
+      activeColliders.some((collider) => bodyOverlapsCollider(pos, collider, PLAYER_BODY)) ||
       !isBodyPathClear(player.pos, pos, activeColliders, { body: PLAYER_BODY })) return false;
 
   player._horizontalBudget = Math.max(0, player._horizontalBudget - horizontalCost);
   player._verticalBudget = Math.max(0, player._verticalBudget - verticalCost);
+  player._verticalFlight = vertical.flight;
+  player._lastAcceptedStateAt = time;
   return true;
+}
+
+function settleStaleVerticalPosition(player, time) {
+  const flight = player._verticalFlight;
+  if (!flight || time - player._lastAcceptedStateAt <= 0.25) return;
+  const age = Math.max(0, time - flight.startedAt);
+  const ceiling = flight.originY + flight.velocity * age - 0.5 * GRAVITY * age * age + 0.7;
+  if (player.pos.y <= ceiling) return;
+  const activeColliders = activeMovementColliders();
+  let support = null;
+  for (const collider of activeColliders) {
+    if (collider.maxY > player.pos.y + 0.06 || collider.maxY < ceiling - 0.06) continue;
+    if (player.pos.x + PLAYER_BODY.halfX <= collider.minX || player.pos.x - PLAYER_BODY.halfX >= collider.maxX ||
+        player.pos.z + PLAYER_BODY.halfZ <= collider.minZ || player.pos.z - PLAYER_BODY.halfZ >= collider.maxZ) continue;
+    if (!support || collider.maxY > support.maxY) support = collider;
+  }
+  if (support) {
+    player.pos.y = support.maxY + 0.001;
+    player._verticalFlight = null;
+    player._lastAcceptedStateAt = time;
+  } else {
+    player.pos.y = Math.max(-2, ceiling);
+  }
 }
 
 function send(p, msg) {
@@ -700,6 +1082,10 @@ function attach(ws, hello) {
   }, 5000);
 
   const handleMessage = (raw) => {
+    // Una vez completado el saludo, todo frame consume presupuesto incluso si
+    // su JSON o su forma son inválidos. De otro modo un flood de "{", null o
+    // arrays eludiría el límite antes de llegar a la validación del protocolo.
+    if (me && !messageAllowed(me)) return;
     let m;
     if (raw && typeof raw === 'object' && !Array.isArray(raw) && !Buffer.isBuffer(raw)) {
       m = raw;
@@ -744,6 +1130,8 @@ function attach(ws, hello) {
         skinColor: (m.skin && Number.isInteger(m.skin.c)) ? (m.skin.c & 0xffffff) : null,
         badge: '',
       };
+      resetCombatState(me);
+      resetMessageBudget(me);
       players.set(id, me);
       // insignia de nivel según su historial en el ranking mundial
       ranking.getTotalKills(me.name).then((total) => {
@@ -757,6 +1145,8 @@ function attach(ws, hello) {
         bc: botConfigData(),
       });
       send(me, matchMsg());
+      const podium = currentPodiumMsg();
+      if (podium) send(me, podium);
       broadcast(botConfigMsg());
       if (match.mode === 'gun') send(me, { t: 'gun', gi: 0 });
       broadcast({ t: 'aviso', txt: `${me.name} entró a la partida` }, id);
@@ -781,25 +1171,27 @@ function attach(ws, hello) {
       if (Number.isFinite(m.s)) me.speed = Math.max(0, Math.min(20, m.s));
       me.sliding = !!m.sl;
     } else if (m.t === 'fire') {
-      const origin = isFiniteVectorPayload(m.a) ? { x: m.a[0], y: m.a[1], z: m.a[2] } : null;
-      if (me.alive && match.state === 'playing' && origin && isFiniteVectorPayload(m.b) &&
-          distOk(me.pos, origin, 6) && eventAllowed(me, 'fire', 30)) {
-        broadcast({ t: 'fire', id, a: m.a, b: m.b, k: String(m.k || 'ar').slice(0, 8) }, id);
-      }
+      if (!me.alive || match.state !== 'playing') return;
+      const shot = acceptFire(me, m);
+      if (shot) broadcast({ t: 'fire', id, a: m.a, b: m.b, k: shot.kind }, id);
     } else if (m.t === 'nade') {
-      const origin = isFiniteVectorPayload(m.p) ? { x: m.p[0], y: m.p[1], z: m.p[2] } : null;
-      if (me.alive && match.state === 'playing' && origin && isFiniteVectorPayload(m.v, 80) &&
-          distOk(me.pos, origin, 6) && eventAllowed(me, 'nade', 6)) {
+      if (me.alive && match.state === 'playing' && acceptNade(me, m)) {
         broadcast({ t: 'nade', id, p: m.p, v: m.v, im: m.im ? 1 : 0 }, id);
       }
     } else if (m.t === 'hit') {
-      if (!me.alive || match.state !== 'playing' || !hitAllowed(me)) return;
-      const dmg = Math.max(1, Math.min(120, Math.round(+m.d || 0)));
+      if (!me.alive || match.state !== 'playing' || !eventAllowed(me, 'hit', 32)) return;
       const weapon = String(m.w || '').slice(0, 10);
       if (m.kind === 'bot') {
         const bot = bots.find((b) => b.id === m.id);
         if (bot && !bot.dead && distOk(me.pos, bot.pos) &&
             !(match.mode === 'teams' && bot.team === me.team)) {
+          const targetKey = `bot:${bot.id}`;
+          const dmg = weapon === 'knife'
+            ? consumeKnifeHit(me, bot, m.d, 'bot')
+            : weapon === 'nade'
+              ? consumeNadeHit(me, targetKey, bot, m.d)
+              : consumeFirearmHit(me, weapon, entityCenter(bot, !!m.h), m.d, !!m.h);
+          if (dmg <= 0) return;
           const died = bot.takeDamage(dmg, me.pos);
           if (died) {
             creditKill(me, weapon);
@@ -811,11 +1203,26 @@ function attach(ws, hello) {
         const victim = players.get(+m.id);
         if (victim && victim.id !== me.id && distOk(me.pos, victim.pos)) {
           if (match.mode === 'teams' && victim.team === me.team) return; // fuego amigo desactivado
+          const targetKey = `pl:${victim.id}`;
+          const dmg = weapon === 'knife'
+            ? consumeKnifeHit(me, victim, m.d, 'pl')
+            : weapon === 'nade'
+              ? consumeNadeHit(me, targetKey, victim, m.d)
+              : consumeFirearmHit(me, weapon, entityCenter(victim, !!m.h), m.d, !!m.h);
+          if (dmg <= 0) return;
           damagePlayer(victim, dmg, me.name, !!m.h, me, weapon);
         }
       } else if (m.kind === 'crate') {
         const c = crates.get(String(m.id));
         if (c && c.alive) {
+          const target = {
+            x: (c.collider.minX + c.collider.maxX) / 2,
+            y: (c.collider.minY + c.collider.maxY) / 2,
+            z: (c.collider.minZ + c.collider.maxZ) / 2,
+          };
+          if (!distOk(me.pos, target)) return;
+          const dmg = consumeFirearmHit(me, weapon, target, m.d, false, c.collider);
+          if (dmg <= 0) return;
           c.hp -= dmg;
           if (c.hp <= 0) {
             c.alive = false;
@@ -835,17 +1242,26 @@ function attach(ws, hello) {
         broadcast({ t: 'chat', n: me.name, i });
       }
     } else if (m.t === 'ping') {
-      send(me, { t: 'pong', ts: +m.ts || 0 });
+      if (eventAllowed(me, 'ping', 2)) send(me, { t: 'pong', ts: +m.ts || 0 });
     } else if (m.t === 'skin') {
-      me.hat = HATS[m.h] ? m.h : 'none';
-      me.skinColor = Number.isInteger(m.c) ? (m.c & 0xffffff) : me.skinColor;
+      if (!eventAllowed(me, 'skin', 2)) return;
+      const nextHat = typeof m.h === 'string' && Object.hasOwn(HATS, m.h) ? m.h : 'none';
+      const nextColor = Number.isInteger(m.c) ? (m.c & 0xffffff) : me.skinColor;
+      if (nextHat === me.hat && nextColor === me.skinColor) return;
+      me.hat = nextHat;
+      me.skinColor = nextColor;
     } else if (m.t === 'selfdmg') {
       // daño por caída, lo declara el propio cliente
+      if (!eventAllowed(me, 'selfdmg', 4)) return;
       const dmg = Math.max(1, Math.min(60, Math.round(+m.d || 0)));
       damagePlayer(me, dmg, 'la caída', false);
     } else if (m.t === 'team') {
       if (match.mode === 'teams') {
-        me.team = m.tm === 'r' || m.tm === 'b' ? m.tm : assignTeam();
+        const nextTeam = m.tm === 'r' || m.tm === 'b' ? m.tm : assignTeam();
+        const t = now();
+        if (nextTeam === me.team || (me._lastTeamChange && t - me._lastTeamChange < 2)) return;
+        me._lastTeamChange = t;
+        me.team = nextTeam;
         rebalanceBots();
         broadcast({ t: 'aviso', txt: `${me.name} → equipo ${me.team === 'r' ? 'ROJO' : 'AZUL'}` });
       }
@@ -878,8 +1294,10 @@ function attach(ws, hello) {
       const description = botConfig.enabled ? `${botConfig.count} bots` : 'bots desactivados';
       broadcast({ t: 'aviso', txt: `${me.name}: ${description}` });
     } else if (m.t === 'vote') {
-      if (match.state === 'podium') {
-        if (MAPS[m.map]) match.mapVotes.set(me.id, m.map);
+      if (match.state === 'podium' && eventAllowed(me, 'vote', 4)) {
+        if (typeof m.map !== 'string' || !Object.hasOwn(MAPS, m.map) ||
+            match.mapVotes.get(me.id) === m.map) return;
+        match.mapVotes.set(me.id, m.map);
         const mapTally = {};
         for (const v of match.mapVotes.values()) mapTally[v] = (mapTally[v] || 0) + 1;
         broadcast({ t: 'votes', stage: 'map', tally: {}, mapTally });
@@ -952,6 +1370,11 @@ function tick(t, dt, elapsed = dt) {
   }
 
   modeTick(t);
+  const nadeColliders = activeMovementColliders();
+  for (const player of players.values()) {
+    player._nades = (player._nades || []).filter((nade) => t - nade.at <= (nade.impact ? 5 : 3.3));
+    for (const nade of player._nades) advanceNadeTo(nade, t, nadeColliders);
+  }
   if (match.state === 'playing') {
     for (const b of bots) {
       b.update(dt, botCtx);
@@ -966,6 +1389,10 @@ function tick(t, dt, elapsed = dt) {
         }
       }
     }
+  }
+
+  for (const p of players.values()) {
+    if (p.alive) settleStaleVerticalPosition(p, t);
   }
 
   // regeneración de vida de jugadores

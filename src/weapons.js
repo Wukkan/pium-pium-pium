@@ -106,6 +106,7 @@ const BASE_FOV = 78;
 const EQUIP_READY_PROGRESS = 0.999;
 const MELEE_DURATION = 0.62;
 const MELEE_COOLDOWN = 0.9;
+const KNIFE_READY_PROGRESS = 0.18;
 
 const EQUIP_DURATIONS = Object.freeze({
   pistol: 0.3,
@@ -214,8 +215,7 @@ export function firstPersonAnimationState({
   };
 }
 
-export function meleeAnimationState(progress = 0) {
-  const p = clamp01(progress);
+function rawMeleeAnimationState(p) {
   const draw = smoothRange(0, 0.18, p);
   const windup = windowPulse(p, 0.12, 0.27, 0.43);
   const strike = windowPulse(p, 0.25, 0.43, 0.68);
@@ -260,13 +260,47 @@ export function meleeAnimationState(progress = 0) {
   };
 }
 
-export function viewmodelVisibilityState({ dead = false, scoped = false, meleeActive = false } = {}) {
+const mixMeleeValue = (from, to, amount) => from + (to - from) * amount;
+const mixMeleeVector = (from, to, amount) => Object.fromEntries(
+  Object.keys(from).map((key) => [key, mixMeleeValue(from[key], to[key], amount)]),
+);
+
+function mixMeleePose(from, to, amount) {
+  if (amount >= 1) return to;
+  return {
+    visible: amount > 0 ? to.visible : from.visible,
+    draw: mixMeleeValue(from.draw, to.draw, amount),
+    windup: mixMeleeValue(from.windup, to.windup, amount),
+    strike: mixMeleeValue(from.strike, to.strike, amount),
+    recover: mixMeleeValue(from.recover, to.recover, amount),
+    position: mixMeleeVector(from.position, to.position, amount),
+    rotation: mixMeleeVector(from.rotation, to.rotation, amount),
+    guard: {
+      position: mixMeleeVector(from.guard.position, to.guard.position, amount),
+      rotation: mixMeleeVector(from.guard.rotation, to.guard.rotation, amount),
+    },
+    hands: mixMeleeVector(from.hands, to.hands, amount),
+  };
+}
+
+export function meleeAnimationState(progress = 0) {
+  const p = clamp01(progress);
+  const pose = rawMeleeAnimationState(p);
+  const recoveryToReady = smoothRange(0.66, 1, p);
+  if (recoveryToReady <= 0) return pose;
+  return mixMeleePose(pose, rawMeleeAnimationState(KNIFE_READY_PROGRESS), recoveryToReady);
+}
+
+export function viewmodelVisibilityState({
+  dead = false, scoped = false, knifeEquipped = false, meleeActive = false,
+} = {}) {
   const alive = !dead;
+  const showKnife = knifeEquipped || meleeActive;
   return {
     rig: alive,
-    firearm: alive && !scoped && !meleeActive,
-    knife: alive && meleeActive,
-    scope: alive && scoped && !meleeActive,
+    firearm: alive && !scoped && !showKnife,
+    knife: alive && showKnife,
+    scope: alive && scoped && !showKnife,
   };
 }
 
@@ -956,6 +990,19 @@ export function applyKnifeMeleePose(model, pose = meleeAnimationState(0)) {
   arms.right.position.x -= pose.hands.gripPressure * 0.014;
   arms.right.rotation.x += pose.hands.dominantFlex;
   arms.left.rotation.x += pose.hands.guardFlex;
+  // Los dedos mantienen sus puntos de contacto, pero el volumen principal de
+  // la palma se apoya fuera del eje del mango. El offset se expresa primero en
+  // el espacio radial del pivote y luego se convierte al espacio local de la mano.
+  const palmOffset = new THREE.Vector3(0.04, 0, 0)
+    .applyQuaternion(arms.right.quaternion.clone().invert());
+  for (const name of [
+    'right-glove-palm', 'right-palm-pad', 'right-hand-backplate', 'right-thenar-pad',
+  ]) {
+    const part = arms.right.getObjectByName(name);
+    if (!part) continue;
+    part.userData.knifePalmBasePosition ||= part.position.clone();
+    part.position.copy(part.userData.knifePalmBasePosition).add(palmOffset);
+  }
   viewmodel.grip = grip;
 
   attackPivot.updateMatrix();
@@ -1072,6 +1119,8 @@ export class WeaponSystem {
     this.getTargets = () => [];       // lo inyecta main.js
     this.onTargetHit = () => {};      // lo inyecta main.js (bot local o entidad de red)
     this.onShot = null;               // aviso de cada disparo (para la red)
+    this.onMeleeTrigger = null;        // clic primario con el cuchillo equipado
+    this.onOpenBuy = null;             // selección de un slot todavía bloqueado
     this.onEconomyChange = null;      // persistencia opcional inyectada por main.js
 
     // estado por arma (munición persistente al cambiar)
@@ -1104,6 +1153,7 @@ export class WeaponSystem {
     this.bindings = { ...DEFAULT_BINDINGS };
     this.aimMode = 'hold';
     this.weaponBob = 1;
+    this.knifeEquipped = false;
     this.meleeActive = false;
     this.meleeProgress = 0;
     this.meleeCooldownUntil = 0;
@@ -1128,8 +1178,12 @@ export class WeaponSystem {
 
     addEventListener('mousedown', (e) => {
       if (!this.hasGameplayControl(e) || this.inputBlocked || this.meleeActive) return;
-      if (e.button === 0) this.triggerDown = true;
-      if (e.button === 2) this.ads = this.aimMode === 'toggle' ? !this.ads : true;
+      if (e.button === 0) {
+        this.primaryAction();
+      }
+      if (e.button === 2 && !this.knifeEquipped) {
+        this.ads = this.aimMode === 'toggle' ? !this.ads : true;
+      }
     });
     addEventListener('mouseup', (e) => {
       if (e.button === 0) this.triggerDown = false;
@@ -1145,6 +1199,10 @@ export class WeaponSystem {
       const idx = bindingSlotIndex(this.bindings, e.code);
       if (!e.repeat && idx >= 0 && idx < this.slots.length) this.switchTo(this.slots[idx]);
     });
+    addEventListener('wheel', (e) => {
+      if (!this.hasGameplayControl(e) || this.inputBlocked || !e.deltaY) return;
+      if (this.cycleWeapon(e.deltaY)) e.preventDefault();
+    }, { passive: false });
     addEventListener('blur', () => this.clearInput());
     document.addEventListener('pointerlockchange', () => {
       if (!this.hasGameplayControl()) this.clearInput();
@@ -1169,6 +1227,17 @@ export class WeaponSystem {
     return this.fallbackControlSurface.contains?.(event.target) === true;
   }
 
+  primaryAction() {
+    if (this.player.dead || this.inputBlocked || this.meleeActive) return false;
+    if (!this.knifeEquipped) {
+      this.triggerDown = true;
+      return true;
+    }
+    this.triggerDown = false;
+    if (typeof this.onMeleeTrigger !== 'function') return false;
+    return this.onMeleeTrigger() !== false;
+  }
+
   setPreferences({ aimMode = 'hold', weaponBob = 1 } = {}) {
     this.aimMode = aimMode === 'toggle' ? 'toggle' : 'hold';
     this.weaponBob = Math.min(1, Math.max(0, Number(weaponBob) || 0));
@@ -1178,7 +1247,7 @@ export class WeaponSystem {
   clearInput() {
     this.triggerDown = false;
     this.ads = false;
-    if (this.meleeActive) this.cancelMelee(false);
+    if (this.meleeActive) this.cancelMelee();
   }
 
   get def() { return WEAPON_DEFS[this.current]; }
@@ -1261,10 +1330,18 @@ export class WeaponSystem {
   }
 
   switchTo(key) {
-    if (this.forcedKey) return; // en búsqueda del arma no se cambia a mano
-    if (key === this.current || this.player.dead || this.meleeActive) return;
+    if (this.player.dead) return;
+    if (this.forcedKey) {
+      // En búsqueda del arma no se cambia la selección impuesta, pero cualquier
+      // tecla de arma sí permite volver del cuchillo a esa arma.
+      if (this.knifeEquipped) this.unequipKnife(true);
+      return;
+    }
+    if (key === this.current && !this.knifeEquipped) return;
     if (weaponSelectionAction(!!this.owned[key]) === 'open-buy') {
-      this.hud.announce(`Pulsa ${keyCodeLabel(this.bindings.openArsenal)} para abrir el arsenal y comprar armas`);
+      if (this.knifeEquipped) this.unequipKnife(true);
+      if (typeof this.onOpenBuy === 'function') this.onOpenBuy(key);
+      else this.hud.announce(`Pulsa ${keyCodeLabel(this.bindings.openArsenal)} para abrir el arsenal y comprar armas`);
       this.audio.dry();
       return;
     }
@@ -1273,7 +1350,18 @@ export class WeaponSystem {
   }
 
   _equip(key) {
-    if (key === this.current) return;
+    const leavingKnife = this.knifeEquipped;
+    if (leavingKnife) this.unequipKnife(false);
+    if (key === this.current) {
+      if (!leavingKnife) return;
+      this.equipProgress = 0;
+      this.equipDuration = 0.28;
+      this.kickPos = 0.06;
+      this.hud.updateAmmo(this);
+      this.hud.updateSlots(this);
+      this._syncViewmodelVisibility();
+      return;
+    }
     const previous = this.models[this.current];
     previous.userData.flash.visible = false;
     previous.userData.muzzleLight.intensity = 0;
@@ -1287,6 +1375,24 @@ export class WeaponSystem {
     this.hud.updateSlots(this);
     this.hud.setReloading(false);
     this._syncViewmodelVisibility();
+  }
+
+  cycleWeapon(delta) {
+    if (this.player.dead || !Number.isFinite(Number(delta)) || Number(delta) === 0) return false;
+    if (this.forcedKey) {
+      if (!this.knifeEquipped) return false;
+      this.unequipKnife(true);
+      return true;
+    }
+    const available = this.slots.filter((key) => this.owned[key]);
+    if (available.length === 0) return false;
+    const currentIndex = Math.max(0, available.indexOf(this.current));
+    const direction = Number(delta) > 0 ? 1 : -1;
+    const next = available[(currentIndex + direction + available.length) % available.length];
+    const prior = this.current;
+    const wasKnifeEquipped = this.knifeEquipped;
+    this.switchTo(next);
+    return wasKnifeEquipped || this.current !== prior;
   }
 
   // búsqueda del arma: el servidor impone qué arma llevas
@@ -1322,7 +1428,7 @@ export class WeaponSystem {
   reload() {
     const st = this.ammo;
     const def = this.def;
-    if (this.meleeActive || this.equipProgress < EQUIP_READY_PROGRESS || this.reloading ||
+    if (this.knifeEquipped || this.meleeActive || this.equipProgress < EQUIP_READY_PROGRESS || this.reloading ||
         st.ammo >= def.mag || st.reserve <= 0 || this.player.dead) return;
     this.reloading = true;
     this.reloadEnd = performance.now() / 1000 + def.reloadTime;
@@ -1345,14 +1451,13 @@ export class WeaponSystem {
     this.hud.setReloading(false);
   }
 
-  beginMelee(onStrike = null) {
-    const time = performance.now() / 1000;
-    if (this.meleeActive || this.player.dead || this.inputBlocked || time < this.meleeCooldownUntil) return false;
-    this.meleeActive = true;
-    this.meleeProgress = 0;
-    this.meleeStrikeCallback = typeof onStrike === 'function' ? onStrike : null;
+  equipKnife() {
+    if (this.knifeEquipped || this.player.dead || this.inputBlocked) return false;
+    this.knifeEquipped = true;
+    this.meleeActive = false;
+    this.meleeProgress = KNIFE_READY_PROGRESS;
+    this.meleeStrikeCallback = null;
     this.meleeStrikeFired = false;
-    this.meleeCooldownUntil = time + MELEE_COOLDOWN;
     this.triggerDown = false;
     this.ads = false;
     this.reloading = false;
@@ -1361,14 +1466,15 @@ export class WeaponSystem {
     this.models[this.current].userData.muzzleLight.intensity = 0;
     this.hud.setReloading(false);
     this.hud.setScope(false);
-    applyKnifeMeleePose(this.knifeModel, meleeAnimationState(0));
+    applyKnifeMeleePose(this.knifeModel, meleeAnimationState(KNIFE_READY_PROGRESS));
     this._syncViewmodelVisibility(false);
     return true;
   }
 
-  cancelMelee(restoreDraw = true) {
-    if (!this.meleeActive) return false;
-    this.meleeActive = false;
+  unequipKnife(restoreDraw = true) {
+    if (!this.knifeEquipped) return false;
+    if (this.meleeActive) this.cancelMelee();
+    this.knifeEquipped = false;
     this.meleeProgress = 0;
     this.meleeStrikeCallback = null;
     this.meleeStrikeFired = false;
@@ -1382,10 +1488,46 @@ export class WeaponSystem {
     return true;
   }
 
+  beginMelee(onStrike = null) {
+    const time = performance.now() / 1000;
+    if (!this.knifeEquipped || this.meleeActive || this.player.dead || this.inputBlocked ||
+        time < this.meleeCooldownUntil) return false;
+    this.meleeActive = true;
+    this.meleeProgress = KNIFE_READY_PROGRESS;
+    this.meleeStrikeCallback = typeof onStrike === 'function' ? onStrike : null;
+    this.meleeStrikeFired = false;
+    this.meleeCooldownUntil = time + MELEE_COOLDOWN;
+    this.triggerDown = false;
+    this.ads = false;
+    this.reloading = false;
+    this.firePulse = 0;
+    this.models[this.current].userData.flash.visible = false;
+    this.models[this.current].userData.muzzleLight.intensity = 0;
+    this.hud.setReloading(false);
+    this.hud.setScope(false);
+    applyKnifeMeleePose(this.knifeModel, meleeAnimationState(KNIFE_READY_PROGRESS));
+    this._syncViewmodelVisibility(false);
+    return true;
+  }
+
+  cancelMelee() {
+    if (!this.meleeActive) return false;
+    this.meleeActive = false;
+    this.meleeProgress = this.knifeEquipped ? KNIFE_READY_PROGRESS : 0;
+    this.meleeStrikeCallback = null;
+    this.meleeStrikeFired = false;
+    if (this.knifeEquipped) {
+      applyKnifeMeleePose(this.knifeModel, meleeAnimationState(KNIFE_READY_PROGRESS));
+    }
+    this._syncViewmodelVisibility();
+    return true;
+  }
+
   _syncViewmodelVisibility(scoped = this.ads && this.def.scope && !this.player.dead) {
     const visibility = viewmodelVisibilityState({
       dead: this.player.dead,
       scoped,
+      knifeEquipped: this.knifeEquipped,
       meleeActive: this.meleeActive,
     });
     this.rig.visible = visibility.rig;
@@ -1400,7 +1542,7 @@ export class WeaponSystem {
   _updateMelee(dt) {
     if (!this.meleeActive) return;
     if (this.player.dead) {
-      this.cancelMelee(false);
+      this.cancelMelee();
       return;
     }
     this.meleeProgress = Math.min(1, this.meleeProgress + Math.max(0, dt) / MELEE_DURATION);
@@ -1412,7 +1554,7 @@ export class WeaponSystem {
       this.meleeStrikeCallback = null;
       if (strike) strike();
     }
-    if (this.meleeProgress >= 1) this.cancelMelee(true);
+    if (this.meleeProgress >= 1) this.cancelMelee();
   }
 
   currentSpread() {
@@ -1443,7 +1585,7 @@ export class WeaponSystem {
     const now = performance.now() / 1000;
     const def = this.def;
     const st = this.ammo;
-    if (this.meleeActive || this.equipProgress < EQUIP_READY_PROGRESS || this.player.dead ||
+    if (this.knifeEquipped || this.meleeActive || this.equipProgress < EQUIP_READY_PROGRESS || this.player.dead ||
         this.reloading || now - this.lastShot < 60 / def.rpm) return;
     if (st.ammo <= 0) {
       this.lastShot = now;
@@ -1485,6 +1627,7 @@ export class WeaponSystem {
 
     // la escopeta dispara varios perdigones: el daño se agrega por objetivo
     const acc = new Map();
+    const crateHits = [];
     let firstEnd = null;
     let impactSound = null;
 
@@ -1514,7 +1657,7 @@ export class WeaponSystem {
         } else if (data.crate) {
           this.effects.impact(hit.point, 0xc09858, 3, 'wood');
           impactSound ||= 'wood';
-          if (this.onCrateHit) this.onCrateHit(data.crate, def.damage, def.kind);
+          crateHits.push(data.crate);
         } else {
           this.effects.impact(hit.point, 0xd8d0b8, pellets > 1 ? 2 : 5, 'concrete');
           impactSound ||= 'concrete';
@@ -1523,11 +1666,16 @@ export class WeaponSystem {
       if (!firstEnd) firstEnd = end;
     }
 
+    if (impactSound && this.audio.impact) this.audio.impact(impactSound);
+    if (this.onShot) this.onShot(muzzle, firstEnd, def.kind);
+    // WebSocket conserva el orden: el servidor debe conocer el disparo antes
+    // de autorizar cualquiera de sus impactos (incluidos los perdigones).
+    for (const crateId of crateHits) {
+      if (this.onCrateHit) this.onCrateHit(crateId, def.damage, def.kind);
+    }
     for (const entry of acc.values()) {
       this.onTargetHit(entry.data, entry.dmg, entry.head, entry.point);
     }
-    if (impactSound && this.audio.impact) this.audio.impact(impactSound);
-    if (this.onShot) this.onShot(muzzle, firstEnd, def.kind);
 
     // retroceso
     this.player.recoilPitch += def.recoil * (this.ads ? 0.6 : 1);
@@ -1610,7 +1758,9 @@ export class WeaponSystem {
       this.hud.setReloading(false);
     }
 
-    if (inputEnabled && this.triggerDown && !this.player.dead && !this.meleeActive) this.fire();
+    if (inputEnabled && this.triggerDown && !this.player.dead && !this.knifeEquipped && !this.meleeActive) {
+      this.fire();
+    }
 
     // FOV según ADS
     const targetFov = (this.ads && !this.player.dead) ? this.baseFov / def.zoom : this.baseFov;
@@ -1618,7 +1768,7 @@ export class WeaponSystem {
     this.camera.updateProjectionMatrix();
 
     // mira telescópica: oculta el modelo y muestra el overlay
-    const scoped = this.ads && def.scope && !this.player.dead && !this.meleeActive;
+    const scoped = this.ads && def.scope && !this.player.dead && !this.knifeEquipped && !this.meleeActive;
     this._syncViewmodelVisibility(scoped);
 
     // animación del modelo: bob al andar + retroceso con muelle

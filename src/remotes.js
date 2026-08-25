@@ -211,4 +211,11 @@ export class Remotes {
   triggerHit(kind, id, intensity = 1) {
     this.find(kind, id)?.reactToHit(intensity);
   }
+
+  dispose() {
+    for (const ent of this.players.values()) ent.dispose();
+    for (const ent of this.bots.values()) ent.dispose();
+    this.players.clear();
+    this.bots.clear();
+  }
 }

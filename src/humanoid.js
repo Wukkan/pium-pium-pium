@@ -23,6 +23,22 @@ function operatorBoxGeometry(width, height, depth) {
   });
 }
 
+const freezeVector = (values) => Object.freeze([...values]);
+
+// Proporciones compactas para que la mano siga siendo legible a distancia sin
+// volverla un bloque. Las falanges usan geometría compartida de pocos lados y
+// no participan en el raycast: el hitbox de brazo conserva su tamaño original.
+export const OPERATOR_HAND_PROFILE = Object.freeze({
+  palm: freezeVector([0.19, 0.14, 0.21]),
+  wrist: freezeVector([0.16, 0.06, 0.18]),
+  fingerLengths: freezeVector([0.086, 0.098, 0.092, 0.075]),
+  fingerCurls: freezeVector([0.42, 0.48, 0.53, 0.58]),
+  distalCurls: freezeVector([0.62, 0.67, 0.72, 0.78]),
+  thumbLength: 0.073,
+  segmentsPerFinger: 2,
+  meshBudgetPerHand: 13,
+});
+
 export function makeNameSprite(name, color = '#ffffff') {
   const canvas = document.createElement('canvas');
   canvas.width = 256; canvas.height = 48;
@@ -82,7 +98,9 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   const skinTone = new THREE.MeshLambertMaterial({ color: 0xe0aa7a });
   const pants = new THREE.MeshLambertMaterial({ color: 0x202a34 });
   const boot = new THREE.MeshLambertMaterial({ color: 0x111821 });
-  const glove = new THREE.MeshLambertMaterial({ color: 0x171d25 });
+  const glove = new THREE.MeshStandardMaterial({ color: 0x1b242d, roughness: 0.94, metalness: 0.01 });
+  const glovePanel = new THREE.MeshStandardMaterial({ color: 0x394957, roughness: 0.8, metalness: 0.015 });
+  const gloveGrip = new THREE.MeshStandardMaterial({ color: 0x0e141a, roughness: 1, metalness: 0 });
   const metal = new THREE.MeshLambertMaterial({ color: 0x11161d });
   const visor = new THREE.MeshLambertMaterial({ color: 0x152b3a });
   const statusLight = new THREE.MeshBasicMaterial({ color: accentColor });
@@ -191,33 +209,135 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   armL.name = 'armL';
   armR.name = 'armR';
   torso.add(armL, armR);
-  const forearmL = new THREE.Group(); forearmL.position.set(0, -0.28, 0);
-  const forearmR = new THREE.Group(); forearmR.position.set(0, -0.28, 0);
+  const forearmL = new THREE.Group(); forearmL.position.set(0, -0.52, 0);
+  const forearmR = new THREE.Group(); forearmR.position.set(0, -0.52, 0);
   forearmL.name = 'forearmL';
   forearmR.name = 'forearmR';
   armL.add(forearmL);
   armR.add(forearmR);
-  box(...profile.limb, uniformMid, 0, -0.26, 0, 'arm', armL);
-  box(...profile.limb, uniformMid, 0, -0.26, 0, 'arm', armR);
+  const upperArmL = box(...profile.limb, uniformMid, 0, -0.26, 0, 'arm', armL);
+  const upperArmR = box(...profile.limb, uniformMid, 0, -0.26, 0, 'arm', armR);
+  upperArmL.name = 'upperArmL';
+  upperArmR.name = 'upperArmR';
   box(...profile.shoulder, armor, 0, -0.03, 0, null, armL);
   box(...profile.shoulder, armor, 0, -0.03, 0, null, armR);
   box(0.24, 0.07, 0.28, uniformAccent, 0, -0.03, -0.01, null, armL);
   box(0.24, 0.07, 0.28, uniformAccent, 0, -0.03, -0.01, null, armR);
-  box(0.22, 0.2, 0.27, armorEdge, 0, -0.09, -0.01, null, forearmL);
-  box(0.22, 0.2, 0.27, armorEdge, 0, -0.09, -0.01, null, forearmR);
-  box(0.21, 0.16, 0.24, glove, 0, -0.3, -0.02, null, forearmL);
-  box(0.21, 0.16, 0.24, glove, 0, -0.3, -0.02, null, forearmR);
+  const forearmShellL = box(0.21, 0.22, 0.25, armorEdge, 0, -0.1, -0.01, null, forearmL);
+  const forearmShellR = box(0.21, 0.22, 0.25, armorEdge, 0, -0.1, -0.01, null, forearmR);
+  forearmShellL.name = 'forearm-shell-L';
+  forearmShellR.name = 'forearm-shell-R';
+
+  const fingerGeometry = new THREE.CylinderGeometry(0.014, 0.017, 1, 6, 1);
+  const thumbGeometry = new THREE.CylinderGeometry(0.016, 0.019, 1, 6, 1);
+  const wristGeometry = new THREE.CylinderGeometry(0.08, 0.085, OPERATOR_HAND_PROFILE.wrist[1], 8, 1);
+  const fingerNames = ['index', 'middle', 'ring', 'pinky'];
+  const fingerSlots = [0.061, 0.021, -0.022, -0.06];
+  const fingerSplay = [0.055, 0.018, -0.012, -0.06];
+
+  const makeOperatorHand = (side, parent) => {
+    const direction = side === 'L' ? -1 : 1;
+    const hand = new THREE.Group();
+    hand.name = `hand${side}`;
+    hand.position.set(0, -0.3, -0.02);
+    parent.add(hand);
+
+    const palm = box(...OPERATOR_HAND_PROFILE.palm, glove, 0, 0, 0, null, hand);
+    palm.name = `hand${side}-palm`;
+    // Placa dorsal: el espesor va sobre Z (normal de la palma), no sobre Y.
+    // Un pequeño solape oculta z-fighting sin convertirla en un bloque interno.
+    const palmPanel = box(0.145, 0.12, 0.025, glovePanel, 0, 0.002, 0.108, null, hand);
+    palmPanel.name = `hand${side}-palm-panel`;
+
+    const wrist = add(wristGeometry, glovePanel, 0, 0.095, 0.008, null, hand);
+    wrist.name = `hand${side}-wrist`;
+    wrist.scale.z = OPERATOR_HAND_PROFILE.wrist[2] / OPERATOR_HAND_PROFILE.wrist[0];
+
+    const fingers = {};
+    for (let index = 0; index < fingerNames.length; index++) {
+      const fingerName = fingerNames[index];
+      const totalLength = OPERATOR_HAND_PROFILE.fingerLengths[index];
+      const proximalLength = totalLength * 0.56;
+      const distalLength = totalLength - proximalLength;
+      const root = new THREE.Group();
+      root.name = `hand${side}-${fingerName}`;
+      root.position.set(direction * fingerSlots[index], -0.058, -0.058);
+      root.rotation.x = OPERATOR_HAND_PROFILE.fingerCurls[index];
+      root.rotation.z = direction * fingerSplay[index];
+
+      const proximal = new THREE.Mesh(fingerGeometry, glove);
+      proximal.name = `hand${side}-${fingerName}-proximal`;
+      proximal.position.y = -proximalLength / 2;
+      proximal.scale.y = proximalLength;
+      proximal.castShadow = true;
+      root.add(proximal);
+
+      const distalJoint = new THREE.Group();
+      distalJoint.name = `hand${side}-${fingerName}-distal-joint`;
+      distalJoint.position.y = -proximalLength;
+      distalJoint.rotation.x = OPERATOR_HAND_PROFILE.distalCurls[index];
+      const distal = new THREE.Mesh(fingerGeometry, gloveGrip);
+      distal.name = `hand${side}-${fingerName}-distal`;
+      distal.position.y = -distalLength / 2;
+      distal.scale.set(0.92, distalLength, 0.92);
+      distal.castShadow = true;
+      distalJoint.add(distal);
+      root.add(distalJoint);
+      hand.add(root);
+      fingers[fingerName] = { root, proximal, distalJoint, distal, totalLength };
+    }
+
+    const thumbLength = OPERATOR_HAND_PROFILE.thumbLength;
+    const thumbProximalLength = thumbLength * 0.58;
+    const thumbDistalLength = thumbLength - thumbProximalLength;
+    const thumb = new THREE.Group();
+    thumb.name = `hand${side}-thumb`;
+    thumb.position.set(direction * 0.088, -0.005, -0.035);
+    thumb.rotation.set(0.5, 0, direction * 0.82);
+    const thumbProximal = new THREE.Mesh(thumbGeometry, glove);
+    thumbProximal.name = `hand${side}-thumb-proximal`;
+    thumbProximal.position.y = -thumbProximalLength / 2;
+    thumbProximal.scale.y = thumbProximalLength;
+    thumbProximal.castShadow = true;
+    thumb.add(thumbProximal);
+    const thumbDistalJoint = new THREE.Group();
+    thumbDistalJoint.position.y = -thumbProximalLength;
+    thumbDistalJoint.rotation.x = 0.72;
+    const thumbDistal = new THREE.Mesh(thumbGeometry, gloveGrip);
+    thumbDistal.name = `hand${side}-thumb-distal`;
+    thumbDistal.position.y = -thumbDistalLength / 2;
+    thumbDistal.scale.set(0.92, thumbDistalLength, 0.92);
+    thumbDistal.castShadow = true;
+    thumbDistalJoint.add(thumbDistal);
+    thumb.add(thumbDistalJoint);
+    hand.add(thumb);
+
+    hand.userData.anatomy = {
+      palm,
+      palmPanel,
+      wrist,
+      fingers,
+      thumb: { root: thumb, proximal: thumbProximal, distal: thumbDistal },
+    };
+    return hand;
+  };
+
+  const handL = makeOperatorHand('L', forearmL);
+  const handR = makeOperatorHand('R', forearmR);
 
   const gun = new THREE.Group();
   gun.name = 'gun';
-  gun.position.set(0, -0.22, -0.1);
+  gun.position.set(0, 1.16, -0.12);
+  gun.rotation.x = -0.32;
   box(0.14, 0.16, 0.55, gunMat, 0, 0.04, -0.24, null, gun);
   box(0.12, 0.14, 0.24, metal, 0, 0.04, 0.13, null, gun);
   box(0.09, 0.1, 0.38, gunAccent, 0, 0.04, -0.67, null, gun);
-  box(0.1, 0.12, 0.2, metal, 0, -0.14, -0.26, null, gun);
+  const gunGrip = box(0.105, 0.24, 0.12, metal, 0, -0.12, 0, null, gun);
+  gunGrip.name = 'operator-gun-primary-grip';
   box(0.06, 0.06, 0.12, gunAccent, 0, 0.14, -0.48, null, gun);
   box(0.12, 0.06, 0.08, metal, 0, 0.08, -0.9, null, gun);
-  box(0.12, 0.08, 0.2, armorEdge, 0, 0.12, -0.18, null, gun);
+  const gunHandguard = box(0.13, 0.13, 0.34, armorEdge, 0, 0, -0.38, null, gun);
+  gunHandguard.name = 'operator-gun-support-grip';
   box(0.035, 0.05, 0.32, metal, 0, 0.04, -1.02, null, gun);
   const muzzleFlash = add(
     new THREE.ConeGeometry(0.09, 0.28, 6), flashMaterial,
@@ -228,7 +348,87 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   muzzleFlash.visible = false;
   muzzleFlash.castShadow = false;
   muzzleFlash.receiveShadow = false;
-  forearmR.add(gun);
+
+  // Objetivos comunes arma/manos. Las palmas permanecen tangentes a las dos
+  // superficies de agarre mientras los brazos resuelven el alcance desde los
+  // hombros; así apuntar no rota el arma a través de los guantes.
+  const rightGripTarget = new THREE.Object3D();
+  rightGripTarget.name = 'operator-right-hand-target';
+  rightGripTarget.position.set(0, -0.11, 0.165);
+  const leftGripTarget = new THREE.Object3D();
+  leftGripTarget.name = 'operator-left-hand-target';
+  leftGripTarget.position.set(0, -0.17, -0.38);
+  leftGripTarget.rotation.x = Math.PI / 2;
+  gun.add(rightGripTarget, leftGripTarget);
+  torso.add(gun);
+
+  const armDown = new THREE.Vector3(0, -1, 0);
+  const upperLength = 0.52;
+  const forearmWrist = new THREE.Vector3(0, -0.205, -0.01);
+  const handWrist = new THREE.Vector3(0, 0.095, 0.008);
+  const gunMatrix = new THREE.Matrix4();
+  const targetMatrix = new THREE.Matrix4();
+  const desiredHandMatrix = new THREE.Matrix4();
+  const parentMatrix = new THREE.Matrix4();
+  const localHandMatrix = new THREE.Matrix4();
+  const inverseArm = new THREE.Quaternion();
+  const shoulder = new THREE.Vector3();
+  const wrist = new THREE.Vector3();
+  const reach = new THREE.Vector3();
+  const elbow = new THREE.Vector3();
+  const upperDirection = new THREE.Vector3();
+  const lowerDirection = new THREE.Vector3();
+  const localLowerDirection = new THREE.Vector3();
+  const poleDirection = new THREE.Vector3();
+  const unitForearmWrist = forearmWrist.clone().normalize();
+  const lowerLength = forearmWrist.length();
+  const handScale = new THREE.Vector3();
+  const operatorGripBindings = [
+    [-1, armL, forearmL, handL, leftGripTarget],
+    [1, armR, forearmR, handR, rightGripTarget],
+  ];
+
+  const syncOperatorGrip = () => {
+    gun.updateMatrix();
+    gunMatrix.copy(gun.matrix);
+    for (const [side, arm, forearm, hand, target] of operatorGripBindings) {
+      target.updateMatrix();
+      targetMatrix.copy(target.matrix);
+      desiredHandMatrix.multiplyMatrices(gunMatrix, targetMatrix);
+      wrist.copy(handWrist).applyMatrix4(desiredHandMatrix);
+      shoulder.copy(arm.position);
+      reach.subVectors(wrist, shoulder);
+      const distance = Math.max(0.001, reach.length());
+      reach.multiplyScalar(1 / distance);
+      const safeDistance = Math.min(
+        upperLength + lowerLength - 0.001,
+        Math.max(Math.abs(upperLength - lowerLength) + 0.001, distance),
+      );
+      const along = (upperLength ** 2 - lowerLength ** 2 + safeDistance ** 2) / (2 * safeDistance);
+      const bend = Math.sqrt(Math.max(0, upperLength ** 2 - along ** 2));
+      poleDirection.set(side, -0.18, 0.55);
+      poleDirection.addScaledVector(reach, -poleDirection.dot(reach));
+      if (poleDirection.lengthSq() < 0.0001) poleDirection.set(side, 0, 0.5);
+      poleDirection.normalize();
+      elbow.copy(shoulder).addScaledVector(reach, along).addScaledVector(poleDirection, bend);
+
+      upperDirection.subVectors(elbow, shoulder).normalize();
+      arm.quaternion.setFromUnitVectors(armDown, upperDirection);
+      arm.updateMatrix();
+      forearm.position.set(0, -upperLength, 0);
+      lowerDirection.subVectors(wrist, elbow).normalize();
+      inverseArm.copy(arm.quaternion).invert();
+      localLowerDirection.copy(lowerDirection).applyQuaternion(inverseArm).normalize();
+      forearm.quaternion.setFromUnitVectors(unitForearmWrist, localLowerDirection);
+      forearm.updateMatrix();
+
+      parentMatrix.multiplyMatrices(arm.matrix, forearm.matrix);
+      localHandMatrix.copy(parentMatrix).invert().multiply(desiredHandMatrix);
+      localHandMatrix.decompose(hand.position, hand.quaternion, handScale);
+      hand.scale.set(1, 1, 1);
+    }
+  };
+  syncOperatorGrip();
 
   const hatMesh = makeHat(hat);
   if (hatMesh) {
@@ -241,8 +441,9 @@ export function makeHumanoid(color, name, userDataFor, nameColor, hat) {
   torso.add(nameSprite);
 
   return {
-    group, parts, torso, body, legL, legR, armL, armR, forearmL, forearmR,
-    head, headPivot, gun, muzzleFlash, nameSprite,
+    group, parts, torso, body, legL, legR, armL, armR, forearmL, forearmR, handL, handR,
+    head, headPivot, gun, gunGrip, gunHandguard, muzzleFlash, nameSprite,
+    gripTargets: { left: leftGripTarget, right: rightGripTarget }, syncOperatorGrip,
     armor: armorGroup, headgear, equipment,
     motion: { hit: 0, hitSide: 1, recoil: 0 },
   };
@@ -289,16 +490,22 @@ export function animateHumanoid(rig, dt, speed, walkTimeRef, aiming, aimPitch = 
 
   rig.legL.rotation.x = damp(rig.legL.rotation.x, pose.legL, response);
   rig.legR.rotation.x = damp(rig.legR.rotation.x, pose.legR, response);
-  rig.armR.rotation.x = damp(rig.armR.rotation.x, pose.armR, response);
-  rig.armL.rotation.x = damp(rig.armL.rotation.x, pose.armL, response);
-  rig.armL.position.x = damp(rig.armL.position.x, pose.armLx, response);
-  rig.armR.position.x = damp(rig.armR.position.x, pose.armRx, response);
-  rig.armL.rotation.z = damp(rig.armL.rotation.z, pose.armLz, response);
-  rig.armR.rotation.z = damp(rig.armR.rotation.z, pose.armRz, response);
-  if (rig.forearmL) rig.forearmL.rotation.x = damp(rig.forearmL.rotation.x, pose.forearmL, response);
-  if (rig.forearmR) rig.forearmR.rotation.x = damp(rig.forearmR.rotation.x, pose.forearmR, response);
-  rig.gun.rotation.x = damp(rig.gun.rotation.x, pose.gunRotationX, response);
-  rig.gun.position.z = damp(rig.gun.position.z, pose.gunPositionZ, response);
+  rig.armL.position.x = damp(rig.armL.position.x, aiming ? -0.36 : -0.4, response);
+  rig.armR.position.x = damp(rig.armR.position.x, aiming ? 0.36 : 0.4, response);
+  const safePitch = Math.min(1.15, Math.max(-1.15, Number(aimPitch) || 0));
+  const gunTargetX = 0;
+  const gunTargetY = aiming ? 1.32 : 1.16 - pose.sprint * 0.08;
+  const gunTargetZ = aiming ? -0.25 : -0.12 + pose.sprint * 0.035;
+  const gunTargetRotation = aiming
+    ? -safePitch + motion.recoil * 0.08
+    : -0.32 - pose.sprint * 0.16 + motion.recoil * 0.04;
+  rig.gun.position.x = damp(rig.gun.position.x, gunTargetX, response);
+  rig.gun.position.y = damp(rig.gun.position.y, gunTargetY, response);
+  rig.gun.position.z = damp(rig.gun.position.z, gunTargetZ, response);
+  rig.gun.rotation.x = damp(rig.gun.rotation.x, gunTargetRotation, response);
+  rig.gun.rotation.y = damp(rig.gun.rotation.y, 0, response);
+  rig.gun.rotation.z = damp(rig.gun.rotation.z, 0, response);
+  rig.syncOperatorGrip?.();
   rig.torso.position.y = damp(rig.torso.position.y, pose.bodyY, response);
   rig.torso.rotation.x = damp(rig.torso.rotation.x, pose.torsoPitch, response);
   rig.torso.rotation.y = damp(rig.torso.rotation.y, pose.torsoYaw, response);
@@ -347,12 +554,11 @@ export function resetHumanoidPose(rig) {
   rig.armR.rotation.set(0, 0, 0);
   rig.armL.position.x = -0.4;
   rig.armR.position.x = 0.4;
-  if (rig.forearmL) rig.forearmL.rotation.set(0, 0, 0);
-  if (rig.forearmR) rig.forearmR.rotation.set(0, 0, 0);
   if (rig.headPivot) rig.headPivot.rotation.set(0, 0, 0);
   if (rig.equipment) rig.equipment.rotation.set(0, 0, 0);
-  rig.gun.rotation.set(0, 0, 0);
-  rig.gun.position.z = -0.1;
+  rig.gun.position.set(0, 1.16, -0.12);
+  rig.gun.rotation.set(-0.32, 0, 0);
+  rig.syncOperatorGrip?.();
   if (rig.muzzleFlash) rig.muzzleFlash.visible = false;
   if (rig.nameSprite?.material) {
     rig.nameSprite.material.opacity = 1;
@@ -367,7 +573,9 @@ export function disposeHumanoid(rig) {
   const materials = new Set();
   const textures = new Set();
   rig.group.traverse((object) => {
-    if (object.geometry) geometries.add(object.geometry);
+    // Sprite usa una geometría singleton interna de Three.js compartida entre
+    // todos los nombres. No pertenece al rig y disponerla invalida a los demás.
+    if (object.geometry && !object.isSprite) geometries.add(object.geometry);
     const list = Array.isArray(object.material) ? object.material : [object.material];
     for (const material of list) {
       if (!material) continue;

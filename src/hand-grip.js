@@ -29,17 +29,17 @@ const supportFingers = ({ compact = false } = {}) => ({
 });
 
 const knifeFingers = () => ({
-  index: digit([0.56, 0.68, 0.60], { splay: 0.032, twist: -0.018 }),
-  middle: digit([0.65, 0.78, 0.69], { splay: 0.01 }),
-  ring: digit([0.70, 0.82, 0.74], { splay: -0.014 }),
-  pinky: digit([0.74, 0.86, 0.78], { splay: -0.04, twist: 0.02 }),
+  index: digit([0.59, 0.72, 0.64], { splay: 0.028, twist: -0.022 }),
+  middle: digit([0.67, 0.80, 0.72], { splay: 0.009, twist: -0.006 }),
+  ring: digit([0.72, 0.84, 0.77], { splay: -0.013, twist: 0.008 }),
+  pinky: digit([0.77, 0.89, 0.82], { splay: -0.042, twist: 0.026 }),
 });
 
 const guardFingers = () => ({
-  index: digit([0.18, 0.24, 0.18], { contact: false, splay: 0.14, twist: -0.025 }),
-  middle: digit([0.22, 0.29, 0.22], { contact: false, splay: 0.052 }),
-  ring: digit([0.27, 0.34, 0.26], { contact: false, splay: -0.045 }),
-  pinky: digit([0.34, 0.42, 0.32], { contact: false, splay: -0.14, twist: 0.025 }),
+  index: digit([0.20, 0.28, 0.22], { contact: false, splay: 0.14, twist: -0.028 }),
+  middle: digit([0.25, 0.34, 0.27], { contact: false, splay: 0.052, twist: -0.006 }),
+  ring: digit([0.31, 0.40, 0.32], { contact: false, splay: -0.045, twist: 0.008 }),
+  pinky: digit([0.38, 0.49, 0.39], { contact: false, splay: -0.14, twist: 0.03 }),
 });
 
 const triggerHand = (position, rotation) => ({
@@ -101,17 +101,17 @@ export const HAND_GRIP_PROFILES = deepFreeze({
       role: 'knife',
       // La palma queda fuera del volumen del mango; son las yemas las que
       // alcanzan la goma y no el centro de los dedos.
-      position: [0.020, -0.106, 0.070],
-      rotation: [-0.09, 1.48, 0.035],
+      position: [0.018, -0.106, 0.068],
+      rotation: [-0.09, 1.46, 0.035],
       fingers: knifeFingers(),
-      thumb: digit([0.48, 0.62], { splay: 0.025, twist: -0.055 }),
+      thumb: digit([0.54, 0.68], { splay: 0.018, twist: -0.06 }),
     },
     left: {
       role: 'guard',
       position: [-0.155, -0.132, 0.012],
       rotation: [-0.42, -0.34, -0.36],
       fingers: guardFingers(),
-      thumb: digit([0.28, 0.36], { contact: false, splay: -0.16, twist: 0.035 }),
+      thumb: digit([0.31, 0.40], { contact: false, splay: -0.16, twist: 0.04 }),
     },
   },
 });

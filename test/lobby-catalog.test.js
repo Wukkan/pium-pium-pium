@@ -211,4 +211,8 @@ test('authoritative room errors always return to the lobby instead of changing g
   assert.equal(lobbyJoinFailureAction('INVALID_SELECTION'), 'lobby');
   assert.equal(lobbyJoinFailureAction('network', { serverAvailable: true }), 'lobby');
   assert.equal(lobbyJoinFailureAction('network', { serverAvailable: false }), 'offline');
+  assert.equal(lobbyJoinFailureAction('network', {
+    serverAvailable: false,
+    recoveringOnlineSession: true,
+  }), 'lobby', 'a failed reconnect must not silently lock an established online player into local mode');
 });

@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
+import { OBB } from 'three/addons/math/OBB.js';
 
 import {
   applyKnifeMeleePose,
@@ -17,6 +19,11 @@ const KINDS = [...FIREARMS, 'knife'];
 const FINGERS = ['index', 'middle', 'ring', 'pinky'];
 const SUPPORT_FORWARD = ['shotgun', 'smg', 'ar', 'sniper', 'launcher'];
 const RELOAD_RELEASE = ['pistol', 'smg', 'ar', 'sniper', 'revolver', 'launcher'];
+
+function worldObb(mesh) {
+  mesh.geometry.computeBoundingBox();
+  return new OBB().fromBox3(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld);
+}
 
 function assertFiniteVector(value, length, label) {
   assert.equal(Array.isArray(value), true, `${label} must be an array`);
@@ -140,6 +147,44 @@ test('knife pose closes the dominant hand around the handle and keeps a separate
   assert.notDeepEqual(knife.left.position, knife.right.position, 'guard and knife hands cannot overlap');
 });
 
+test('knife grip follows a closing finger cascade with an opposed thumb', () => {
+  const { right: dominant, left: guard } = handGripState({ kind: 'knife' });
+  const dominantCurls = FINGERS.map((finger) => average(dominant.fingers[finger].curl));
+  const guardCurls = FINGERS.map((finger) => average(guard.fingers[finger].curl));
+
+  assert.ok(
+    dominantCurls.every((curl, index) => index === 0 || curl > dominantCurls[index - 1]),
+    'knife fingers must close progressively from index to pinky',
+  );
+  assert.ok(
+    FINGERS.every((finger) => {
+      const [mcp, pip, dip] = dominant.fingers[finger].curl;
+      return pip > dip && dip > mcp;
+    }),
+    'each gripping finger needs a readable MCP/PIP/DIP wrap',
+  );
+  assert.ok(
+    FINGERS.every((finger, index) => (
+      index === 0 || dominant.fingers[finger].splay < dominant.fingers[FINGERS[index - 1]].splay
+    )),
+    'dominant fingers must fan naturally across the handle',
+  );
+  assert.ok(dominant.thumb.curl[1] > dominant.thumb.curl[0]);
+  assert.ok(average(dominant.thumb.curl) >= 0.6, 'thumb must visibly oppose the closed fingers');
+  assert.equal(dominant.thumb.contact, true);
+  assert.ok(Math.abs(dominant.rotation[0]) < 0.15, 'knife wrist flexion is excessive');
+  assert.ok(dominant.rotation[1] >= 1.35 && dominant.rotation[1] <= 1.5, 'knife wrist lost its edge grip');
+  assert.ok(Math.abs(dominant.rotation[2]) < 0.1, 'knife wrist deviation is excessive');
+
+  assert.ok(
+    guardCurls.every((curl, index) => index === 0 || curl > guardCurls[index - 1]),
+    'guard hand must retain a relaxed anatomical cascade',
+  );
+  assert.ok(guardCurls.every((curl) => curl <= 0.5), 'guard hand must not form a second fist');
+  assert.ok(FINGERS.every((finger) => guard.fingers[finger].contact === false));
+  assert.equal(guard.thumb.contact, false);
+});
+
 test('knife fingertips rest on the handle surface in anatomical order', () => {
   const model = buildKnifeModel();
   const handle = model.getObjectByName('knife-handle');
@@ -153,6 +198,19 @@ test('knife fingertips rest on the handle surface in anatomical order', () => {
     const axis = end.clone().sub(start);
     const axisLengthSq = axis.lengthSq();
     const parameters = [];
+    const palm = model.getObjectByName('right-glove-palm');
+    const palmCenter = palm.getWorldPosition(new THREE.Vector3());
+    const handleObb = worldObb(handle);
+    assert.equal(
+      handleObb.containsPoint(palmCenter),
+      false,
+      `${progress}: dominant palm center penetrates the handle OBB`,
+    );
+    const palmInHandle = handle.worldToLocal(palmCenter.clone());
+    assert.ok(
+      Math.abs(palmInHandle.x) >= handleObb.halfSize.x + 0.001,
+      `${progress}: dominant palm lacks radial clearance (${palmInHandle.x})`,
+    );
 
     const surfaceDistance = (object) => {
       const point = object.getWorldPosition(object.position.clone());
@@ -164,7 +222,7 @@ test('knife fingertips rest on the handle surface in anatomical order', () => {
     for (let index = 1; index <= 4; index++) {
       const distance = surfaceDistance(model.getObjectByName(`right-finger-${index}-tip`));
       assert.ok(
-        distance >= 0.039 && distance <= 0.057,
+        distance >= 0.039 && distance <= 0.054,
         `${progress}: finger ${index} misses the handle surface (${distance})`,
       );
     }
@@ -176,7 +234,7 @@ test('knife fingertips rest on the handle surface in anatomical order', () => {
     parameters.length = 0;
     const thumbDistance = surfaceDistance(model.getObjectByName('right-thumb-tip'));
     assert.ok(
-      thumbDistance >= 0.038 && thumbDistance <= 0.056,
+      thumbDistance >= 0.038 && thumbDistance <= 0.054,
       `${progress}: thumb penetrates or floats off the handle (${thumbDistance})`,
     );
   }

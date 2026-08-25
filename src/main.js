@@ -2,7 +2,12 @@ import * as THREE from 'three';
 import * as QUARKS from 'three.quarks';
 import { buildWorld } from './world.js';
 import { Player } from './player.js';
-import { WeaponSystem, WEAPON_DEFS, WEAPON_ORDER } from './weapons.js';
+import {
+  WeaponSystem,
+  WEAPON_DEFS,
+  WEAPON_ORDER,
+} from './weapons.js';
+import { knifeDamageLimit } from './shared/combat-rules.js';
 import { BotManager } from './bots.js';
 import { Effects } from './effects.js';
 import { AudioSys } from './audio.js';
@@ -1213,11 +1218,16 @@ addEventListener('keydown', (e) => {
   if (grenades.throwFrom(camera)) playCombatSound('nadeThrow');
 });
 
-// --- cuchillo (V): cambio temporal de viewmodel, 100 de daño por la espalda ---
+// --- cuchillo persistente: V lo equipa; clic ataca; 100 de daño por la espalda ---
 let offlineBotKilled = null; // lo asigna setupOffline
 
+function equipKnife() {
+  if (player.dead || state !== 'playing' || weapons.inputBlocked) return false;
+  return weapons.equipKnife();
+}
+
 function doKnife() {
-  if (player.dead || state !== 'playing') return;
+  if (player.dead || state !== 'playing' || !weapons.knifeEquipped) return false;
   const strike = () => {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
     fwd.y = 0;
@@ -1229,10 +1239,7 @@ function doKnife() {
       if (Math.hypot(dx, dz) > 2.4 || Math.abs(pos.y - player.pos.y) > 2) return false;
       return new THREE.Vector3(dx, 0, dz).normalize().dot(fwd) > 0.5;
     };
-    const calcDmg = (yaw) => {
-      const facing = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-      return facing.dot(fwd) > 0.35 ? 100 : 40; // por la espalda = letal
-    };
+    const calcDmg = (pos, yaw, kind) => knifeDamageLimit(player.pos, pos, yaw, kind);
 
     if (online && remotes) {
       const grupos = [['pl', remotes.players], ['bot', remotes.bots]];
@@ -1241,7 +1248,7 @@ function doKnife() {
           if (!ent.alive) continue;
           const pos = ent.rig.group.position;
           if (!enRango(pos)) continue;
-          const dmg = calcDmg(ent.rig.group.rotation.y);
+          const dmg = calcDmg(pos, ent.rig.group.rotation.y, kind);
           effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
           hud.hitmarker(false);
           playCombatSound('hit', dmg >= 100);
@@ -1253,7 +1260,7 @@ function doKnife() {
     } else if (botsLocal) {
       for (const bot of botsLocal.bots) {
         if (bot.dead || !enRango(bot.pos)) continue;
-        const dmg = calcDmg(bot.yaw);
+        const dmg = calcDmg(bot.pos, bot.yaw, 'bot');
         const killed = bot.takeDamage(dmg, player.pos);
         effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
         hud.hitmarker(killed);
@@ -1266,9 +1273,12 @@ function doKnife() {
       }
     }
   };
-  if (!weapons.beginMelee(strike)) return;
+  if (!weapons.beginMelee(strike)) return false;
   playCombatSound('knife');
+  return true;
 }
+
+weapons.onMeleeTrigger = doKnife;
 
 let remotes = null;      // modo online
 let botsLocal = null;    // modo offline
@@ -1276,6 +1286,8 @@ let online = false;
 let serverAvailable = false;
 let joined = false;
 let lastSnap = null;
+let onlineSessionToken = 0;
+let hasOnlineSessionHistory = false;
 let kills = 0, deaths = 0;
 let state = 'menu'; // menu | playing | dead
 let fallbackControlsActive = false;
@@ -1349,6 +1361,7 @@ function syncJoinedRoomOccupancy(rawHumans) {
 
 function renderLobbySelector() {
   const catalog = lobbyCatalogState({ selection: lobbySelection, occupancy: lobbyRooms });
+  const recoveringOnline = hasOnlineSessionHistory && !joined && !botsLocal;
   for (const mode of catalog.modes) {
     const button = lobbyModeGrid?.querySelector(`[data-lobby-mode="${mode.id}"]`);
     if (!button) continue;
@@ -1397,11 +1410,13 @@ function renderLobbySelector() {
       ? 'VOLVER A LA PARTIDA'
       : botsLocal
         ? 'VOLVER A ENTRENAMIENTO'
-        : serverAvailable && selected.full
-          ? 'SALA LLENA'
-          : serverAvailable
-            ? `ENTRAR SALA ${selected.room}`
-            : 'JUGAR LOCAL';
+        : recoveringOnline && !serverAvailable
+          ? 'REINTENTAR ONLINE'
+          : serverAvailable && selected.full
+            ? 'SALA LLENA'
+            : serverAvailable
+              ? `ENTRAR SALA ${selected.room}`
+              : 'JUGAR LOCAL';
   playBtn.innerHTML = `${label} <span aria-hidden="true">→</span>`;
   renderRoomSummary();
 }
@@ -1452,7 +1467,11 @@ async function refreshLobbyRooms({ announce = false } = {}) {
     lobbyRooms = [];
     lobbyCatalogReady = false;
     serverAvailable = false;
-    if (!net.connected) hud.setNetStatus('🔴 Sin servidor — entrenamiento local disponible', false);
+    if (!net.connected) {
+      hud.setNetStatus(hasOnlineSessionHistory
+        ? '🔴 Conexión interrumpida — reintenta la sala online'
+        : '🔴 Sin servidor — entrenamiento local disponible', false);
+    }
     if (announce) hud.info('No se pudo actualizar la lista de salas');
     renderLobbySelector();
     return false;
@@ -1595,13 +1614,95 @@ function setupOffline() {
   renderLobbySelector();
 }
 
+const ONLINE_NET_EVENTS = Object.freeze([
+  'snap', 'match', 'podium', 'podiumStage', 'votes', 'chat', 'pong', 'ammo',
+  'botcfg', 'cbox', 'gun', 'fire', 'kill', 'nade', 'ouch', 'spawn', 'med',
+  'aviso', 'botbye',
+]);
+const ignoreOnlineMessage = () => {};
+
+function clearOnlineSessionBindings() {
+  for (const type of ONLINE_NET_EVENTS) net.on(type, ignoreOnlineMessage);
+  net.onClose(ignoreOnlineMessage);
+  document.getElementById('podium').onclick = null;
+
+  weapons.getTargets = () => [...world.occluders];
+  weapons.onTargetHit = ignoreOnlineMessage;
+  weapons.onShot = null;
+  grenades.onThrow = null;
+  grenades.onExplode = null;
+  player.onDeath = null;
+}
+
+function teardownOnlineSession(sessionToken = onlineSessionToken) {
+  if (sessionToken !== onlineSessionToken) return false;
+  const hadOnlineSession = online || joined || !!remotes;
+  onlineSessionToken++;
+
+  net.stopHeartbeat();
+  clearOnlineSessionBindings();
+  clearOnlineCrateRestores();
+  remotes?.dispose();
+  remotes = null;
+  kitsMgr.sync([]);
+
+  online = false;
+  joined = false;
+  connecting = false;
+  lastSnap = null;
+  player.netMode = false;
+  player.keys = {};
+  player._jumpWasHeld = false;
+  pendingBotRequestId = null;
+  botDraftDirty = false;
+
+  clearInterval(podiumTimer);
+  podiumTimer = null;
+  podiumOpen = false;
+  podiumStage = 'map';
+  setChat(false);
+  setBuyMenu(false, false);
+  setBotPanel(false, false);
+  setTeamPicker(false);
+  refreshWeaponInputBlock();
+
+  weapons.clearInput();
+  weapons.setForced(null);
+  weapons.unequipKnife(false);
+  audio.stopCombat();
+  setFallbackControls(false);
+  if (document.pointerLockElement) document.exitPointerLock();
+
+  state = 'menu';
+  hud.hidePodium();
+  hud.showDeath(false);
+  hud.showScores(false);
+  hud.setScope(false);
+  hud.setMatchBanner('');
+  hud.setPing(-1);
+  hud.showHud(false);
+  hud.showMenu(true);
+  showMenuScreen('play');
+  hud.setMenuStats(kills, deaths);
+  nameInput.disabled = false;
+  hud.setNetStatus('🔴 Conexión perdida — puedes volver a conectarte', false);
+  if (hadOnlineSession) hud.info('⚠ Conexión perdida · vuelve a entrar desde el menú');
+  renderLobbySelector();
+  return hadOnlineSession;
+}
+
 // --- cableado modo ONLINE ---
 function setupOnline() {
+  net.stopHeartbeat();
+  remotes?.dispose();
+  const sessionToken = ++onlineSessionToken;
   online = true;
+  hasOnlineSessionHistory = true;
   serverAvailable = true;
   lobbySelection = sanitizeLobbySelection({ mode: net.mode, room: net.room }, lobbySelection);
   saveLobbySelection();
   player.netMode = true;
+  player.onDeath = null;
   remotes = new Remotes(scene);
 
   weapons.getTargets = () => [...world.occluders, ...remotes.getHitMeshes()];
@@ -1731,8 +1832,6 @@ function setupOnline() {
     }
     receiveBotConfig(m, acknowledged);
   });
-  setInterval(() => { if (net.connected) net.sendPing(); }, 3000);
-
   net.on('cbox', (m) => {
     const pos = syncOnlineCrate(m.id, !!m.al);
     if (pos && !m.al) {
@@ -1828,15 +1927,11 @@ function setupOnline() {
   });
 
   net.on('aviso', (m) => hud.info(String(m.txt).slice(0, 40)));
-  net.on('botbye', (m) => remotes.removeBot(m.id));
+  net.on('botbye', (m) => remotes?.removeBot(m.id));
   net.onClose(() => {
-    clearOnlineCrateRestores();
-    pendingBotRequestId = null;
-    if (botPanelOpen) setBotPanel(false, false);
-    hud.setNetStatus('🔴 Conexión perdida — recarga la página', false);
-    hud.info('⚠ Conexión perdida');
-    renderRoomSummary();
+    teardownOnlineSession(sessionToken);
   });
+  net.startHeartbeat(3000);
 
   renderLobbySelector();
 }
@@ -1883,7 +1978,10 @@ async function joinAndPlay() {
     if (hi.map) loadWorldMap(hi.map);
     player.spawn(safePlayerSpawn(new THREE.Vector3(hi.spawn[0], hi.spawn[1], hi.spawn[2])));
   } catch (error) {
-    if (lobbyJoinFailureAction(error?.code, { serverAvailable }) === 'lobby') {
+    if (lobbyJoinFailureAction(error?.code, {
+      serverAvailable,
+      recoveringOnlineSession: hasOnlineSessionHistory,
+    }) === 'lobby') {
       if (document.pointerLockElement) document.exitPointerLock();
       state = 'menu';
       hud.showMenu(true);
@@ -2071,12 +2169,14 @@ function renderRoomSummary() {
   if (detail) {
     detail.textContent = lobbyCatalogReady
       ? `${selected.detail} · ${selected.availableSlots} plaza${selected.availableSlots === 1 ? '' : 's'} libre${selected.availableSlots === 1 ? '' : 's'}.`
-      : 'Elige tu modo y sala; si el servidor no responde podrás entrenar localmente.';
+      : hasOnlineSessionHistory
+        ? 'La conexión se interrumpió; elige la sala y vuelve a intentarlo sin recargar.'
+        : 'Elige tu modo y sala; si el servidor no responde podrás entrenar localmente.';
   }
   if (status) {
     status.textContent = serverAvailable
       ? selected.full ? 'SALA COMPLETA' : 'SALA DISPONIBLE'
-      : 'ENTRENAMIENTO LOCAL';
+      : hasOnlineSessionHistory ? 'RECONEXIÓN ONLINE' : 'ENTRENAMIENTO LOCAL';
   }
 }
 
@@ -2352,6 +2452,12 @@ function setBuyMenu(open, restorePointer = true) {
   }
 }
 
+weapons.onOpenBuy = () => {
+  // El listener de slots corre antes que el listener global del menú. Diferir
+  // la apertura evita que esa misma tecla compre el arma accidentalmente.
+  queueMicrotask(() => setBuyMenu(true));
+};
+
 function setBuyBackgroundInert(inert) {
   for (const id of ['app', 'hud', 'menu', 'death', 'bot-panel']) {
     const element = document.getElementById(id);
@@ -2464,7 +2570,7 @@ addEventListener('keydown', (e) => {
     setBuyMenu(!buyOpen);
     return;
   }
-  if (isAction(e, 'melee') && !e.repeat && !weapons.inputBlocked) doKnife();
+  if (isAction(e, 'melee') && !e.repeat && !weapons.inputBlocked) equipKnife();
   if (isAction(e, 'changeTeam') && !e.repeat && online && matchInfo.mode === 'teams' && !podiumOpen) {
     setTeamPicker(!teamPickerOpen);
   }
@@ -2583,7 +2689,7 @@ requestAnimationFrame(loop);
 
 // gancho de depuración/pruebas (no afecta al juego)
 window.__game = {
-  scene, camera, renderer, player, weapons, world, effects, net, tick, grenades, doKnife,
+  scene, camera, renderer, player, weapons, world, effects, net, tick, grenades, equipKnife, doKnife,
   getRemotes: () => remotes,
   getBots: () => botsLocal,
   getState: () => state,

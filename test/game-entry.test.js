@@ -51,3 +51,45 @@ test('the room entry CTA stays fixed and visible on compact viewports', () => {
 test('a late Pointer Lock grant cannot capture the cursor over an overlay', () => {
   assert.match(mainSource, /if \(document\.pointerLockElement\) \{\s*if \(buyOpen \|\| botPanelOpen \|\| podiumOpen \|\| teamPickerOpen\) \{\s*document\.exitPointerLock\(\);\s*return;/);
 });
+
+test('online lifecycle owns one heartbeat and tears down the dead session', () => {
+  assert.match(mainSource, /net\.startHeartbeat\(3000\);/);
+  assert.doesNotMatch(mainSource, /setInterval\([^)]*sendPing|setInterval\([\s\S]{0,120}?net\.sendPing/);
+
+  const teardown = mainSource.match(
+    /function teardownOnlineSession\([\s\S]*?\n}\n\n\/\/ --- cableado modo ONLINE ---/,
+  )?.[0] || '';
+  assert.match(teardown, /net\.stopHeartbeat\(\);/);
+  assert.match(teardown, /remotes\?\.dispose\(\);\s*remotes = null;/);
+  assert.match(teardown, /online = false;\s*joined = false;/);
+  assert.match(teardown, /player\.netMode = false;/);
+  assert.match(teardown, /nameInput\.disabled = false;/);
+  assert.match(teardown, /state = 'menu';/);
+});
+
+test('disconnect removes callbacks and overlays that belonged to the online session', () => {
+  const bindings = mainSource.match(
+    /function clearOnlineSessionBindings\(\)[\s\S]*?\n}/,
+  )?.[0] || '';
+  assert.match(bindings, /weapons\.getTargets = \(\) => \[\.\.\.world\.occluders];/);
+  assert.match(bindings, /weapons\.onShot = null;/);
+  assert.match(bindings, /grenades\.onThrow = null;/);
+  assert.match(bindings, /grenades\.onExplode = null;/);
+
+  const teardown = mainSource.match(
+    /function teardownOnlineSession\([\s\S]*?\n}\n\n\/\/ --- cableado modo ONLINE ---/,
+  )?.[0] || '';
+  assert.match(teardown, /setChat\(false\);/);
+  assert.match(teardown, /setBuyMenu\(false, false\);/);
+  assert.match(teardown, /setBotPanel\(false, false\);/);
+  assert.match(teardown, /setTeamPicker\(false\);/);
+  assert.match(teardown, /weapons\.clearInput\(\);/);
+  assert.match(teardown, /hud\.showMenu\(true\);/);
+});
+
+test('a previously established online session keeps later failures in the reconnectable lobby', () => {
+  assert.match(mainSource, /hasOnlineSessionHistory = true;/);
+  assert.match(mainSource, /recoveringOnlineSession: hasOnlineSessionHistory/);
+  assert.match(mainSource, /recoveringOnline && !serverAvailable\s*\? 'REINTENTAR ONLINE'/);
+  assert.match(mainSource, /weapons\.onOpenBuy = \(\) => \{[\s\S]*?queueMicrotask\(\(\) => setBuyMenu\(true\)\);/);
+});

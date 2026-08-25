@@ -28,6 +28,8 @@ El parche **Room Entry Fix 1.6.5** desacopla la entrada a la partida de Pointer 
 
 El parche **Clean Audio 1.6.6** reconstruye la mezcla para eliminar chasquidos, saturación y el ruido áspero de las ráfagas. Incorpora ataques y salidas suaves, offsets aleatorios para el ruido procedural, robo de voces con fundido, headroom y limitador final. Los disparos y explosiones lejanas ahora desaparecen al salir del radio audible, el audio de combate se pausa fuera de la partida y los intentos de disparar sin munición ya no generan una repetición dañada.
 
+La actualización **Knife & Hardening 1.7.0** convierte `V` en un cambio de arma persistente: el cuchillo permanece equipado, el clic izquierdo ejecuta el ataque y solo una ranura o la rueda vuelve al arma de fuego. Refina el agarre, los dedos, guantes y muñecas del operador; permite reconectar sin recargar la página; y endurece el servidor con reglas compartidas de daño, cadencia, munición, línea de visión, granadas y movimiento. También corrige el microvuelo por paquetes, los impactos sin disparo, la entrada tardía al podio y limita el abuso de mensajes por conexión.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.
@@ -84,7 +86,7 @@ Los cambios se aplican al momento y se guardan en el navegador. **Escape** perma
 | G | Lanzar granada (2 por vida) |
 | H | Abrir/cerrar el control de bots de la sala |
 | B | Abrir/cerrar el arsenal |
-| V | Ataque con cuchillo |
+| V | Equipar cuchillo (clic izquierdo para atacar) |
 | M | Cambiar de equipo |
 | C | Chat rápido |
 | P | Silenciar/activar todo el sonido |

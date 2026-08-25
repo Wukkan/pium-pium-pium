@@ -102,6 +102,7 @@ function meleeHarness() {
   Object.assign(weapon, {
     current: 'pistol',
     forcedKey: null,
+    slots: ['pistol', 'ar'],
     owned: { pistol: true, ar: true },
     models: { pistol, ar },
     knifeModel: knife,
@@ -156,23 +157,30 @@ test('firearm and knife viewmodels are mutually exclusive in every visibility mo
   const normal = viewmodelVisibilityState();
   assert.deepEqual(normal, { rig: true, firearm: true, knife: false, scope: false });
 
-  const melee = viewmodelVisibilityState({ meleeActive: true });
+  const melee = viewmodelVisibilityState({ knifeEquipped: true, meleeActive: true });
   assert.deepEqual(melee, { rig: true, firearm: false, knife: true, scope: false });
+
+  const knifeIdle = viewmodelVisibilityState({ knifeEquipped: true });
+  assert.deepEqual(knifeIdle, { rig: true, firearm: false, knife: true, scope: false });
 
   const scoped = viewmodelVisibilityState({ scoped: true });
   assert.deepEqual(scoped, { rig: true, firearm: false, knife: false, scope: true });
 
-  const dead = viewmodelVisibilityState({ dead: true, scoped: true, meleeActive: true });
+  const dead = viewmodelVisibilityState({
+    dead: true, scoped: true, knifeEquipped: true, meleeActive: true,
+  });
   assert.deepEqual(dead, { rig: false, firearm: false, knife: false, scope: false });
 
-  for (const state of [normal, melee, scoped, dead]) {
+  for (const state of [normal, melee, knifeIdle, scoped, dead]) {
     assert.equal(state.firearm && state.knife, false, 'gun and knife must never render together');
   }
 });
 
-test('melee animation is clamped, strikes once in the middle and finishes hidden', () => {
+test('melee animation is clamped, strikes once and recovers continuously to the ready pose', () => {
   const start = meleeAnimationState(-10);
+  const ready = meleeAnimationState(0.18);
   const strike = meleeAnimationState(0.43);
+  const beforeFinish = meleeAnimationState(1 - 1e-6);
   const finish = meleeAnimationState(1);
   const clampedFinish = meleeAnimationState(10);
 
@@ -181,8 +189,16 @@ test('melee animation is clamped, strikes once in the middle and finishes hidden
   assert.ok(strike.strike > 0.99);
   assert.ok(strike.position.x < start.position.x - 0.24);
   assert.ok(Math.abs(strike.rotation.y - start.rotation.y) > 1.2, 'slash needs a readable wrist rotation');
-  assert.equal(finish.visible, false);
+  assert.equal(finish.visible, true);
   assert.equal(finish.strike, 0);
+  assert.deepEqual(finish, ready, 'the completed swing must be the persistent ready pose');
+  const continuityDelta = [
+    ...Object.keys(finish.position).map((key) => Math.abs(finish.position[key] - beforeFinish.position[key])),
+    ...Object.keys(finish.rotation).map((key) => Math.abs(finish.rotation[key] - beforeFinish.rotation[key])),
+    ...Object.keys(finish.guard.position).map((key) =>
+      Math.abs(finish.guard.position[key] - beforeFinish.guard.position[key])),
+  ];
+  assert.ok(Math.max(...continuityDelta) < 1e-6, 'recovery must not snap on its final frame');
   assert.deepEqual(clampedFinish, finish);
 
   for (const pose of [start, strike, finish]) {
@@ -283,11 +299,19 @@ test('viewmodels use rounded visible boxes within the web geometry budget', () =
   }
 });
 
-test('beginning and cancelling melee blocks firearm actions and restores only the active gun', () => {
+test('equipped knife persists after an attack until a firearm is selected', () => {
   const { weapon, calls } = meleeHarness();
   const ammoBefore = weapon.ammo.ammo;
   const attackPivot = weapon.knifeModel.userData.viewmodel.attackPivot;
   attackPivot.position.set(9, 9, 9);
+
+  assert.equal(weapon.equipKnife(), true);
+  assert.equal(weapon.knifeEquipped, true);
+  assert.equal(weapon.models.pistol.visible, false);
+  assert.equal(weapon.models.ar.visible, false);
+  assert.equal(weapon.knifeModel.visible, true);
+  assert.notDeepEqual(attackPivot.position.toArray(), [9, 9, 9]);
+  const readyPosition = attackPivot.position.toArray();
 
   assert.equal(weapon.beginMelee(), true);
   assert.equal(weapon.meleeActive, true);
@@ -300,7 +324,6 @@ test('beginning and cancelling melee blocks firearm actions and restores only th
   assert.equal(weapon.models.pistol.visible, false);
   assert.equal(weapon.models.ar.visible, false);
   assert.equal(weapon.knifeModel.visible, true);
-  assert.deepEqual(attackPivot.position.toArray(), Object.values(meleeAnimationState(0).position));
   assert.deepEqual(weapon.knifeModel.position.toArray(), [0, 0, 0], 'knife root must not leak its previous attack transform');
   assert.equal(calls.reloading.at(-1), false);
   assert.equal(calls.scope.at(-1), false);
@@ -308,32 +331,98 @@ test('beginning and cancelling melee blocks firearm actions and restores only th
   assert.equal(weapon.beginMelee(), false, 'an active melee animation cannot restart');
   weapon.fire();
   weapon.reload();
-  weapon.switchTo('ar');
   assert.equal(weapon.ammo.ammo, ammoBefore, 'melee must block gunfire');
   assert.equal(weapon.reloading, false, 'melee must block reload');
-  assert.equal(weapon.current, 'pistol', 'melee must block manual weapon switching');
   assert.equal(calls.shots, 0);
 
-  assert.equal(weapon.cancelMelee(true), true);
+  weapon._updateMelee(1);
   assert.equal(weapon.meleeActive, false);
-  assert.equal(weapon.meleeProgress, 0);
-  assert.equal(weapon.knifeModel.visible, false);
-  assert.equal(weapon.models.pistol.visible, true);
+  assert.equal(weapon.knifeEquipped, true, 'attack recovery must not auto-return to the gun');
+  assert.equal(weapon.knifeModel.visible, true);
+  assert.equal(weapon.models.pistol.visible, false);
   assert.equal(weapon.models.ar.visible, false);
-  assert.equal(weapon.equipProgress, 0, 'restored firearm must play its draw animation');
-  assert.equal(weapon.equipDuration, 0.28);
+  assert.deepEqual(attackPivot.position.toArray(), readyPosition, 'knife returns to its persistent ready pose');
+
+  weapon.switchTo('ar');
+  assert.equal(weapon.knifeEquipped, false);
+  assert.equal(weapon.current, 'ar');
+  assert.equal(weapon.knifeModel.visible, false);
+  assert.equal(weapon.models.pistol.visible, false);
+  assert.equal(weapon.models.ar.visible, true);
+  assert.equal(weapon.equipProgress, 0, 'selected firearm must play its draw animation');
+  assert.ok(weapon.equipDuration > 0);
   assert.equal(weapon.cancelMelee(), false, 'cancelling an inactive melee is a no-op');
+});
+
+test('primary click attacks with the equipped knife instead of firing the hidden gun', () => {
+  const { weapon } = meleeHarness();
+  let meleeTriggers = 0;
+  weapon.onMeleeTrigger = () => {
+    meleeTriggers++;
+    return true;
+  };
+
+  assert.equal(weapon.equipKnife(), true);
+  weapon.triggerDown = true;
+  assert.equal(weapon.primaryAction(), true);
+  assert.equal(meleeTriggers, 1);
+  assert.equal(weapon.triggerDown, false);
+
+  assert.equal(weapon.unequipKnife(false), true);
+  assert.equal(weapon.primaryAction(), true);
+  assert.equal(meleeTriggers, 1);
+  assert.equal(weapon.triggerDown, true, 'firearm click returns to the normal held trigger');
+});
+
+test('number selection and wheel cycling both leave the persistent knife', () => {
+  const sameSlot = meleeHarness().weapon;
+  assert.equal(sameSlot.equipKnife(), true);
+  sameSlot.switchTo('pistol');
+  assert.equal(sameSlot.knifeEquipped, false, 'selecting the underlying slot exits the knife');
+  assert.equal(sameSlot.current, 'pistol');
+  assert.equal(sameSlot.models.pistol.visible, true);
+
+  const wheel = meleeHarness().weapon;
+  assert.equal(wheel.equipKnife(), true);
+  assert.equal(wheel.cycleWeapon(1), true);
+  assert.equal(wheel.knifeEquipped, false);
+  assert.equal(wheel.current, 'ar');
+  assert.equal(wheel.models.ar.visible, true);
+
+  assert.equal(wheel.equipKnife(), true);
+  assert.equal(wheel.beginMelee(), true);
+  wheel.switchTo('pistol');
+  assert.equal(wheel.knifeEquipped, false, 'weapon selection cancels an attack in progress');
+  assert.equal(wheel.meleeActive, false);
+  assert.equal(wheel.current, 'pistol');
+});
+
+test('a locked slot leaves the knife and requests the buy menu without purchasing', () => {
+  const { weapon } = meleeHarness();
+  weapon.owned.ar = false;
+  let requested = null;
+  weapon.onOpenBuy = (key) => { requested = key; };
+
+  assert.equal(weapon.equipKnife(), true);
+  weapon.switchTo('ar');
+
+  assert.equal(weapon.knifeEquipped, false);
+  assert.equal(weapon.current, 'pistol');
+  assert.equal(requested, 'ar');
+  assert.equal(weapon.owned.ar, false);
+  assert.equal(weapon.models.pistol.visible, true);
 });
 
 test('melee strike callback fires exactly once when progress crosses the impact point', () => {
   const { weapon } = meleeHarness();
   let strikes = 0;
 
+  assert.equal(weapon.equipKnife(), true);
   assert.equal(weapon.beginMelee(() => { strikes++; }), true);
-  weapon._updateMelee(0.26);
+  weapon._updateMelee(0.15);
   assert.equal(strikes, 0, 'impact must wait until progress reaches 0.43');
 
-  weapon._updateMelee(0.02);
+  weapon._updateMelee(0.01);
   assert.equal(strikes, 1, 'impact fires on the first update that crosses 0.43');
   weapon._updateMelee(0.1);
   weapon._updateMelee(1);
@@ -344,15 +433,18 @@ test('cancelling melee before the impact point discards its strike callback', ()
   const { weapon } = meleeHarness();
   let strikes = 0;
 
+  assert.equal(weapon.equipKnife(), true);
   assert.equal(weapon.beginMelee(() => { strikes++; }), true);
-  weapon._updateMelee(0.2);
+  weapon._updateMelee(0.1);
   assert.equal(weapon.meleeProgress < 0.43, true);
-  assert.equal(weapon.cancelMelee(false), true);
+  assert.equal(weapon.cancelMelee(), true);
   weapon._updateMelee(1);
 
   assert.equal(strikes, 0);
   assert.equal(weapon.meleeStrikeCallback, null);
   assert.equal(weapon.meleeStrikeFired, false);
+  assert.equal(weapon.knifeEquipped, true);
+  assert.equal(weapon.knifeModel.visible, true);
 });
 
 test('each weapon class exposes the moving part needed by its reload', () => {

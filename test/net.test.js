@@ -58,3 +58,37 @@ test('state messages carry the accepted spawn sequence and stop while dead', () 
   net.tickState(1, player);
   assert.equal(sent.length, 1);
 });
+
+test('network heartbeat has one owner and restarting it clears the previous timer', () => {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const timers = [];
+  const cleared = [];
+  globalThis.setInterval = (callback, delay) => {
+    const timer = { callback, delay, id: timers.length + 1 };
+    timers.push(timer);
+    return timer;
+  };
+  globalThis.clearInterval = (timer) => cleared.push(timer);
+  try {
+    const sent = [];
+    const net = new Net();
+    net.connected = true;
+    net.sendPing = () => sent.push('ping');
+
+    const first = net.startHeartbeat(100);
+    const second = net.startHeartbeat(4500);
+    assert.equal(first.delay, 1000);
+    assert.equal(second.delay, 4500);
+    assert.deepEqual(cleared, [first]);
+
+    second.callback();
+    assert.deepEqual(sent, ['ping']);
+    net.stopHeartbeat();
+    assert.deepEqual(cleared, [first, second]);
+    assert.equal(net._heartbeatTimer, null);
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});

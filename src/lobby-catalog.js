@@ -267,6 +267,11 @@ export function lobbyCatalogState({ selection, occupancy } = {}) {
   };
 }
 
-export function lobbyJoinFailureAction(errorCode, { serverAvailable = false } = {}) {
-  return LOBBY_JOIN_ERROR_CODES.includes(errorCode) || serverAvailable ? 'lobby' : 'offline';
+export function lobbyJoinFailureAction(errorCode, {
+  serverAvailable = false,
+  recoveringOnlineSession = false,
+} = {}) {
+  return recoveringOnlineSession || LOBBY_JOIN_ERROR_CODES.includes(errorCode) || serverAvailable
+    ? 'lobby'
+    : 'offline';
 }
