@@ -35,6 +35,11 @@ test('operator preview identity includes and mounts the equipped weapon model', 
   assert.match(main, /const weaponKind = WEAPON_DEFS\[weapons\.current\]\?\.kind/);
   assert.match(main, /\|\$\{weaponKind\}`/);
   assert.match(main, /equipOperatorPreviewWeapon\(rig, weaponKind\)/);
+  assert.match(main, /setOperatorWeaponGrip\?\.\(kind, detailedWeapon\.scale\.x\)/);
+  assert.match(main, /setOperatorPreviewStance\?\.\(\)/);
+  assert.match(main, /animateHumanoid\([\s\S]*operatorPreview\.motionClock/);
+  assert.match(main, /operatorPreview\.camera\.fov = operatorPreviewFov\(weaponKind, \{ compact \}\)/);
+  assert.match(main, /operatorPreview\.rig = rig;\s*syncOperatorPreviewCamera\(\)/);
 });
 
 test('active loadout card reuses the personalized operator renderer', () => {

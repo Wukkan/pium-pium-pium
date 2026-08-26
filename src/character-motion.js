@@ -101,7 +101,14 @@ export function operatorDeathState(progress = 0, side = 1) {
     legR: collapse * (direction > 0 ? 0.18 : 0.5),
     armL: -collapse * (direction > 0 ? 0.32 : 0.72),
     armR: -collapse * (direction > 0 ? 0.72 : 0.32),
+    gunX: direction * collapse * 0.055,
+    gunY: 1.16 - collapse * 0.11,
+    gunZ: -0.12 + collapse * 0.075,
+    gunPitch: -0.32 + collapse * 0.48,
+    gunYaw: direction * collapse * 0.1,
+    gunRoll: direction * collapse * 0.16,
     headRoll: direction * collapse * 0.2,
+    equipmentRoll: -direction * collapse * 0.08,
     nameOpacity: 1 - smoothstep(p / 0.28),
   };
 }

@@ -40,7 +40,7 @@ import {
   BINDING_ACTIONS, assignBinding, bindingSlotIndex, keyCodeLabel,
   matchesBinding, readBindings,
 } from './input-bindings.js';
-import { disposeHumanoid, makeHumanoid } from './humanoid.js';
+import { animateHumanoid, disposeHumanoid, makeHumanoid } from './humanoid.js';
 import { SKIN_COLORS, sanitizeSkin } from './player-profile.js';
 import {
   buildWeaponOnlyModel,
@@ -57,6 +57,7 @@ import { gameplayControlActive, requestPointerLockSafe } from './game-entry.js';
 import { frameSimulationPlan } from './frame-timing.js';
 import { segmentBlocked } from './shared/physics.js';
 import { createResilientWebGLRenderer } from './operator-preview-safety.js';
+import { operatorPreviewFov } from './operator-preview-layout.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — shooter multijugador original para navegador.
@@ -314,6 +315,7 @@ const operatorPreview = {
   unavailable: false,
   failureReported: false,
   hasRendered: false,
+  motionClock: { t: 0, idle: 0 },
 };
 
 function setOperatorPreviewState(state) {
@@ -329,6 +331,22 @@ function setOperatorPreviewState(state) {
   }
 }
 
+function syncOperatorPreviewCamera() {
+  if (!operatorPreview.camera) return;
+  const compact = operatorPreview.screen === 'play';
+  const weaponKind = operatorPreview.rig?.getOperatorWeaponGripKind?.()
+    || WEAPON_DEFS[weapons.current]?.kind
+    || 'pistol';
+  operatorPreview.camera.fov = operatorPreviewFov(weaponKind, { compact });
+  operatorPreview.camera.position.set(
+    compact ? 1.22 : 1.35,
+    compact ? 1.72 : 1.8,
+    compact ? -5.2 : -5.35,
+  );
+  operatorPreview.camera.lookAt(0, compact ? 1.12 : 1.15, 0);
+  operatorPreview.camera.updateProjectionMatrix();
+}
+
 function syncOperatorPreviewHost(screen = 'play') {
   const activeScreen = screen === 'operator' ? 'operator' : 'play';
   const hostId = activeScreen === 'operator' ? 'operator-preview' : 'menu-operator-preview';
@@ -340,13 +358,9 @@ function syncOperatorPreviewHost(screen = 'play') {
   if (operatorPreview.renderer && operatorPreview.renderer.domElement.parentElement !== host) {
     host.appendChild(operatorPreview.renderer.domElement);
   }
-  if (operatorPreview.camera) {
-    const compact = activeScreen === 'play';
-    operatorPreview.camera.fov = compact ? 25 : 27;
-    operatorPreview.camera.position.set(compact ? 1.22 : 1.35, compact ? 1.72 : 1.8, compact ? -5.2 : -5.35);
-    operatorPreview.camera.lookAt(0, compact ? 1.12 : 1.15, 0);
-    operatorPreview.camera.updateProjectionMatrix();
-  }
+  // La tarjeta compacta necesita aire vertical; la vista completa ajusta el
+  // FOV a la longitud del arma para mantener presencia sin recortar el giro.
+  syncOperatorPreviewCamera();
   if (operatorPreview.renderer && operatorPreview.hasRendered) setOperatorPreviewState('ready');
   else if (operatorPreview.renderer) setOperatorPreviewState('loading');
   else if (operatorPreview.unavailable) setOperatorPreviewState('unavailable');
@@ -403,6 +417,8 @@ function equipOperatorPreviewWeapon(rig, kind) {
   detailedWeapon.scale.setScalar(1.03);
   rig.gun.add(detailedWeapon);
   rig.previewWeapon = detailedWeapon;
+  rig.setOperatorWeaponGrip?.(kind, detailedWeapon.scale.x);
+  rig.setOperatorPreviewStance?.();
   return true;
 }
 
@@ -423,6 +439,9 @@ function refreshOperatorPreview() {
     rig.group.rotation.y = operatorPreview.angle;
     operatorPreview.scene.add(rig.group);
     operatorPreview.rig = rig;
+    syncOperatorPreviewCamera();
+    operatorPreview.motionClock.t = 0;
+    operatorPreview.motionClock.idle = 0;
   } catch (error) {
     disableOperatorPreview(error);
   }
@@ -530,6 +549,10 @@ function renderOperatorPreview(dt) {
       operatorPreview.camera.updateProjectionMatrix();
     }
     if (operatorPreview.rig && !document.body.classList.contains('reduced-motion')) {
+      animateHumanoid(
+        operatorPreview.rig, previewDt, 0, operatorPreview.motionClock, false, 0,
+      );
+      operatorPreview.rig.setOperatorPreviewStance?.();
       operatorPreview.angle += previewDt * 0.12;
       operatorPreview.rig.group.rotation.y = operatorPreview.angle;
     }
