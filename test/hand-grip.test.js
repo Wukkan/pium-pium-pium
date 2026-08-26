@@ -322,27 +322,30 @@ test('reload releases only the hand that manipulates the mechanism and returns t
   }
 
   const shotgunIdle = handGripState({ kind: 'shotgun' });
-  const shotgunReload = handGripState({ kind: 'shotgun', reloading: true, reloadProgress: 0.25 });
-  assert.ok(['pump', 'reload'].includes(shotgunReload.left.role));
-  assert.equal(contactCount(shotgunReload.left), contactCount(shotgunIdle.left));
-  assert.deepEqual(
-    shotgunReload.left.position,
-    shotgunIdle.left.position,
-    'the grip state must not add a second movement independent from the pump',
+  const shotgunReload = handGripState({
+    kind: 'shotgun', reloading: true, reloadProgress: 0.25, reloadRounds: 4,
+  });
+  assert.equal(shotgunReload.left.role, 'reload');
+  assert.ok(contactCount(shotgunReload.left) < contactCount(shotgunIdle.left));
+  assert.ok(
+    maxVectorDelta(shotgunReload.left.position, shotgunIdle.left.position) >= 0.02,
+    'the support hand must leave the pump to insert a shell',
   );
 });
 
-test('shotgun hand and pump use the exact same mechanical travel', () => {
+test('shotgun hand returns to the pump and uses its exact final action travel', () => {
   const model = buildGunModel('shotgun');
   const arms = model.userData.viewmodel.arms;
   const pump = model.userData.viewmodel.moving.pump;
   const baseHandZ = arms.left.position.z;
   const basePumpZ = pump.position.z;
   const pose = firstPersonAnimationState({
-    kind: 'shotgun', reloading: true, reloadProgress: 0.31,
+    kind: 'shotgun', reloading: true, reloadProgress: 0.89, reloadRounds: 4,
   });
   const weapon = Object.create(WeaponSystem.prototype);
   weapon._applyViewmodelPose(model, pose);
+  assert.equal(model.userData.viewmodel.grip.left.role, 'pump');
+  assert.ok(pose.mechanism.pumpTravel > 0.99);
   assert.ok(Math.abs((arms.left.position.z - baseHandZ) - (pump.position.z - basePumpZ)) < 1e-9);
 });
 
@@ -474,6 +477,30 @@ test('two-bone arms keep human proportions during reload and the knife swing', (
     );
     const angle = elbowAngle(chain);
     assert.ok(angle >= 0.65 && angle <= 3.05, `knife: ${side} elbow folded unnaturally (${angle})`);
+  }
+});
+
+test('reload arms keep natural elbows and anchored shoulders through the complete animation', () => {
+  for (const kind of FIREARMS) {
+    const model = buildGunModel(kind);
+    const arms = model.userData.viewmodel.arms;
+    for (let index = 0; index <= 100; index++) {
+      const progress = index / 100;
+      arms.applyGrip(handGripState({ kind, reloading: true, reloadProgress: progress, reloadRounds: 6 }));
+      arms.update();
+      for (const side of ['right', 'left']) {
+        const chain = arms.chains[side];
+        const angle = elbowAngle(chain);
+        assert.ok(
+          chain.shoulder.distanceTo(chain.baseShoulder) < 1e-9,
+          `${kind} ${progress}: ${side} shoulder slid to fake reach`,
+        );
+        assert.ok(
+          angle >= 0.65 && angle <= 3.05,
+          `${kind} ${progress}: ${side} elbow left the anatomical range (${angle})`,
+        );
+      }
+    }
   }
 });
 

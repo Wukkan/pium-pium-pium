@@ -538,13 +538,21 @@ test('first-person animation differentiates draw, sprint, ADS and reduced bob', 
 test('reload choreography is specific to magazines, pump, cylinder and breech', () => {
   const shared = { reloading: true, reloadProgress: 0.46 };
   const rifle = firstPersonAnimationState({ ...shared, kind: 'ar' });
-  const shotgun = firstPersonAnimationState({ ...shared, kind: 'shotgun', reloadProgress: 0.25 });
+  const shotgunInsert = firstPersonAnimationState({
+    ...shared, kind: 'shotgun', reloadProgress: 0.25, reloadRounds: 4,
+  });
+  const shotgunPump = firstPersonAnimationState({
+    ...shared, kind: 'shotgun', reloadProgress: 0.89, reloadRounds: 4,
+  });
   const revolver = firstPersonAnimationState({ ...shared, kind: 'revolver' });
   const launcher = firstPersonAnimationState({ ...shared, kind: 'launcher' });
 
   assert.ok(rifle.mechanism.magazineDrop > 0.95);
   assert.equal(rifle.mechanism.cylinderOpen, 0);
-  assert.ok(shotgun.mechanism.pumpTravel > 0.65);
+  assert.equal(shotgunInsert.reload.type, 'shell');
+  assert.equal(shotgunInsert.reload.support.role, 'reload');
+  assert.ok(shotgunPump.mechanism.pumpTravel > 0.99);
+  assert.equal(shotgunPump.reload.support.role, 'pump');
   assert.ok(revolver.mechanism.cylinderOpen > 0.95);
   assert.ok(launcher.mechanism.breechOpen > 0.95);
 });

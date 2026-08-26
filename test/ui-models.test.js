@@ -119,8 +119,9 @@ test('weapon animation state adds bob, recoil and a visible reload motion', () =
     speed: 7, ads: false, reloading: true, reloadProgress: 0.5,
     bobTime: 1.2, kickPos: 0.08, kickRot: 0.2,
   });
-  assert.ok(reload.position.y < -0.3);
-  assert.ok(reload.rotation.x < -0.4);
+  assert.ok(reload.position.y > idle.position.y + 0.08, 'reload payload must stay inside the frame');
+  assert.ok(reload.rotation.x < 0);
+  assert.ok(reload.rotation.z > 0.1);
   assert.ok(Math.abs(reload.position.x - idle.position.x) > 0.001);
 
   const noBob = weaponAnimationState({ speed: 7, bobTime: 1.2, bobAmount: 0 });

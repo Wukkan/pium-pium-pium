@@ -476,13 +476,15 @@ export function weaponAnimationState({
   const baseZ = -0.55 * (1 - adsT) + -0.42 * adsT;
   return {
     position: {
-      x: baseX + bobX,
-      y: baseY + bobY - reloadTilt * 0.14,
-      z: baseZ + kickPos,
+      // La recarga se presenta arriba y hacia el centro para que la munición y
+      // la mano manipuladora permanezcan dentro del encuadre, incluso a FOV 70.
+      x: baseX + bobX - reloadTilt * 0.1,
+      y: baseY + bobY + reloadTilt * 0.33,
+      z: baseZ + kickPos + reloadTilt * 0.035,
     },
     rotation: {
-      x: kickRot * 0.5 - reloadTilt * 0.65,
-      z: reloadTilt * 0.3,
+      x: kickRot * 0.5 - reloadTilt * 0.22,
+      z: reloadTilt * 0.2,
     },
     reloadTilt,
   };

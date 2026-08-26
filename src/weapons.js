@@ -6,6 +6,7 @@ import {
 import { DEFAULT_BINDINGS, bindingSlotIndex, keyCodeLabel } from './input-bindings.js';
 import { roundedBoxGeometry } from './rounded-geometry.js';
 import { handGripState } from './hand-grip.js';
+import { reloadChoreographyState } from './reload-choreography.js';
 
 export { HAND_GRIP_PROFILES, handGripState } from './hand-grip.js';
 
@@ -121,7 +122,6 @@ const EQUIP_DURATIONS = Object.freeze({
   launcher: 0.62,
 });
 
-const MAGAZINE_WEAPONS = new Set(['pistol', 'smg', 'ar', 'sniper']);
 
 const clamp01 = (value) => Math.min(1, Math.max(0, Number(value) || 0));
 const smooth01 = (value) => {
@@ -159,12 +159,6 @@ const windowPulse = (value, start, peak, end) => {
   if (value < peak) return smoothRange(start, peak, value);
   return 1 - smoothRange(peak, end, value);
 };
-const windowPlateau = (value, openStart, openEnd, closeStart, closeEnd) => {
-  if (value <= openStart || value >= closeEnd) return 0;
-  if (value < openEnd) return smoothRange(openStart, openEnd, value);
-  if (value <= closeStart) return 1;
-  return 1 - smoothRange(closeStart, closeEnd, value);
-};
 
 // Estado puro de la animación de primera persona. Se calcula sin crear objetos
 // de Three.js para mantener estable el coste por frame y permitir pruebas.
@@ -176,6 +170,7 @@ export function firstPersonAnimationState({
   ads = false,
   reloading = false,
   reloadProgress = 0,
+  reloadRounds,
   equipProgress = 1,
   firePulse = 0,
   kind = 'pistol',
@@ -195,19 +190,12 @@ export function firstPersonAnimationState({
   const fireCycle = shot > 0 ? Math.sin((1 - shot) * Math.PI) : 0;
   const sprintBase = smoothRange(4.9, 7.4, safeSpeed);
   const sprint = (ads || reloading ? 0 : sprintBase) * (sliding ? 1 : 0.82);
-
-  const magazineDrop = MAGAZINE_WEAPONS.has(kind)
-    ? windowPulse(reload, 0.14, 0.46, 0.79)
-    : 0;
-  const cylinderOpen = kind === 'revolver'
-    ? windowPlateau(reload, 0.08, 0.22, 0.72, 0.9)
-    : 0;
-  const breechOpen = kind === 'launcher'
-    ? windowPlateau(reload, 0.06, 0.2, 0.68, 0.9)
-    : 0;
-  const reloadPump = kind === 'shotgun' && reloading
-    ? Math.max(0, Math.sin(reload * Math.PI * 2)) * reloadArc
-    : 0;
+  const reloadState = reloadChoreographyState({
+    kind,
+    progress: reload,
+    active: reloading,
+    rounds: reloadRounds,
+  });
 
   return {
     locomotion: { movement, sprint, stride, step, breath },
@@ -227,19 +215,27 @@ export function firstPersonAnimationState({
       ads: Boolean(ads),
       reloading: Boolean(reloading),
       reloadProgress: reload,
+      reloadRounds: reloadState.roundCount,
       sway: stride,
       step,
       shot,
       sprint,
     },
     mechanism: {
-      slideTravel: (kind === 'pistol' || kind === 'smg' || kind === 'ar' || kind === 'sniper') ? shot : 0,
-      pumpTravel: kind === 'shotgun' ? Math.max(fireCycle, reloadPump) : 0,
-      magazineDrop,
-      cylinderOpen,
-      breechOpen,
+      slideTravel: (kind === 'pistol' || kind === 'smg' || kind === 'ar' || kind === 'sniper')
+        ? Math.max(shot, reloadState.mechanism.actionCycle * 0.72)
+        : 0,
+      pumpTravel: kind === 'shotgun'
+        ? Math.max(fireCycle, reloadState.mechanism.pumpTravel)
+        : 0,
+      magazineDrop: reloadState.mechanism.magazineDrop,
+      cylinderOpen: reloadState.mechanism.cylinderOpen,
+      breechOpen: reloadState.mechanism.breechOpen,
+      ejector: reloadState.mechanism.ejector,
+      actionCycle: reloadState.mechanism.actionCycle,
       chamberCycle: kind === 'revolver' ? fireCycle : 0,
     },
+    reload: reloadState,
   };
 }
 
@@ -775,6 +771,9 @@ function createViewmodelMaterials() {
     wood: new THREE.MeshStandardMaterial({ color: 0x5c4738, roughness: 0.72 }),
     rubber: new THREE.MeshStandardMaterial({ color: 0x11161d, roughness: 0.92 }),
     accent: new THREE.MeshStandardMaterial({ color: 0xc69b48, metalness: 0.45, roughness: 0.42 }),
+    brass: new THREE.MeshStandardMaterial({ color: 0xc89b48, metalness: 0.72, roughness: 0.28 }),
+    shell: new THREE.MeshStandardMaterial({ color: 0x9e2f2f, metalness: 0.08, roughness: 0.62 }),
+    grenade: new THREE.MeshStandardMaterial({ color: 0x657847, metalness: 0.18, roughness: 0.64 }),
     glove: new THREE.MeshStandardMaterial({
       color: 0x3b4d5c, roughness: 0.92, emissive: 0x080d12, emissiveIntensity: 0.025,
     }),
@@ -786,6 +785,115 @@ function createViewmodelMaterials() {
     cuff: new THREE.MeshStandardMaterial({ color: 0x202b36, roughness: 0.9 }),
     sleeve: new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.94 }),
     sleeveDark: new THREE.MeshStandardMaterial({ color: 0x253647, roughness: 0.96 }),
+  };
+}
+
+function createShotgunReloadShell(materials) {
+  const group = new THREE.Group();
+  group.name = 'reload-shell';
+  const bodyGeometry = new THREE.CylinderGeometry(0.017, 0.017, 0.065, 10, 1);
+  bodyGeometry.rotateX(Math.PI / 2);
+  const body = new THREE.Mesh(bodyGeometry, materials.shell);
+  body.name = 'reload-shell-body';
+  const rimGeometry = new THREE.CylinderGeometry(0.0185, 0.0185, 0.012, 10, 1);
+  rimGeometry.rotateX(Math.PI / 2);
+  const rim = new THREE.Mesh(rimGeometry, materials.brass);
+  rim.name = 'reload-shell-rim';
+  rim.position.z = 0.0385;
+  group.add(body, rim);
+  group.visible = false;
+  group.userData.ammoType = 'shell';
+  return group;
+}
+
+function createRevolverSpeedloader(materials) {
+  const group = new THREE.Group();
+  group.name = 'reload-speedloader';
+  const bulletGeometry = new THREE.CylinderGeometry(0.0065, 0.007, 0.068, 8, 1);
+  bulletGeometry.rotateX(Math.PI / 2);
+  const rounds = new THREE.InstancedMesh(bulletGeometry, materials.brass, 6);
+  rounds.name = 'reload-speedloader-rounds';
+  rounds.frustumCulled = false;
+  rounds.castShadow = false;
+  const matrix = new THREE.Matrix4();
+  for (let index = 0; index < 6; index++) {
+    const angle = (index / 6) * Math.PI * 2;
+    matrix.makeTranslation(Math.cos(angle) * 0.043, Math.sin(angle) * 0.043, -0.016);
+    rounds.setMatrixAt(index, matrix);
+  }
+  rounds.instanceMatrix.needsUpdate = true;
+  const diskGeometry = new THREE.CylinderGeometry(0.052, 0.052, 0.014, 12, 1);
+  diskGeometry.rotateX(Math.PI / 2);
+  const disk = new THREE.Mesh(diskGeometry, materials.dark);
+  disk.name = 'reload-speedloader-disk';
+  disk.position.z = 0.026;
+  group.add(rounds, disk);
+  group.visible = false;
+  group.userData.ammoType = 'speedloader';
+  group.userData.rounds = rounds;
+
+  const loaded = new THREE.InstancedMesh(bulletGeometry, materials.brass, 6);
+  loaded.name = 'reload-cylinder-rounds';
+  loaded.frustumCulled = false;
+  loaded.castShadow = false;
+  for (let index = 0; index < 6; index++) {
+    const angle = (index / 6) * Math.PI * 2;
+    matrix.makeTranslation(Math.cos(angle) * 0.043, Math.sin(angle) * 0.043, 0);
+    loaded.setMatrixAt(index, matrix);
+  }
+  loaded.instanceMatrix.needsUpdate = true;
+  loaded.visible = false;
+  loaded.userData.ammoType = 'cartridges';
+  return { payload: group, loaded };
+}
+
+function createLauncherReloadGrenade(materials) {
+  const group = new THREE.Group();
+  group.name = 'reload-grenade';
+  const bodyGeometry = new THREE.CylinderGeometry(0.043, 0.045, 0.13, 12, 1);
+  bodyGeometry.rotateX(Math.PI / 2);
+  const body = new THREE.Mesh(bodyGeometry, materials.grenade);
+  body.name = 'reload-grenade-body';
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.044, 10, 6), materials.grenade);
+  nose.name = 'reload-grenade-nose';
+  nose.scale.z = 0.72;
+  nose.position.z = -0.078;
+  const bandGeometry = new THREE.CylinderGeometry(0.046, 0.046, 0.014, 12, 1);
+  bandGeometry.rotateX(Math.PI / 2);
+  const band = new THREE.Mesh(bandGeometry, materials.accent);
+  band.name = 'reload-grenade-band';
+  const rimGeometry = new THREE.CylinderGeometry(0.047, 0.047, 0.018, 12, 1);
+  rimGeometry.rotateX(Math.PI / 2);
+  const rim = new THREE.Mesh(rimGeometry, materials.brass);
+  rim.name = 'reload-grenade-rim';
+  rim.position.z = 0.073;
+  group.add(body, nose, band, rim);
+  group.visible = false;
+  group.userData.ammoType = 'grenade';
+  return group;
+}
+
+function createReloadVisual(kind, root, moving, materials) {
+  const idle = reloadChoreographyState({ kind, active: false });
+  const socket = new THREE.Object3D();
+  socket.name = `reload-${idle.type}-socket`;
+  socket.position.fromArray(idle.magazine?.socket || idle.payload.socket || [0, 0, 0]);
+  root.add(socket);
+
+  let payload = moving.magazine || null;
+  let loaded = null;
+  if (kind === 'shotgun') payload = createShotgunReloadShell(materials);
+  else if (kind === 'revolver') ({ payload, loaded } = createRevolverSpeedloader(materials));
+  else if (kind === 'launcher') payload = createLauncherReloadGrenade(materials);
+  if (payload && payload.parent !== root) root.add(payload);
+  if (loaded) root.add(loaded);
+
+  return {
+    type: idle.type,
+    payload,
+    socket,
+    loaded,
+    installed: moving.magazine || null,
   };
 }
 
@@ -809,10 +917,11 @@ function createGripTargets(model, gripState) {
 export function buildGunModel(kind) {
   const g = new THREE.Group();
   g.name = `viewmodel-${kind}`;
+  const materials = createViewmodelMaterials();
   const {
     dark, mid, polymer, steel, wood, rubber, accent,
     glove, glovePanel, cuff, sleeve, sleeveDark,
-  } = createViewmodelMaterials();
+  } = materials;
   const moving = {};
 
   const part = (mat, w, h, d, x, y, z) => {
@@ -836,6 +945,25 @@ export function buildGunModel(kind) {
     part(accent, width * 0.42, 0.025, 0.04, x, 0.14, z - 0.03);
   };
 
+  const decorateMagazine = (magazine, width, height, depth) => {
+    const radius = Math.min(0.007, width * 0.14);
+    const cartridgeGeometry = new THREE.CylinderGeometry(radius, radius, 0.004, 8, 1);
+    const cartridges = new THREE.InstancedMesh(cartridgeGeometry, materials.brass, 2);
+    cartridges.name = 'reload-magazine-cartridges';
+    cartridges.frustumCulled = false;
+    cartridges.castShadow = false;
+    const matrix = new THREE.Matrix4();
+    const offset = width * 0.2;
+    for (let index = 0; index < 2; index++) {
+      matrix.makeTranslation(index === 0 ? -offset : offset, height * 0.5 + 0.002, -depth * 0.08);
+      cartridges.setMatrixAt(index, matrix);
+    }
+    cartridges.instanceMatrix.needsUpdate = true;
+    cartridges.userData.ammoType = 'cartridges';
+    magazine.add(cartridges);
+    return magazine;
+  };
+
   if (kind === 'pistol') {
     part(polymer, 0.1, 0.06, 0.25, 0, -0.02, 0.02);
     part(rubber, 0.065, 0.18, 0.12, 0, -0.16, 0.06);
@@ -843,7 +971,7 @@ export function buildGunModel(kind) {
     sight(0, -0.1, 0.045);
     moving.slide = part(dark, 0.075, 0.11, 0.3, 0, 0.02, -0.08); // corredera
     part(mid, 0.07, 0.14, 0.11, 0, -0.09, 0.05);      // empuñadura
-    moving.magazine = part(dark, 0.052, 0.13, 0.072, 0, -0.145, 0.065);
+    moving.magazine = decorateMagazine(part(dark, 0.052, 0.13, 0.072, 0, -0.145, 0.065), 0.052, 0.13, 0.072);
     part(dark, 0.045, 0.045, 0.12, 0, 0.03, -0.26);   // cañón
     part(accent, 0.02, 0.03, 0.04, 0, 0.09, -0.2);    // mira
   } else if (kind === 'revolver') {
@@ -882,7 +1010,7 @@ export function buildGunModel(kind) {
     sight(0, -0.18, 0.055);
     part(mid, 0.09, 0.13, 0.62, 0, 0, -0.1);          // cuerpo
     part(dark, 0.055, 0.055, 0.45, 0, 0.01, -0.55);   // cañón
-    moving.magazine = part(dark, 0.07, 0.16, 0.13, 0, -0.13, 0.02);
+    moving.magazine = decorateMagazine(part(dark, 0.07, 0.16, 0.13, 0, -0.13, 0.02), 0.07, 0.16, 0.13);
     part(wood, 0.08, 0.11, 0.22, 0, -0.03, 0.28);     // culata
     part(dark, 0.03, 0.05, 0.14, 0, 0.09, -0.05);     // mira
     part(accent, 0.06, 0.04, 0.1, 0, -0.02, -0.35);   // detalle
@@ -894,7 +1022,7 @@ export function buildGunModel(kind) {
     sight(0, -0.24, 0.05);
     part(mid, 0.09, 0.12, 0.42, 0, 0, -0.05);
     part(dark, 0.05, 0.05, 0.25, 0, 0.01, -0.36);
-    moving.magazine = part(dark, 0.06, 0.2, 0.1, 0, -0.15, 0.03);
+    moving.magazine = decorateMagazine(part(dark, 0.06, 0.2, 0.1, 0, -0.15, 0.03), 0.06, 0.2, 0.1);
     part(dark, 0.07, 0.09, 0.13, 0, -0.02, 0.2);
     part(accent, 0.095, 0.03, 0.08, 0, 0.07, -0.1);
     moving.slide = part(steel, 0.015, 0.04, 0.075, 0.047, 0.02, -0.1);
@@ -905,7 +1033,7 @@ export function buildGunModel(kind) {
     sight(0, -0.42, 0.06);
     part(wood, 0.09, 0.13, 0.75, 0, 0, -0.05);
     part(dark, 0.05, 0.05, 0.6, 0, 0.02, -0.68);
-    moving.magazine = part(dark, 0.06, 0.12, 0.1, 0, -0.12, -0.02);
+    moving.magazine = decorateMagazine(part(dark, 0.06, 0.12, 0.1, 0, -0.12, -0.02), 0.06, 0.12, 0.1);
     part(rubber, 0.078, 0.15, 0.105, 0, -0.12, 0.105); // empuñadura separada
     part(mid, 0.06, 0.08, 0.28, 0, 0.12, -0.12);      // mira telescópica
     part(dark, 0.07, 0.09, 0.03, 0, 0.12, -0.27);
@@ -935,10 +1063,14 @@ export function buildGunModel(kind) {
     snapshotTransform(object);
   }
 
+  const reloadVisual = createReloadVisual(kind, g, moving, materials);
+
   const arms = buildFirstPersonArms(kind, { glove, glovePanel, cuff, sleeve, sleeveDark });
   g.add(arms.root);
   const gripTargets = createGripTargets(g, arms.gripState);
-  g.userData.viewmodel = { kind, arms, moving, grip: arms.gripState, gripTargets };
+  g.userData.viewmodel = {
+    kind, arms, moving, grip: arms.gripState, gripTargets, reloadVisual,
+  };
 
   // destello del cañón
   const flashMat = new THREE.SpriteMaterial({
@@ -1172,6 +1304,7 @@ export class WeaponSystem {
     this.lastShot = 0;
     this.reloading = false;
     this.reloadEnd = 0;
+    this.reloadAmount = 0;
     this.kickPos = 0;
     this.kickRot = 0;
     this.bobTime = 0;
@@ -1212,7 +1345,9 @@ export class WeaponSystem {
       }
       if (e.button === 2) {
         this.aimButtonDown = true;
-        if (!this.knifeEquipped) this.ads = this.aimMode === 'toggle' ? !this.ads : true;
+        if (!this.knifeEquipped && !this.reloading) {
+          this.ads = this.aimMode === 'toggle' ? !this.ads : true;
+        }
       }
     });
     addEventListener('mouseup', (e) => {
@@ -1281,6 +1416,7 @@ export class WeaponSystem {
     this.triggerDown = false;
     this.aimButtonDown = false;
     this.ads = false;
+    this.cancelReload();
     if (this.meleeActive) this.cancelMelee();
   }
 
@@ -1405,6 +1541,7 @@ export class WeaponSystem {
       if (playSound) this._playWeaponSwitch();
       return;
     }
+    this.cancelReload();
     // El ADS pertenece al arma anterior. Durante el cambio se cierra la mira;
     // en modo mantener, update() la recupera al terminar el desenfunde si RMB
     // continúa pulsado.
@@ -1413,7 +1550,6 @@ export class WeaponSystem {
     previous.userData.flash.visible = false;
     previous.userData.muzzleLight.intensity = 0;
     this.current = key;
-    this.reloading = false;
     this.equipProgress = 0;
     this.equipDuration = EQUIP_DURATIONS[this.def.kind] || 0.45;
     this.firePulse = 0;
@@ -1478,10 +1614,31 @@ export class WeaponSystem {
     const st = this.ammo;
     const def = this.def;
     if (this.knifeEquipped || this.meleeActive || this.equipProgress < EQUIP_READY_PROGRESS || this.reloading ||
-        st.ammo >= def.mag || st.reserve <= 0 || this.player.dead) return;
+        st.ammo >= def.mag || st.reserve <= 0 || this.player.dead) return false;
     this.reloading = true;
+    this.reloadAmount = Math.min(def.mag - st.ammo, st.reserve);
     this.reloadEnd = performance.now() / 1000 + def.reloadTime;
+    this.ads = false;
     this.hud.setReloading(true);
+    this.hud.setScope?.(false);
+    return true;
+  }
+
+  _resetReloadVisual(model = this.models?.[this.current]) {
+    const kind = model?.userData?.viewmodel?.kind;
+    if (!kind) return false;
+    this._applyViewmodelPose(model, firstPersonAnimationState({ kind }));
+    return true;
+  }
+
+  cancelReload() {
+    const wasReloading = Boolean(this.reloading);
+    this.reloading = false;
+    this.reloadEnd = 0;
+    this.reloadAmount = 0;
+    this._resetReloadVisual();
+    if (wasReloading) this.hud?.setReloading?.(false);
+    return wasReloading;
   }
 
   // munición completa en todas las armas (al reaparecer)
@@ -1494,7 +1651,8 @@ export class WeaponSystem {
       this.state[key].ammo = WEAPON_DEFS[key].mag;
       this.state[key].reserve = WEAPON_DEFS[key].reserve;
     }
-    this.reloading = false;
+    this.reloadEnd = 0;
+    this.reloadAmount = 0;
     this.hud.updateAmmo(this);
     this.hud.setReloading(false);
   }
@@ -1508,7 +1666,7 @@ export class WeaponSystem {
     this.meleeStrikeFired = false;
     this.triggerDown = false;
     this.ads = false;
-    this.reloading = false;
+    this.cancelReload();
     this.firePulse = 0;
     this.models[this.current].userData.flash.visible = false;
     this.models[this.current].userData.muzzleLight.intensity = 0;
@@ -1550,7 +1708,7 @@ export class WeaponSystem {
     this.meleeCooldownUntil = time + MELEE_COOLDOWN;
     this.triggerDown = false;
     this.ads = false;
-    this.reloading = false;
+    this.cancelReload();
     this.firePulse = 0;
     this.models[this.current].userData.flash.visible = false;
     this.models[this.current].userData.muzzleLight.intensity = 0;
@@ -1732,10 +1890,11 @@ export class WeaponSystem {
   _applyViewmodelPose(model, pose) {
     const viewmodel = model.userData.viewmodel;
     if (!viewmodel) return;
-    const { kind, arms, moving } = viewmodel;
+    const { kind, arms, moving, reloadVisual } = viewmodel;
     const { right, left } = arms;
     const handPose = pose.hands;
     const mechanism = pose.mechanism;
+    const reloadState = pose.reload || reloadChoreographyState({ kind, active: false });
 
     // Los dedos permanecen anclados al arma durante movimiento, ADS y recoil.
     // Solo la mano que manipula el mecanismo abandona temporalmente su agarre.
@@ -1744,10 +1903,12 @@ export class WeaponSystem {
       ads: handPose.ads,
       reloading: handPose.reloading,
       reloadProgress: handPose.reloadProgress,
+      reloadRounds: handPose.reloadRounds,
       firePulse: handPose.shot,
     });
     arms.applyGrip(grip);
     viewmodel.grip = grip;
+    viewmodel.reloadState = reloadState;
 
     for (const object of Object.values(moving)) {
       object.position.copy(object.userData.basePosition);
@@ -1755,26 +1916,59 @@ export class WeaponSystem {
       object.visible = true;
     }
 
+    if (reloadVisual?.payload && reloadVisual.payload !== moving.magazine) {
+      reloadVisual.payload.visible = false;
+    }
+    if (reloadVisual?.loaded) reloadVisual.loaded.visible = false;
+
     if (moving.slide) moving.slide.position.z += mechanism.slideTravel * 0.072;
     if (moving.magazine) {
-      moving.magazine.position.y -= mechanism.magazineDrop * 0.3;
-      moving.magazine.position.z += mechanism.magazineDrop * 0.055;
-      moving.magazine.rotation.x += mechanism.magazineDrop * 0.22;
-      moving.magazine.rotation.z += mechanism.magazineDrop * 0.12;
+      if (reloadState.active && reloadState.type === 'magazine') {
+        const magazine = reloadState.magazine;
+        const useSpare = magazine.spareVisible;
+        moving.magazine.position.fromArray(
+          useSpare ? magazine.sparePosition : magazine.installedPosition,
+        );
+        moving.magazine.rotation.fromArray(
+          useSpare ? magazine.spareRotation : magazine.installedRotation,
+        );
+        moving.magazine.visible = magazine.installedVisible || magazine.spareVisible;
+      }
     }
     if (moving.pump) {
       const pumpTravel = mechanism.pumpTravel * 0.16;
       moving.pump.position.z += pumpTravel;
-      // La mano acompaña exactamente la bomba y conserva todos sus contactos.
-      left.position.z += pumpTravel;
+      // En la fase final la mano vuelve a la bomba y comparte su recorrido.
+      if (grip.left.role === 'pump') left.position.z += pumpTravel;
     }
     if (moving.cylinder) {
       moving.cylinder.position.x += mechanism.cylinderOpen * 0.095;
+      moving.cylinder.position.z += mechanism.ejector * 0.018;
       moving.cylinder.rotation.z += mechanism.cylinderOpen * 0.55 + mechanism.chamberCycle * 0.18;
     }
     if (moving.breech) {
       moving.breech.position.y -= mechanism.breechOpen * 0.055;
       moving.breech.rotation.x += mechanism.breechOpen * 0.82;
+    }
+
+    if (reloadVisual?.payload && reloadVisual.payload !== moving.magazine) {
+      reloadVisual.payload.visible = Boolean(reloadState.payload.visible);
+      reloadVisual.payload.position.fromArray(reloadState.payload.position);
+      reloadVisual.payload.rotation.fromArray(reloadState.payload.rotation);
+      const rounds = reloadVisual.payload.userData.rounds;
+      if (rounds?.isInstancedMesh) rounds.count = reloadState.payload.roundCount ?? reloadState.roundCount;
+    }
+    if (reloadVisual?.loaded) {
+      reloadVisual.loaded.visible = Boolean(reloadState.loadedVisible);
+      reloadVisual.loaded.count = reloadState.loadedRoundCount ?? reloadState.roundCount;
+      if (moving.cylinder) {
+        reloadVisual.loaded.position.copy(moving.cylinder.position);
+        reloadVisual.loaded.position.z += 0.08;
+        reloadVisual.loaded.rotation.set(0, 0, moving.cylinder.rotation.z);
+      } else {
+        reloadVisual.loaded.position.fromArray(reloadState.payload.socket || [0, 0, 0]);
+        reloadVisual.loaded.rotation.set(0, 0, 0);
+      }
     }
     arms.update();
   }
@@ -1785,16 +1979,21 @@ export class WeaponSystem {
     const st = this.ammo;
     this.animationTime += Math.max(0, dt);
     this.equipProgress = Math.min(1, this.equipProgress + dt / Math.max(0.1, this.equipDuration));
+    if (this.player.dead && this.reloading) this.cancelReload();
+    if (this.reloading) this.ads = false;
     if (this.aimMode === 'hold' && this.aimButtonDown && inputEnabled &&
-        !this.knifeEquipped && this.equipProgress >= EQUIP_READY_PROGRESS) this.ads = true;
+        !this.knifeEquipped && !this.reloading && this.equipProgress >= EQUIP_READY_PROGRESS) this.ads = true;
     this.firePulse = Math.max(0, this.firePulse - dt * 4.8);
     this._updateMelee(dt);
 
     // recarga completa
     if (this.reloading && now >= this.reloadEnd) {
+      const planned = this.reloadAmount;
       this.reloading = false;
+      this.reloadEnd = 0;
+      this.reloadAmount = 0;
       const need = def.mag - st.ammo;
-      const take = Math.min(need, st.reserve);
+      const take = Math.min(planned, need, st.reserve);
       st.ammo += take;
       st.reserve -= take;
       this.hud.updateAmmo(this);
@@ -1806,12 +2005,12 @@ export class WeaponSystem {
     }
 
     // FOV según ADS
-    const targetFov = (this.ads && !this.player.dead) ? this.baseFov / def.zoom : this.baseFov;
+    const targetFov = (this.ads && !this.reloading && !this.player.dead) ? this.baseFov / def.zoom : this.baseFov;
     this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 12);
     this.camera.updateProjectionMatrix();
 
     // mira telescópica: oculta el modelo y muestra el overlay
-    const scoped = this.ads && def.scope && !this.player.dead && !this.knifeEquipped && !this.meleeActive;
+    const scoped = this.ads && !this.reloading && def.scope && !this.player.dead && !this.knifeEquipped && !this.meleeActive;
     this._syncViewmodelVisibility(scoped);
 
     // animación del modelo: bob al andar + retroceso con muelle
@@ -1848,6 +2047,7 @@ export class WeaponSystem {
       equipProgress: this.equipProgress,
       firePulse: this.firePulse,
       kind: def.kind,
+      reloadRounds: this.reloadAmount,
       bobAmount: this.weaponBob,
     });
     const targetX = visual.position.x + firstPerson.position.x;

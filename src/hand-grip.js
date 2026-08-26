@@ -1,3 +1,5 @@
+import { reloadChoreographyState } from './reload-choreography.js';
+
 const clamp01 = (value) => Math.min(1, Math.max(0, Number(value) || 0));
 
 const deepFreeze = (value) => {
@@ -75,6 +77,7 @@ export const HAND_GRIP_PROFILES = deepFreeze({
   shotgun: {
     right: triggerHand([0.030, -0.120, 0.110], [-0.08, 0.02, 1.22]),
     left: supportHand([-0.100, -0.112, -0.300], [-0.08, -1.48, -0.10]),
+    reload: { position: [-0.145, -0.12, 0.085], rotation: [-0.26, -1.05, 0.20] },
   },
   smg: {
     right: triggerHand([0.030, -0.125, 0.080], [-0.10, 0.02, 1.26]),
@@ -134,19 +137,37 @@ const cloneHand = (source) => ({
 const mix = (from, to, amount) => from + (to - from) * amount;
 const mixVector = (from, to, amount) => from.map((value, index) => mix(value, to[index], amount));
 
-function relaxReloadHand(hand, amount) {
-  const relaxed = {
-    index: [0.20, 0.30, 0.24],
-    middle: [0.31, 0.42, 0.34],
-    ring: [0.36, 0.47, 0.39],
-    pinky: [0.42, 0.53, 0.45],
-  };
+const RELOAD_GRIPS = Object.freeze({
+  magazine: Object.freeze({
+    index: [0.44, 0.57, 0.48], middle: [0.56, 0.68, 0.58],
+    ring: [0.62, 0.73, 0.64], pinky: [0.45, 0.55, 0.48], thumb: [0.5, 0.64],
+    contacts: Object.freeze(['index', 'middle', 'ring']), thumbContact: true,
+  }),
+  shell: Object.freeze({
+    index: [0.38, 0.5, 0.42], middle: [0.46, 0.58, 0.49],
+    ring: [0.3, 0.4, 0.34], pinky: [0.24, 0.32, 0.28], thumb: [0.46, 0.6],
+    contacts: Object.freeze(['index', 'middle']), thumbContact: true,
+  }),
+  speedloader: Object.freeze({
+    index: [0.46, 0.58, 0.5], middle: [0.54, 0.66, 0.56],
+    ring: [0.58, 0.7, 0.6], pinky: [0.38, 0.48, 0.42], thumb: [0.48, 0.62],
+    contacts: Object.freeze(['index', 'middle', 'ring']), thumbContact: true,
+  }),
+  grenade: Object.freeze({
+    index: [0.52, 0.66, 0.57], middle: [0.6, 0.72, 0.64],
+    ring: [0.64, 0.76, 0.68], pinky: [0.48, 0.58, 0.51], thumb: [0.54, 0.68],
+    contacts: Object.freeze(['index', 'middle', 'ring']), thumbContact: true,
+  }),
+});
+
+function poseReloadHand(hand, gripKind, amount, holding) {
+  const profile = RELOAD_GRIPS[gripKind] || RELOAD_GRIPS.magazine;
   for (const [name, finger] of Object.entries(hand.fingers)) {
-    finger.curl = mixVector(finger.curl, relaxed[name], amount);
-    finger.contact = amount < 0.08;
+    finger.curl = mixVector(finger.curl, profile[name], amount);
+    finger.contact = Boolean(holding && amount > 0.08 && profile.contacts.includes(name));
   }
-  hand.thumb.curl = mixVector(hand.thumb.curl, [0.20, 0.30], amount);
-  hand.thumb.contact = amount < 0.08;
+  hand.thumb.curl = mixVector(hand.thumb.curl, profile.thumb, amount);
+  hand.thumb.contact = Boolean(holding && amount > 0.08 && profile.thumbContact);
 }
 
 function tightenHand(hand, amount) {
@@ -164,6 +185,7 @@ export function handGripState({
   ads = false,
   reloading = false,
   reloadProgress = 0,
+  reloadRounds,
   firePulse = 0,
 } = {}) {
   const safeKind = Object.prototype.hasOwnProperty.call(HAND_GRIP_PROFILES, kind) ? kind : 'pistol';
@@ -175,17 +197,27 @@ export function handGripState({
   const right = cloneHand(profile.right);
   const left = cloneHand(profile.left);
   const reload = reloading ? clamp01(reloadProgress) : 0;
-  // Sube y baja de forma continua, y vuelve exactamente al anclaje al acabar.
-  const manipulation = reloading && reload > 0 && reload < 1 ? Math.sin(reload * Math.PI) : 0;
+  const choreography = reloadChoreographyState({
+    kind: safeKind,
+    progress: reload,
+    active: reloading,
+    rounds: reloadRounds,
+  });
+  const manipulation = choreography.support.mix;
 
-  if (safeKind === 'shotgun' && manipulation > 0) {
+  if (choreography.support.role === 'pump') {
     left.role = 'pump';
-    tightenHand(left, 0.035 * manipulation);
-  } else if (profile.reload && manipulation > 0) {
+    tightenHand(left, 0.035 * choreography.mechanism.pumpTravel);
+  } else if (manipulation > 0) {
     left.role = 'reload';
-    left.position = mixVector(left.position, profile.reload.position, manipulation);
-    left.rotation = mixVector(left.rotation, profile.reload.rotation, manipulation);
-    relaxReloadHand(left, manipulation);
+    left.position = mixVector(left.position, choreography.support.position, manipulation);
+    left.rotation = mixVector(left.rotation, choreography.support.rotation, manipulation);
+    poseReloadHand(
+      left,
+      choreography.support.grip,
+      manipulation,
+      choreography.support.holding,
+    );
   }
 
   // El arma y las manos comparten rig. ADS no cambia sus anclajes; solamente

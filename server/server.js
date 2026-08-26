@@ -52,7 +52,7 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.7.7';
+const GAME_VERSION = '1.7.8';
 const ZOMBIE_WAVES = 8;
 const configuredZombiePrep = Number(process.env.PIUM_ZOMBIE_PREP_SECONDS);
 const ZOMBIE_PREP_SECONDS = Number.isFinite(configuredZombiePrep)
