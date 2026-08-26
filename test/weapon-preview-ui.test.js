@@ -36,3 +36,17 @@ test('operator preview identity includes and mounts the equipped weapon model', 
   assert.match(main, /\|\$\{weaponKind\}`/);
   assert.match(main, /equipOperatorPreviewWeapon\(rig, weaponKind\)/);
 });
+
+test('active loadout card reuses the personalized operator renderer', () => {
+  assert.match(html, /id="menu-operator-preview"[^>]+role="img"/);
+  assert.doesNotMatch(html, /class="operator-avatar"/);
+  assert.match(main, /const hostId = activeScreen === 'operator' \? 'operator-preview' : 'menu-operator-preview'/);
+  assert.match(main, /operatorPreview\.renderer && operatorPreview\.renderer\.domElement\.parentElement !== host/);
+  assert.match(main, /host\.appendChild\(operatorPreview\.renderer\.domElement\)/);
+  assert.match(main, /active === 'play' \|\| active === 'operator'\) initOperatorPreview\(active\)/);
+  assert.match(main, /const key = `\$\{name\}\|\$\{skin\.hat \|\| 'none'\}\|\$\{color\}\|\$\{weaponKind\}`/);
+  assert.match(main, /makeHumanoid\(color, name,[\s\S]+skin\.hat \|\| 'none'\)/);
+  assert.match(main, /menu-operator-preview'\)\?\.setAttribute\('aria-label', operatorLabel\)/);
+  assert.match(main, /previewRenderer\.domElement\.setAttribute\('aria-hidden', 'true'\)/);
+  assert.match(main, /pagehide[\s\S]+disposeOperatorPreview\(\)/);
+});

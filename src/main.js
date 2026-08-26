@@ -289,10 +289,12 @@ try { storedSkin = JSON.parse(safeStorageGet('pium_skin')); } catch { /* se repa
 let skin = sanitizeSkin(storedSkin);
 const saveSkin = () => safeStorageSet('pium_skin', JSON.stringify(skin));
 const COLORS_PRICE = 300;
+const DEFAULT_OPERATOR_COLOR = 0x3f6ea8;
 let menuMsg = '';
 
 const operatorPreview = {
   host: null,
+  screen: 'play',
   renderer: null,
   scene: null,
   camera: null,
@@ -302,6 +304,28 @@ const operatorPreview = {
   angle: 0.08,
   renderAccumulator: 0,
 };
+
+function syncOperatorPreviewHost(screen = 'play') {
+  const activeScreen = screen === 'operator' ? 'operator' : 'play';
+  const hostId = activeScreen === 'operator' ? 'operator-preview' : 'menu-operator-preview';
+  const host = document.getElementById(hostId);
+  if (!host) return null;
+
+  operatorPreview.host = host;
+  operatorPreview.screen = activeScreen;
+  if (operatorPreview.renderer && operatorPreview.renderer.domElement.parentElement !== host) {
+    host.appendChild(operatorPreview.renderer.domElement);
+  }
+  if (operatorPreview.camera) {
+    const compact = activeScreen === 'play';
+    operatorPreview.camera.fov = compact ? 25 : 27;
+    operatorPreview.camera.position.set(compact ? 1.22 : 1.35, compact ? 1.72 : 1.8, compact ? -5.2 : -5.35);
+    operatorPreview.camera.lookAt(0, compact ? 1.12 : 1.15, 0);
+    operatorPreview.camera.updateProjectionMatrix();
+  }
+  operatorPreview.renderAccumulator = 1 / 30;
+  return host;
+}
 
 function disposePreviewRig() {
   if (!operatorPreview.rig) return;
@@ -330,7 +354,7 @@ function equipOperatorPreviewWeapon(rig, kind) {
 function refreshOperatorPreview() {
   if (!operatorPreview.scene) return;
   const name = (nameInput?.value || 'OPERADOR').toUpperCase();
-  const color = skin.color || 0x3f6ea8;
+  const color = skin.color || DEFAULT_OPERATOR_COLOR;
   const weaponKind = WEAPON_DEFS[weapons.current]?.kind || 'pistol';
   const key = `${name}|${skin.hat || 'none'}|${color}|${weaponKind}`;
   if (key === operatorPreview.key) return;
@@ -345,9 +369,13 @@ function refreshOperatorPreview() {
   operatorPreview.rig = rig;
 }
 
-function initOperatorPreview() {
-  const host = document.getElementById('operator-preview');
-  if (!host || operatorPreview.renderer) return;
+function initOperatorPreview(screen = 'play') {
+  const host = syncOperatorPreviewHost(screen);
+  if (!host) return;
+  if (operatorPreview.renderer) {
+    refreshOperatorPreview();
+    return;
+  }
   const previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
   previewRenderer.setPixelRatio(effectivePixelRatio(settings.renderScale, devicePixelRatio));
   previewRenderer.setClearColor(0x000000, 0);
@@ -356,6 +384,7 @@ function initOperatorPreview() {
   previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
   previewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
   previewRenderer.toneMappingExposure = 1.08;
+  previewRenderer.domElement.setAttribute('aria-hidden', 'true');
   host.appendChild(previewRenderer.domElement);
 
   const previewScene = new THREE.Scene();
@@ -393,7 +422,25 @@ function initOperatorPreview() {
   operatorPreview.scene = previewScene;
   operatorPreview.camera = previewCamera;
   operatorPreview.keyLight = keyLight;
+  syncOperatorPreviewHost(screen);
   refreshOperatorPreview();
+}
+
+function disposeOperatorPreview() {
+  disposePreviewRig();
+  operatorPreview.scene?.traverse((object) => {
+    object.geometry?.dispose?.();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) material?.dispose?.();
+  });
+  operatorPreview.renderer?.dispose();
+  operatorPreview.renderer?.domElement.remove();
+  operatorPreview.host = null;
+  operatorPreview.renderer = null;
+  operatorPreview.scene = null;
+  operatorPreview.camera = null;
+  operatorPreview.keyLight = null;
+  operatorPreview.key = '';
 }
 
 function renderOperatorPreview(dt) {
@@ -474,6 +521,7 @@ addEventListener('pagehide', (event) => {
     liveWeaponPreviewManager.suspend();
     return;
   }
+  disposeOperatorPreview();
   liveWeaponPreviewManager.dispose();
   weaponPreviewManager.dispose();
 });
@@ -1001,6 +1049,10 @@ function renderLoadoutPanel() {
   document.getElementById('loadout-color').textContent = meta.color ? `#${meta.color.toString(16).padStart(6, '0')}` : 'Predeterminado';
   const previewWeapon = document.getElementById('operator-preview-weapon');
   if (previewWeapon) previewWeapon.textContent = `${weapon.name} · ${weapon.kind.toUpperCase()}`;
+  const colorLabel = `#${(meta.color || DEFAULT_OPERATOR_COLOR).toString(16).padStart(6, '0').toUpperCase()}`;
+  const operatorLabel = `Tu operador personalizado: ${hat ? hat.name : 'Sin sombrero'}, uniforme ${colorLabel} y arma ${weapon.name}`;
+  document.getElementById('operator-preview')?.setAttribute('aria-label', operatorLabel);
+  document.getElementById('menu-operator-preview')?.setAttribute('aria-label', operatorLabel);
   const quickWeapon = document.getElementById('menu-quick-weapon');
   const quickDetail = document.getElementById('menu-quick-detail');
   const playerLabel = document.getElementById('menu-player-label');
@@ -1090,10 +1142,8 @@ function showMenuScreen(screen) {
   } else if (!buyOpen) {
     liveWeaponPreviewManager.suspend();
   }
-  if (active === 'operator') {
-    initOperatorPreview();
-    renderMenuPanels();
-  }
+  if (active === 'play' || active === 'operator') initOperatorPreview(active);
+  if (active === 'operator') renderMenuPanels();
   if (active === 'options') renderSettings();
 }
 

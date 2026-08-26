@@ -349,10 +349,6 @@
     }
     .operator-card { position: relative; min-height: 220px; overflow: hidden; border-radius: 10px; background: linear-gradient(145deg, #263d59, #121a2b); text-align: center; }
     .operator-card::after { content: 'OPERADOR'; position: absolute; left: 14px; bottom: 12px; color: rgba(255,255,255,.5); font: 900 12px Arial, sans-serif; letter-spacing: 2px; }
-    .operator-avatar { position: absolute; left: 50%; top: 42px; width: 92px; height: 132px; transform: translateX(-50%); }
-    .operator-avatar .avatar-head { display: block; width: 48px; height: 48px; margin: 0 auto; border-radius: 50%; background: #d19768; border: 5px solid #1a2638; }
-    .operator-avatar .avatar-body { display: block; width: 80px; height: 80px; margin: 4px auto 0; border-radius: 25px 25px 8px 8px; background: linear-gradient(90deg, #425f7c, #1c2e47); border: 5px solid #1a2638; }
-    .operator-avatar .avatar-gun { position: absolute; width: 82px; height: 12px; right: -28px; bottom: 18px; border-radius: 5px; background: #15171c; transform: rotate(-25deg); box-shadow: 0 0 0 3px rgba(255,210,77,.55); }
     .loadout-title { color: #ffd24d; font: 900 14px Arial, sans-serif; letter-spacing: 1.5px; text-transform: uppercase; }
     .loadout-main { margin-top: 12px; color: #fff; font: 900 30px 'Arial Black', Arial, sans-serif; font-style: italic; }
     .loadout-sub { margin-top: 4px; color: #9fb4d8; font: 13px Arial, sans-serif; }
@@ -537,13 +533,24 @@
     .menu-hero-side { position: relative; overflow: hidden; min-height: 330px; padding: 20px; border: 1px solid rgba(150,190,240,.22); border-radius: 8px; background: linear-gradient(145deg, rgba(31,52,78,.9), rgba(12,19,33,.96)); box-shadow: 0 20px 50px rgba(0,0,0,.25); }
     .menu-hero-side::after { content: ''; position: absolute; right: -50px; bottom: -85px; width: 230px; height: 230px; border: 1px solid rgba(255,195,77,.18); border-radius: 50%; box-shadow: 0 0 0 25px rgba(255,195,77,.03), 0 0 0 50px rgba(255,195,77,.02); }
     .menu-hero-side .eyebrow { position: relative; z-index: 1; }
-    .mini-operator-art { position: relative; height: 170px; margin: 8px 0 0; background: radial-gradient(circle at 50% 60%, rgba(255,195,77,.2), transparent 42%); }
-    .operator-avatar { position: absolute; left: 50%; top: 42px; width: 92px; height: 132px; transform: translateX(-50%); animation: operator-idle 2.8s ease-in-out infinite; }
-    @keyframes operator-idle { 50% { transform: translateX(-50%) translateY(-4px) rotate(.7deg); } }
-    .operator-avatar.large { transform: translateX(-50%) scale(1.12); transform-origin: center bottom; }
-    .operator-avatar .avatar-head { display: block; width: 48px; height: 48px; margin: 0 auto; border-radius: 50%; background: #d19768; border: 5px solid #17263d; }
-    .operator-avatar .avatar-body { display: block; width: 80px; height: 80px; margin: 4px auto 0; border-radius: 25px 25px 8px 8px; background: linear-gradient(90deg, #526f8f, #1c2e47); border: 5px solid #17263d; }
-    .operator-avatar .avatar-gun { position: absolute; width: 82px; height: 12px; right: -28px; bottom: 18px; border-radius: 5px; background: #15171c; transform: rotate(-25deg); box-shadow: 0 0 0 3px rgba(255,195,77,.55); }
+    .mini-operator-art {
+      position: relative; z-index: 1; height: 178px; margin: 5px -4px 2px; overflow: hidden;
+      border-radius: 7px;
+      background: radial-gradient(ellipse at 50% 70%, rgba(255,195,77,.19), transparent 37%), linear-gradient(180deg, rgba(79,130,187,.08), transparent 72%);
+      isolation: isolate;
+    }
+    .mini-operator-art::before {
+      content: ''; position: absolute; inset: 22px 10% 2px; z-index: 0; pointer-events: none;
+      background: linear-gradient(90deg, transparent 49.6%, rgba(145,181,221,.08) 50%, transparent 50.4%), linear-gradient(0deg, transparent 49.6%, rgba(145,181,221,.06) 50%, transparent 50.4%);
+      background-size: 38px 38px;
+      mask-image: linear-gradient(180deg, transparent, #000 25%, #000 82%, transparent);
+    }
+    .mini-operator-art canvas { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; pointer-events: none; }
+    .mini-operator-live {
+      position: absolute; top: 7px; right: 6px; z-index: 2; display: inline-flex; align-items: center; gap: 5px;
+      color: #8fa9c9; font: 900 7px Arial, sans-serif; letter-spacing: 1.15px; pointer-events: none;
+    }
+    .mini-operator-live i { width: 5px; height: 5px; border-radius: 50%; background: #82df9a; box-shadow: 0 0 8px #82df9a; }
     .hero-loadout-name, .menu-hero-side > strong { display: block; position: relative; z-index: 1; color: #fff; font: 900 26px 'Arial Black', Arial, sans-serif; font-style: italic; }
     .hero-loadout-detail, .menu-hero-side > span { display: block; position: relative; z-index: 1; margin-top: 5px; color: #8fa6c6; font: 12px Arial, sans-serif; }
     .ghost-action, .text-action { position: relative; z-index: 1; margin-top: 18px; padding: 0; border: 0; background: transparent; color: #ffc34d; cursor: pointer; font: 900 10px Arial, sans-serif; letter-spacing: .8px; }
@@ -1331,7 +1338,9 @@
 
     <div class="menu-hero-side">
       <div class="eyebrow">LOADOUT ACTIVO</div>
-      <div class="mini-operator-art"><div class="operator-avatar"><span class="avatar-head"></span><span class="avatar-body"></span><span class="avatar-gun"></span></div></div>
+      <div id="menu-operator-preview" class="mini-operator-art" role="img" aria-label="Vista 3D de tu operador personalizado">
+        <span class="mini-operator-live" aria-hidden="true"><i></i> TU OPERADOR · 3D</span>
+      </div>
       <strong id="menu-quick-weapon">PISTOLA</strong>
       <span id="menu-quick-detail">12 / 72 · 2 granadas</span>
       <button type="button" class="ghost-action" data-menu-screen="operator">PERSONALIZAR EQUIPAMIENTO <span>→</span></button>
