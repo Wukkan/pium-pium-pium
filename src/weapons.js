@@ -109,7 +109,7 @@ export function sanitizeArsenalState(value) {
 const BASE_FOV = 78;
 const EQUIP_READY_PROGRESS = 0.999;
 const MELEE_DURATION = 0.62;
-const MELEE_COOLDOWN = 0.9;
+const MELEE_IMPACT_PROGRESS = 0.43;
 const KNIFE_READY_PROGRESS = 0.18;
 
 const EQUIP_DURATIONS = Object.freeze({
@@ -239,47 +239,62 @@ export function firstPersonAnimationState({
   };
 }
 
-function rawMeleeAnimationState(p) {
-  const draw = smoothRange(0, 0.18, p);
-  const windup = windowPulse(p, 0.12, 0.27, 0.43);
-  const strike = windowPulse(p, 0.25, 0.43, 0.68);
-  const recover = smoothRange(0.66, 1, p);
-  const ready = draw * (1 - recover);
+function rawMeleeAnimationState(p, combo = 0) {
+  const style = Math.abs(Math.trunc(Number(combo) || 0)) % 2;
+  const thrust = style === 1;
+  const draw = smoothRange(0, 0.16, p);
+  const windup = windowPulse(p, 0.20, 0.31, 0.43);
+  const strike = windowPulse(p, 0.31, MELEE_IMPACT_PROGRESS, 0.64);
+  const followThrough = windowPulse(p, 0.43, 0.66, 0.84);
+  const recover = smoothRange(0.72, 1, p);
   const guardDrawArc = Math.sin(draw * Math.PI);
   return {
     visible: p < 1,
+    style,
     draw,
     windup,
     strike,
+    followThrough,
     recover,
     position: {
-      x: 0.08 - ready * 0.03 + windup * 0.09 - strike * 0.24,
-      y: 0.07 - (1 - draw) * 0.55 + windup * 0.04 - strike * 0.04 + recover * 0.06,
-      z: -0.04 - ready * 0.025 + windup * 0.045 - strike * 0.14,
+      x: 0.095 - (1 - draw) * 0.025 + windup * (thrust ? 0.045 : 0.07)
+        - strike * (thrust ? 0.075 : 0.22) - followThrough * (thrust ? 0.045 : 0.25),
+      y: 0.085 - (1 - draw) * 0.54 + windup * (thrust ? -0.025 : 0.085)
+        + strike * (thrust ? 0.018 : -0.038) - followThrough * (thrust ? 0.01 : 0.067),
+      z: -0.055 + (1 - draw) * 0.085 + windup * (thrust ? 0.16 : 0.07)
+        - strike * (thrust ? 0.39 : 0.113) - followThrough * (thrust ? 0.24 : 0.13),
     },
     rotation: {
-      x: -0.08 - windup * 0.12 + strike * 0.38,
-      y: 0.78 + windup * 0.18 - strike * 1.34,
-      z: 0.26 + (1 - draw) * 0.82 - windup * 0.12 + strike * 0.96 - recover * 0.22,
+      x: -0.10 + (1 - draw) * 0.20 + windup * (thrust ? 0.08 : -0.18)
+        + strike * (thrust ? -0.06 : 0.30) + followThrough * (thrust ? 0.02 : 0.35),
+      y: 0.72 + (1 - draw) * 0.14 + windup * (thrust ? 0.14 : 0.36)
+        - strike * (thrust ? 0.24 : 0.99) - followThrough * (thrust ? 0.16 : 1.14),
+      z: 0.18 + (1 - draw) * 0.76 - windup * (thrust ? 0.08 : 0.34)
+        + strike * (thrust ? 0.10 : 0.83) + followThrough * (thrust ? 0.06 : 0.92),
     },
     // La mano de guardia tiene su propio pivote en espacio de cámara. Solo
     // contrapesa el golpe; nunca viaja rígidamente pegada a la hoja.
     guard: {
       position: {
-        x: -(1 - draw) * 0.045 + guardDrawArc * 0.20 - ready * 0.20 - windup * 0.025 + strike * 0.015,
-        y: -(1 - draw) * 0.55 + ready * 0.14 - strike * 0.025 + recover * 0.06,
-        z: (1 - draw) * 0.055 + windup * 0.018 + strike * 0.026,
+        x: -0.18 + (1 - draw) * 0.135 + guardDrawArc * 0.18
+          - windup * 0.018 - strike * 0.01 - followThrough * 0.02,
+        y: 0.135 - (1 - draw) * 0.685 + windup * 0.025
+          - strike * 0.025 - followThrough * 0.035,
+        z: 0.015 + (1 - draw) * 0.04 - windup * 0.012
+          + strike * (thrust ? -0.085 : 0.015) + followThrough * 0.01,
       },
       rotation: {
-        x: -(1 - draw) * 0.16 + windup * 0.08 - strike * 0.06,
-        y: (1 - draw) * 0.12 - windup * 0.07 + strike * 0.045,
-        z: -(1 - draw) * 0.28 - windup * 0.08 + strike * 0.12,
+        x: -0.05 - (1 - draw) * 0.16 + windup * 0.07 - strike * 0.08,
+        y: 0.04 + (1 - draw) * 0.12 - windup * 0.06 + strike * 0.055,
+        z: -0.08 - (1 - draw) * 0.28 - windup * 0.07 + strike * 0.13 + followThrough * 0.06,
       },
     },
     hands: {
-      gripPressure: clamp01(0.35 * draw + 0.65 * Math.max(windup, strike)),
-      dominantFlex: -windup * 0.055 + strike * 0.085,
-      guardFlex: windup * 0.09 + strike * 0.14,
+      gripPressure: clamp01(0.48 * draw + 0.52 * Math.max(windup, strike, followThrough * 0.72)),
+      dominantFlex: -windup * 0.055 + strike * (thrust ? 0.035 : 0.085) + followThrough * 0.04,
+      dominantTwist: windup * (thrust ? 0.018 : -0.025) + strike * (thrust ? -0.018 : 0.02),
+      guardFlex: windup * 0.075 + strike * 0.12 + followThrough * 0.055,
+      guardCounter: -windup * 0.045 + strike * 0.07 + followThrough * 0.035,
     },
   };
 }
@@ -296,7 +311,9 @@ function mixMeleePose(from, to, amount) {
     draw: mixMeleeValue(from.draw, to.draw, amount),
     windup: mixMeleeValue(from.windup, to.windup, amount),
     strike: mixMeleeValue(from.strike, to.strike, amount),
+    followThrough: mixMeleeValue(from.followThrough, to.followThrough, amount),
     recover: mixMeleeValue(from.recover, to.recover, amount),
+    style: to.style,
     position: mixMeleeVector(from.position, to.position, amount),
     rotation: mixMeleeVector(from.rotation, to.rotation, amount),
     guard: {
@@ -307,12 +324,12 @@ function mixMeleePose(from, to, amount) {
   };
 }
 
-export function meleeAnimationState(progress = 0) {
+export function meleeAnimationState(progress = 0, combo = 0) {
   const p = clamp01(progress);
-  const pose = rawMeleeAnimationState(p);
-  const recoveryToReady = smoothRange(0.66, 1, p);
+  const pose = rawMeleeAnimationState(p, combo);
+  const recoveryToReady = smoothRange(0.72, 1, p);
   if (recoveryToReady <= 0) return pose;
-  return mixMeleePose(pose, rawMeleeAnimationState(KNIFE_READY_PROGRESS), recoveryToReady);
+  return mixMeleePose(pose, rawMeleeAnimationState(KNIFE_READY_PROGRESS, combo), recoveryToReady);
 }
 
 export function viewmodelVisibilityState({
@@ -1149,12 +1166,15 @@ export function applyKnifeMeleePose(model, pose = meleeAnimationState(0)) {
   // fuera. Así las yemas comprimen la superficie sin atravesar el mango.
   arms.right.position.x -= pose.hands.gripPressure * 0.014;
   arms.right.rotation.x += pose.hands.dominantFlex;
+  arms.right.rotation.y += pose.hands.dominantTwist;
   arms.left.rotation.x += pose.hands.guardFlex;
+  arms.left.rotation.z += pose.hands.guardCounter;
   // Los dedos mantienen sus puntos de contacto, pero el volumen principal de
   // la palma se apoya fuera del eje del mango. El offset se expresa primero en
   // el espacio radial del pivote y luego se convierte al espacio local de la mano.
-  const palmOffset = new THREE.Vector3(0.04, 0, 0)
-    .applyQuaternion(arms.right.quaternion.clone().invert());
+  const scratch = viewmodel.knifeScratch;
+  const palmOffset = scratch.palmOffset.set(0.04, 0, 0)
+    .applyQuaternion(scratch.inverseHandQuaternion.copy(arms.right.quaternion).invert());
   for (const name of [
     'right-glove-palm', 'right-palm-pad', 'right-hand-backplate', 'right-thenar-pad',
   ]) {
@@ -1258,6 +1278,7 @@ export function buildKnifeModel() {
   guardPivot.add(gripTargets.left);
   g.userData.viewmodel = {
     kind: 'knife', arms, moving: {}, grip: arms.gripState, gripTargets, attackPivot, guardPivot,
+    knifeScratch: { palmOffset: new THREE.Vector3(), inverseHandQuaternion: new THREE.Quaternion() },
   };
   g.userData.blade = blade;
   g.userData.handle = handle;
@@ -1318,7 +1339,9 @@ export class WeaponSystem {
     this.knifeEquipped = false;
     this.meleeActive = false;
     this.meleeProgress = 0;
-    this.meleeCooldownUntil = 0;
+    this.meleeCombo = 0;
+    this.meleeQueued = false;
+    this.meleeQueuedCallback = null;
     this.meleeStrikeCallback = null;
     this.meleeStrikeFired = false;
     this.fallbackControls = false;
@@ -1339,7 +1362,7 @@ export class WeaponSystem {
     this.rig.add(this.knifeModel);
 
     addEventListener('mousedown', (e) => {
-      if (!this.hasGameplayControl(e) || this.inputBlocked || this.meleeActive) return;
+      if (!this.hasGameplayControl(e) || this.inputBlocked) return;
       if (e.button === 0) {
         this.primaryAction();
       }
@@ -1396,7 +1419,7 @@ export class WeaponSystem {
   }
 
   primaryAction() {
-    if (this.player.dead || this.inputBlocked || this.meleeActive) return false;
+    if (this.player.dead || this.inputBlocked) return false;
     if (!this.knifeEquipped) {
       this.triggerDown = true;
       return true;
@@ -1662,6 +1685,9 @@ export class WeaponSystem {
     this.knifeEquipped = true;
     this.meleeActive = false;
     this.meleeProgress = KNIFE_READY_PROGRESS;
+    this.meleeCombo = 0;
+    this.meleeQueued = false;
+    this.meleeQueuedCallback = null;
     this.meleeStrikeCallback = null;
     this.meleeStrikeFired = false;
     this.triggerDown = false;
@@ -1684,6 +1710,8 @@ export class WeaponSystem {
     if (this.meleeActive) this.cancelMelee();
     this.knifeEquipped = false;
     this.meleeProgress = 0;
+    this.meleeQueued = false;
+    this.meleeQueuedCallback = null;
     this.meleeStrikeCallback = null;
     this.meleeStrikeFired = false;
     this.knifeModel.visible = false;
@@ -1698,14 +1726,21 @@ export class WeaponSystem {
   }
 
   beginMelee(onStrike = null) {
-    const time = performance.now() / 1000;
-    if (!this.knifeEquipped || this.meleeActive || this.player.dead || this.inputBlocked ||
-        time < this.meleeCooldownUntil) return false;
+    if (!this.knifeEquipped || this.player.dead || this.inputBlocked) return false;
+    const strike = typeof onStrike === 'function' ? onStrike : null;
+    // Un clic durante el recorrido no se pierde: conserva un solo follow-up.
+    // Así se puede pulsar rápidamente y obtener un combo continuo sin acumular
+    // una cola larga que siga atacando después de soltar el botón.
+    if (this.meleeActive) {
+      this.meleeQueued = true;
+      this.meleeQueuedCallback = strike;
+      this.triggerDown = false;
+      return true;
+    }
     this.meleeActive = true;
     this.meleeProgress = KNIFE_READY_PROGRESS;
-    this.meleeStrikeCallback = typeof onStrike === 'function' ? onStrike : null;
+    this.meleeStrikeCallback = strike;
     this.meleeStrikeFired = false;
-    this.meleeCooldownUntil = time + MELEE_COOLDOWN;
     this.triggerDown = false;
     this.ads = false;
     this.cancelReload();
@@ -1714,7 +1749,7 @@ export class WeaponSystem {
     this.models[this.current].userData.muzzleLight.intensity = 0;
     this.hud.setReloading(false);
     this.hud.setScope(false);
-    applyKnifeMeleePose(this.knifeModel, meleeAnimationState(KNIFE_READY_PROGRESS));
+    applyKnifeMeleePose(this.knifeModel, meleeAnimationState(KNIFE_READY_PROGRESS, this.meleeCombo));
     this._syncViewmodelVisibility(false);
     return true;
   }
@@ -1725,8 +1760,10 @@ export class WeaponSystem {
     this.meleeProgress = this.knifeEquipped ? KNIFE_READY_PROGRESS : 0;
     this.meleeStrikeCallback = null;
     this.meleeStrikeFired = false;
+    this.meleeQueued = false;
+    this.meleeQueuedCallback = null;
     if (this.knifeEquipped) {
-      applyKnifeMeleePose(this.knifeModel, meleeAnimationState(KNIFE_READY_PROGRESS));
+      applyKnifeMeleePose(this.knifeModel, meleeAnimationState(KNIFE_READY_PROGRESS, this.meleeCombo));
     }
     this._syncViewmodelVisibility();
     return true;
@@ -1754,16 +1791,34 @@ export class WeaponSystem {
       this.cancelMelee();
       return;
     }
-    this.meleeProgress = Math.min(1, this.meleeProgress + Math.max(0, dt) / MELEE_DURATION);
-    const pose = meleeAnimationState(this.meleeProgress);
-    applyKnifeMeleePose(this.knifeModel, pose);
-    if (!this.meleeStrikeFired && this.meleeProgress >= 0.43) {
-      this.meleeStrikeFired = true;
-      const strike = this.meleeStrikeCallback;
-      this.meleeStrikeCallback = null;
-      if (strike) strike();
+    let remaining = Math.max(0, Number(dt) || 0);
+    while (this.meleeActive && remaining > 0) {
+      const secondsToFinish = Math.max(0, 1 - this.meleeProgress) * MELEE_DURATION;
+      const step = Math.min(remaining, secondsToFinish);
+      this.meleeProgress = Math.min(1, this.meleeProgress + step / MELEE_DURATION);
+      applyKnifeMeleePose(this.knifeModel, meleeAnimationState(this.meleeProgress, this.meleeCombo));
+      if (!this.meleeStrikeFired && this.meleeProgress >= MELEE_IMPACT_PROGRESS) {
+        this.meleeStrikeFired = true;
+        const strike = this.meleeStrikeCallback;
+        this.meleeStrikeCallback = null;
+        if (strike) strike();
+      }
+      remaining -= step;
+      if (this.meleeProgress < 1) break;
+
+      this.meleeCombo = (this.meleeCombo + 1) % 2;
+      if (!this.meleeQueued || !this.knifeEquipped || this.player.dead || this.inputBlocked) {
+        this.cancelMelee();
+        break;
+      }
+
+      this.meleeProgress = KNIFE_READY_PROGRESS;
+      this.meleeStrikeCallback = this.meleeQueuedCallback;
+      this.meleeStrikeFired = false;
+      this.meleeQueued = false;
+      this.meleeQueuedCallback = null;
+      applyKnifeMeleePose(this.knifeModel, meleeAnimationState(this.meleeProgress, this.meleeCombo));
     }
-    if (this.meleeProgress >= 1) this.cancelMelee();
   }
 
   currentSpread() {
@@ -2015,6 +2070,8 @@ export class WeaponSystem {
 
     // animación del modelo: bob al andar + retroceso con muelle
     const speed = this.player.horizontalSpeed();
+    const knifeMotionScale = this.knifeEquipped ? (this.meleeActive ? 0.18 : 0.5) : 1;
+    const viewmodelSpeed = speed * knifeMotionScale;
     if (this.player.onGround && speed > 1) this.bobTime += dt * Math.min(speed, 10);
     this.kickPos *= Math.max(0, 1 - dt * 10);
     this.kickRot *= Math.max(0, 1 - dt * 10);
@@ -2027,18 +2084,18 @@ export class WeaponSystem {
     }
 
     const visual = weaponAnimationState({
-      speed,
+      speed: viewmodelSpeed,
       ads: this.ads && !def.scope,
       reloading: this.reloading,
       reloadProgress,
       bobTime: this.bobTime,
-      bobAmount: this.weaponBob,
+      bobAmount: this.weaponBob * knifeMotionScale,
       kickPos: this.kickPos,
       kickRot: this.kickRot,
     });
     const firstPerson = firstPersonAnimationState({
       time: this.animationTime,
-      speed,
+      speed: viewmodelSpeed,
       onGround: this.player.onGround,
       sliding: this.player.sliding,
       ads: this.ads && !def.scope,
@@ -2048,7 +2105,7 @@ export class WeaponSystem {
       firePulse: this.firePulse,
       kind: def.kind,
       reloadRounds: this.reloadAmount,
-      bobAmount: this.weaponBob,
+      bobAmount: this.weaponBob * knifeMotionScale,
     });
     const targetX = visual.position.x + firstPerson.position.x;
     const targetY = visual.position.y + firstPerson.position.y;

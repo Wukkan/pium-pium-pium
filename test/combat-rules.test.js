@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { WEAPON_DEFS } from '../src/weapons.js';
 import {
+  COMBAT_LIMITS,
   FIREARM_RULES,
   firearmCrateDamageLimit,
   firearmDamageLimit,
@@ -49,4 +50,15 @@ test('knife damage is authoritative for player and bot yaw conventions', () => {
   assert.equal(knifeDamageLimit({ x: 0, z: -1 }, target, 0, 'bot'), 100);
   assert.equal(knifeDamageLimit({ x: 0, z: 1 }, target, 0, 'bot'), 40);
   assert.equal(knifeDamageLimit(null, target, NaN, 'pl'), 40);
+});
+
+test('knife server cadence allows every physical swing without an extra perceptible cooldown', () => {
+  const physicalStrikeInterval = 0.62 * (1 - 0.18);
+  assert.ok(Number.isFinite(COMBAT_LIMITS.knifeMinStrikeInterval));
+  assert.ok(COMBAT_LIMITS.knifeMinStrikeInterval > 0, 'server must retain a narrow anti-duplicate guard');
+  assert.ok(
+    COMBAT_LIMITS.knifeMinStrikeInterval <= physicalStrikeInterval,
+    'server interval exceeds the client animation interval and rejects legitimate chained swings',
+  );
+  assert.equal('knifeCooldown' in COMBAT_LIMITS, false, 'legacy post-swing cooldown must be removed');
 });

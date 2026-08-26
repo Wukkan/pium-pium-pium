@@ -52,7 +52,7 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.7.8';
+const GAME_VERSION = '1.7.9';
 const ZOMBIE_WAVES = 8;
 const configuredZombiePrep = Number(process.env.PIUM_ZOMBIE_PREP_SECONDS);
 const ZOMBIE_PREP_SECONDS = Number.isFinite(configuredZombiePrep)
@@ -605,7 +605,7 @@ function resetCombatState(player) {
   player._nades = [];
   player._regularNadesUsed = 0;
   player._lastRegularNadeAt = -Infinity;
-  player._lastKnifeAt = -Infinity;
+  player._lastKnifeStrikeAt = -Infinity;
   player._verticalFlight = null;
   player._lastAcceptedStateAt = now();
 }
@@ -762,17 +762,17 @@ function consumeFirearmHit(player, weapon, targetPoint, claimedDamage, head, ign
 
 function consumeKnifeHit(player, target, claimedDamage, targetKind) {
   const time = now();
-  if (time - player._lastKnifeAt < COMBAT_LIMITS.knifeCooldown) return 0;
+  if (time - player._lastKnifeStrikeAt < COMBAT_LIMITS.knifeMinStrikeInterval) return 0;
   const dx = target.pos.x - player.pos.x, dz = target.pos.z - player.pos.z;
   if (Math.hypot(dx, dz) > COMBAT_LIMITS.knifeRange ||
       Math.abs(target.pos.y - player.pos.y) > COMBAT_LIMITS.knifeVerticalRange) return 0;
   const length = Math.hypot(dx, dz) || 1;
   const forwardX = -Math.sin(player.ry), forwardZ = -Math.cos(player.ry);
-  if ((dx / length) * forwardX + (dz / length) * forwardZ < 0.15) return 0;
+  if ((dx / length) * forwardX + (dz / length) * forwardZ < COMBAT_LIMITS.knifeFacingDot) return 0;
   if (!hasLineOfSight(playerEye(player), entityCenter(target))) return 0;
   const declared = Math.round(Number(claimedDamage));
   if (!Number.isFinite(declared) || declared <= 0) return 0;
-  player._lastKnifeAt = time;
+  player._lastKnifeStrikeAt = time;
   const yaw = targetKind === 'bot' ? target.yaw : target.ry;
   return Math.min(declared, knifeDamageLimit(player.pos, target.pos, yaw, targetKind));
 }

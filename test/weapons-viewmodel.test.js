@@ -115,7 +115,6 @@ function meleeHarness() {
     inputBlocked: false,
     meleeActive: false,
     meleeProgress: 0,
-    meleeCooldownUntil: 0,
     triggerDown: true,
     ads: true,
     reloading: true,
@@ -238,8 +237,10 @@ test('melee animation is clamped, strikes once and recovers continuously to the 
   assert.equal(start.visible, true);
   assert.equal(start.strike, 0);
   assert.ok(strike.strike > 0.99);
-  assert.ok(strike.position.x < start.position.x - 0.24);
-  assert.ok(Math.abs(strike.rotation.y - start.rotation.y) > 1.2, 'slash needs a readable wrist rotation');
+  assert.ok(strike.position.x < ready.position.x - 0.18,
+    'slash needs readable travel without throwing the wrist outside the view');
+  assert.ok(Math.abs(strike.rotation.y - ready.rotation.y) > 0.9,
+    'slash needs a readable wrist rotation');
   assert.equal(finish.visible, true);
   assert.equal(finish.strike, 0);
   assert.deepEqual(finish, ready, 'the completed swing must be the persistent ready pose');
@@ -380,7 +381,6 @@ test('equipped knife persists after an attack until a firearm is selected', () =
   assert.equal(calls.reloading.at(-1), false);
   assert.equal(calls.scope.at(-1), false);
 
-  assert.equal(weapon.beginMelee(), false, 'an active melee animation cannot restart');
   weapon.fire();
   weapon.reload();
   assert.equal(weapon.ammo.ammo, ammoBefore, 'melee must block gunfire');
@@ -480,6 +480,117 @@ test('melee strike callback fires exactly once when progress crosses the impact 
   weapon._updateMelee(0.1);
   weapon._updateMelee(1);
   assert.equal(strikes, 1, 'later updates and recovery cannot repeat the impact');
+});
+
+test('knife spam buffers one safe follow-up and chains without a wall-clock cooldown', () => {
+  const { weapon } = meleeHarness();
+  let strikes = 0;
+
+  weapon.onMeleeTrigger = () => weapon.beginMelee(() => { strikes++; });
+  assert.equal(weapon.equipKnife(), true);
+  assert.equal(weapon.primaryAction(), true);
+
+  for (let click = 0; click < 32; click++) {
+    assert.equal(
+      weapon.primaryAction(),
+      true,
+      `spam click ${click + 1} was rejected instead of entering the bounded input buffer`,
+    );
+  }
+
+  for (let frame = 0; frame < 240 && weapon.meleeActive; frame++) weapon._updateMelee(1 / 60);
+  assert.equal(weapon.meleeActive, false, 'the active and buffered swings did not drain');
+  assert.equal(strikes, 2, 'spam may queue only one follow-up and each physical swing hits once');
+  for (let frame = 0; frame < 120; frame++) weapon._updateMelee(1 / 60);
+  assert.equal(strikes, 2, 'discarded spam clicks leaked delayed impacts after the queue drained');
+
+  assert.equal(weapon.primaryAction(), true,
+    'a new click immediately after recovery must not wait for wall-clock cooldown');
+  for (let frame = 0; frame < 120 && weapon.meleeActive; frame++) weapon._updateMelee(1 / 60);
+  assert.equal(strikes, 3, 'the immediate post-recovery swing lost or duplicated its hit');
+  assert.equal(weapon.knifeEquipped, true, 'spamming completed swings must keep the knife equipped');
+});
+
+test('knife blade, dominant hand and guard hand follow continuous independent attack arcs', () => {
+  const model = buildKnifeModel();
+  const bladeTip = model.getObjectByName('knife-tip');
+  const dominantPalm = model.getObjectByName('right-glove-palm');
+  const guardPalm = model.getObjectByName('left-glove-palm');
+  const objects = { bladeTip, dominantPalm, guardPalm };
+  const previous = {};
+  const pathLength = Object.fromEntries(Object.keys(objects).map((key) => [key, 0]));
+  const largestStep = Object.fromEntries(Object.keys(objects).map((key) => [key, 0]));
+  const point = new THREE.Vector3();
+
+  for (let frame = 0; frame <= 240; frame++) {
+    const progress = 0.18 + (1 - 0.18) * frame / 240;
+    assert.equal(applyKnifeMeleePose(model, meleeAnimationState(progress)), true);
+    model.updateMatrixWorld(true);
+
+    for (const [key, object] of Object.entries(objects)) {
+      const current = object.getWorldPosition(point.clone());
+      assert.ok(current.toArray().every(Number.isFinite), `${progress}: ${key} left finite space`);
+      if (previous[key]) {
+        const distance = current.distanceTo(previous[key]);
+        pathLength[key] += distance;
+        largestStep[key] = Math.max(largestStep[key], distance);
+      }
+      previous[key] = current;
+    }
+  }
+
+  assert.ok(pathLength.bladeTip > 0.75, 'the blade needs a complete readable attack-and-recovery arc');
+  assert.ok(pathLength.dominantPalm > pathLength.guardPalm * 1.8,
+    'the guard hand must counterbalance instead of being rigidly dragged with the knife');
+  for (const [key, distance] of Object.entries(largestStep)) {
+    assert.ok(distance < 0.05, `${key} teleported ${distance} units between adjacent animation frames`);
+  }
+});
+
+test('successive knife attacks alternate slash and thrust while sharing one exact ready pose', () => {
+  const slashReady = meleeAnimationState(0.18, 0);
+  const thrustReady = meleeAnimationState(0.18, 1);
+  const slashImpact = meleeAnimationState(0.43, 0);
+  const thrustImpact = meleeAnimationState(0.43, 1);
+
+  assert.deepEqual(slashReady.position, thrustReady.position);
+  assert.deepEqual(slashReady.rotation, thrustReady.rotation);
+  assert.equal(slashImpact.style, 0);
+  assert.equal(thrustImpact.style, 1);
+  assert.ok(Math.abs(slashImpact.position.x - thrustImpact.position.x) > 0.1,
+    'alternating attacks collapsed into the same lateral path');
+  assert.ok(Math.abs(slashImpact.position.z - thrustImpact.position.z) > 0.2,
+    'the thrust must extend farther than the slash');
+});
+
+test('switching weapons during windup cancels only that swing and cannot leak a stale hit', () => {
+  const { weapon } = meleeHarness();
+  let staleStrikes = 0;
+  let freshStrikes = 0;
+
+  assert.equal(weapon.equipKnife(), true);
+  assert.equal(weapon.beginMelee(() => { staleStrikes++; }), true);
+  assert.equal(weapon.beginMelee(() => { staleStrikes++; }), true, 'follow-up input must be buffered');
+  weapon._updateMelee(0.05);
+  assert.equal(weapon.meleeProgress < 0.43, true);
+
+  weapon.switchTo('ar');
+  assert.equal(weapon.current, 'ar');
+  assert.equal(weapon.knifeEquipped, false);
+  assert.equal(weapon.meleeActive, false);
+  assert.equal(weapon.meleeStrikeCallback, null);
+  assert.equal(weapon.models.ar.visible, true);
+  assert.equal(weapon.knifeModel.visible, false);
+  weapon._updateMelee(10);
+  assert.equal(staleStrikes, 0, 'a cancelled windup fired after the firearm switch');
+
+  weapon.equipProgress = 1;
+  assert.equal(weapon.equipKnife(), true);
+  assert.equal(weapon.beginMelee(() => { freshStrikes++; }), true);
+  for (let frame = 0; frame < 240 && weapon.meleeActive; frame++) weapon._updateMelee(1 / 60);
+  assert.equal(weapon.meleeActive, false, 'a cancelled buffered swing reappeared after re-equipping');
+  assert.equal(staleStrikes, 0);
+  assert.equal(freshStrikes, 1, 'the next clean swing lost or duplicated its impact');
 });
 
 test('cancelling melee before the impact point discards its strike callback', () => {

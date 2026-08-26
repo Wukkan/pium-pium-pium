@@ -7,7 +7,7 @@ import {
   WEAPON_DEFS,
   WEAPON_ORDER,
 } from './weapons.js';
-import { knifeDamageLimit } from './shared/combat-rules.js';
+import { COMBAT_LIMITS, knifeDamageLimit } from './shared/combat-rules.js';
 import { BotManager } from './bots.js';
 import { Effects } from './effects.js';
 import { AudioSys } from './audio.js';
@@ -1388,10 +1388,14 @@ function doKnife() {
     fwd.normalize();
 
     // El alcance se comprueba en el instante visual del golpe, no al sacar el cuchillo.
-    const enRango = (pos) => {
+    const knifeTargetScore = (pos) => {
       const dx = pos.x - player.pos.x, dz = pos.z - player.pos.z;
-      if (Math.hypot(dx, dz) > 2.4 || Math.abs(pos.y - player.pos.y) > 2) return false;
-      return new THREE.Vector3(dx, 0, dz).normalize().dot(fwd) > 0.5;
+      const distance = Math.hypot(dx, dz);
+      if (distance > COMBAT_LIMITS.knifeRange ||
+          Math.abs(pos.y - player.pos.y) > COMBAT_LIMITS.knifeVerticalRange || distance <= 1e-6) return null;
+      const alignment = (dx / distance) * fwd.x + (dz / distance) * fwd.z;
+      if (alignment < COMBAT_LIMITS.knifeFacingDot) return null;
+      return alignment * 2 - distance / COMBAT_LIMITS.knifeRange;
     };
     const calcDmg = (pos, yaw, kind) => knifeDamageLimit(player.pos, pos, yaw, kind);
     const visibleTarget = (pos) => !segmentBlocked(
@@ -1402,30 +1406,39 @@ function doKnife() {
 
     if (online && remotes) {
       const grupos = [['pl', remotes.players], ['bot', remotes.bots]];
+      let best = null;
       for (const [kind, map] of grupos) {
         for (const ent of map.values()) {
           if (!ent.alive) continue;
           const pos = ent.rig.group.position;
-          if (!enRango(pos) || !visibleTarget(pos)) continue;
-          const dmg = calcDmg(pos, ent.rig.group.rotation.y, kind);
-          effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
-          hud.hitmarker(false);
-          net.sendHit(kind, ent.id, dmg, dmg >= 100, 'knife');
-          return;
+          const score = knifeTargetScore(pos);
+          if (score === null || !visibleTarget(pos) || (best && score <= best.score)) continue;
+          best = { ent, kind, pos, score };
         }
       }
+      if (best) {
+        const dmg = calcDmg(best.pos, best.ent.rig.group.rotation.y, best.kind);
+        effects.popup(best.pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
+        hud.hitmarker(false);
+        net.sendHit(best.kind, best.ent.id, dmg, dmg >= 100, 'knife');
+      }
     } else if (botsLocal) {
+      let best = null;
       for (const bot of botsLocal.bots) {
-        if (bot.dead || !enRango(bot.pos) || !visibleTarget(bot.pos)) continue;
-        const dmg = calcDmg(bot.pos, bot.yaw, 'bot');
-        const killed = bot.takeDamage(dmg, player.pos);
-        effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
+        if (bot.dead) continue;
+        const score = knifeTargetScore(bot.pos);
+        if (score === null || !visibleTarget(bot.pos) || (best && score <= best.score)) continue;
+        best = { bot, score };
+      }
+      if (best) {
+        const dmg = calcDmg(best.bot.pos, best.bot.yaw, 'bot');
+        const killed = best.bot.takeDamage(dmg, player.pos);
+        effects.popup(best.bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
         hud.hitmarker(killed);
         if (killed) {
           missions.event('knifekill');
-          if (offlineBotKilled) offlineBotKilled(bot, false);
+          if (offlineBotKilled) offlineBotKilled(best.bot, false);
         }
-        return;
       }
     }
   };

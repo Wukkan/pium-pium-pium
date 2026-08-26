@@ -21,9 +21,13 @@ export const COMBAT_LIMITS = Object.freeze({
   knifeDamage: 100,
   knifeFrontDamage: 40,
   knifeBackstabDot: 0.35,
-  knifeRange: 2.8,
-  knifeVerticalRange: 2.4,
-  knifeCooldown: 0.75,
+  knifeRange: 2.4,
+  knifeVerticalRange: 2,
+  knifeFacingDot: 0.5,
+  // No es un cooldown jugable: el cliente puede encadenar cortes sin espera.
+  // Este piso queda por debajo del intervalo físico entre impactos y solo
+  // impide que un cliente manipulado inyecte decenas de mensajes hit/segundo.
+  knifeMinStrikeInterval: 0.42,
   nadeDamage: 90,
   nadeMaxTargets: 16,
   nadeRadius: 6,

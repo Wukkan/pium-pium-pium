@@ -257,7 +257,7 @@ test('knife guard hand counterbalances the strike instead of following the blade
   const dominantTravel = dominantReady.distanceTo(dominantStrike);
   const guardTravel = guardReady.distanceTo(guardStrike);
 
-  assert.ok(dominantTravel > 0.28, 'dominant hand must drive a readable slash');
+  assert.ok(dominantTravel > 0.18, 'dominant hand must drive a readable slash');
   assert.ok(guardTravel < dominantTravel * 0.35, 'guard hand is still rigidly attached to the blade');
 });
 
