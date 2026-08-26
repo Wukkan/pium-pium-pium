@@ -50,6 +50,8 @@ El parche **Fluid Knife Combat 1.7.9** sustituye el golpe rígido del cuchillo p
 
 El parche **Unlimited Mouse Look 1.7.10** elimina el tope lateral en navegadores que no ofrecen Pointer Lock. El modo compatible conserva el movimiento directo del mouse y añade giro continuo y proporcional al acercar el cursor a los bordes, con la misma respuesta temporal a cualquier FPS. La cámara normaliza el giro horizontal, sanea deltas corruptos y reinicia toda intención residual al perder foco, abrir una interfaz, morir o reaparecer. La captura solo pertenece al canvas del juego, los intentos tardíos quedan invalidados y una pérdida inesperada de Pointer Lock continúa la partida en modo compatible en vez de expulsar al menú.
 
+La actualización **Solid Core 1.8.0** consolida movimiento, combate, audio y captura del mouse bajo una sola política comprobable; cierra correctamente sockets sustituidos y sesiones a medio conectar; valida el catálogo bidireccional del protocolo y payloads críticos; limita origen, inactividad, conexiones y backpressure; aísla fallos de cada sala y guarda el ranking durante un despliegue. La carga inicial usa Brotli/gzip y las recargas ETag/304, el arsenal 3D se difiere hasta abrirlo, el preview se suspende fuera del menú, la física de visibilidad evita asignaciones por collider y HUD/bots reutilizan estado estable. Los perfiles nuevos reducen 43,75% de píxeles frente a DPR 2 y 75% de texels de sombra, sin quitar los controles de calidad. El selector conectado sincroniza mapa, ocupación y bots después de cada votación. GitHub ejecuta sintaxis, 358 pruebas, límites arquitectónicos y auditoría de dependencias antes de cada despliegue.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.
@@ -88,7 +90,7 @@ Los cambios se aplican al momento y se guardan en el navegador. **Escape** perma
 
 1. Sube este repositorio a GitHub.
 2. Crea cuenta gratuita en [render.com](https://render.com).
-3. **New + → Blueprint** → conecta el repositorio (usa `render.yaml` automáticamente), o **New + → Web Service** con: Build `npm install`, Start `npm start`, plan **Free**, región **Ohio**.
+3. **New + → Blueprint** → conecta el repositorio (usa `render.yaml` automáticamente), o **New + → Web Service** con: Build `npm ci`, Start `npm start`, plan **Free**, región **Ohio**.
 4. Comparte la URL `https://tu-app.onrender.com` con tus amigos.
 
 ⚠️ El plan gratuito duerme el servidor tras 15 min sin uso: el primero en entrar espera ~1 minuto.
@@ -138,11 +140,14 @@ Antes de entrar eliges el modo y una de sus **dos salas online independientes**,
 
 ## Arquitectura
 
+La política completa de capas, ciclos de vida, presupuestos y extensión está en [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 - `server/server.js` — HTTP estático + WebSocket, catálogo `/salas` y ocho motores de partida aislados. Estado autoritativo: vida, muertes, respawns, marcador y nº de bots.
 - `server/botai.js` — IA de los bots en el servidor (patrulla, combate, ráfagas con probabilidad de acierto).
-- `src/shared/` — mapa, física y selector de respawn seguro compartidos entre cliente y servidor.
+- `src/shared/` — mapa, física, respawn, protocolo, combate, navegación y límites de red compartidos.
+- `src/gameplay-policy.js` — única matriz de capacidades de movimiento, combate, audio y Pointer Lock.
 - `src/lobby-catalog.js` — contrato compartido de modos, salas, capacidad, selección y ocupación.
-- `src/net.js` — cliente WebSocket con selección estricta de sala (estado a 15 Hz, disparos, impactos).
+- `src/net.js` — cliente WebSocket con selección estricta, heartbeat y ciclo de desconexión explícito.
 - `src/remotes.js` — marionetas interpoladas de jugadores remotos y bots.
 - `src/main.js` — arranque; modo online o local según haya servidor.
-- El daño lo declara el cliente que dispara (suficiente para partidas entre amigos); el servidor valida rangos y lleva la puntuación.
+- El servidor valida cadencia, daño, alcance, trayectoria, secuencia de vida, movimiento, granadas y puntuación; la hoja de ruta conserva la migración hacia autoridad total de inventario y headshots.

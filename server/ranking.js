@@ -49,13 +49,14 @@ async function runFlush() {
   if (pending.size === 0) return;
   const batch = [...pending.entries()];
   pending.clear();
-  for (const [name, e] of batch) {
+  let cursor = 0;
+  const flushOne = async ([name, e]) => {
     try {
       const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/rpc/pium_bump`, {
         method: 'POST',
         headers: HEADERS,
         body: JSON.stringify({ p_name: name, p_kills: e.kills, p_deaths: e.deaths, p_streak: e.streak }),
-      });
+      }, 3500);
       if (!res.ok) throw new Error(`http ${res.status}`);
     } catch (err) {
       // si falla, se reintenta en el siguiente volcado
@@ -65,7 +66,14 @@ async function runFlush() {
       back.streak = Math.max(back.streak, e.streak);
       console.error('ranking: fallo al guardar,', err.message);
     }
-  }
+  };
+  const workers = Array.from({ length: Math.min(6, batch.length) }, async () => {
+    while (cursor < batch.length) {
+      const item = batch[cursor++];
+      await flushOne(item);
+    }
+  });
+  await Promise.all(workers);
 }
 
 export function flush() {
@@ -110,4 +118,5 @@ export async function getTotalKills(name) {
   }
 }
 
-setInterval(flush, 25000);
+const flushTimer = setInterval(flush, 25000);
+flushTimer.unref?.();

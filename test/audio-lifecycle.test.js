@@ -199,6 +199,57 @@ test('audio initialization is silent and contains no ambient playback primitive'
   }
 });
 
+test('a closed or interrupted audio context recovers without trapping the game in silence', async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let constructions = 0;
+  class RecoveryContext {
+    constructor() {
+      constructions++;
+      this.currentTime = 0;
+      this.state = 'running';
+      this.sampleRate = 100;
+      this.destination = connectable();
+    }
+    createGain() { return connectable({ gain: automationParam(1) }); }
+    createDynamicsCompressor() {
+      return connectable({
+        threshold: { value: 0 }, knee: { value: 0 }, ratio: { value: 0 },
+        attack: { value: 0 }, release: { value: 0 },
+      });
+    }
+    createBuffer(channels, length, sampleRate) {
+      return {
+        channels, length, sampleRate, duration: length / sampleRate,
+        getChannelData() { return new Float32Array(length); },
+      };
+    }
+  }
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { AudioContext: RecoveryContext },
+  });
+  try {
+    const audio = new AudioSys();
+    audio.ctx = { state: 'closed' };
+    audio.master = {};
+    audio.activeVoices.add({ source: {} });
+    assert.equal(audio.ensure(), true);
+    assert.equal(constructions, 1);
+    assert.equal(audio.ctx.state, 'running');
+    assert.equal(audio.activeVoices.size, 0);
+
+    let resumes = 0;
+    audio.ctx.state = 'interrupted';
+    audio.ctx.resume = async () => { resumes++; };
+    assert.equal(audio.ensure(), true);
+    await Promise.resolve();
+    assert.equal(resumes, 1);
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else delete globalThis.window;
+  }
+});
+
 test('only the requested gameplay sounds remain audible and every one is one-shot', () => {
   assert.deepEqual(ALLOWED_AUDIO_EVENTS, [
     'shot',

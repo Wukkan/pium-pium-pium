@@ -14,6 +14,7 @@ import {
   lobbyRoomCardState,
   lobbyRoomKey,
   lobbySelectionState,
+  mergeLobbyRoomSnapshot,
   LOBBY_MODE_IDS,
   LOBBY_MODES,
   LOBBY_ROOM_CAPACITY,
@@ -216,4 +217,28 @@ test('authoritative room errors always return to the lobby instead of changing g
     serverAvailable: false,
     recoveringOnlineSession: true,
   }), 'lobby', 'a failed reconnect must not silently lock an established online player into local mode');
+});
+
+test('joined room snapshots update map and occupancy without rebuilding unchanged state', () => {
+  const initial = [{ mode: 'ffa', room: 1, players: 0, bots: 5, map: 'arena', state: 'playing' }];
+  const updated = mergeLobbyRoomSnapshot(initial, { mode: 'ffa', room: 1 }, {
+    humans: 1,
+    bots: 4,
+    map: 'ciudad',
+    state: 'podium',
+  });
+  assert.equal(updated.changed, true);
+  assert.deepEqual(updated.rooms[0], {
+    mode: 'ffa', room: 1, players: 1, bots: 4, map: 'ciudad', state: 'podium',
+  });
+  assert.equal(initial[0].map, 'arena', 'the network snapshot must not mutate cached lobby data');
+
+  const unchanged = mergeLobbyRoomSnapshot(updated.rooms, { mode: 'ffa', room: 1 }, {
+    humans: 1,
+    bots: 4,
+    map: 'ciudad',
+    state: 'podium',
+  });
+  assert.equal(unchanged.changed, false);
+  assert.equal(unchanged.rooms, updated.rooms);
 });

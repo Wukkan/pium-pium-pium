@@ -1,18 +1,19 @@
 {
   "name": "pium-pium-pium",
   "private": true,
-  "version": "1.7.10",
+  "version": "1.8.0",
   "type": "module",
   "description": "Shooter multijugador original para navegador con combate táctico, bots configurables y ajustes completos",
   "scripts": {
     "start": "node server/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "check": "node scripts/check-syntax.mjs && node --test"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "three.quarks": "0.16.0",
-    "ws": "^8.18.0"
+    "ws": "^8.21.3"
   }
 }

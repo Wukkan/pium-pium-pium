@@ -67,6 +67,11 @@ export class HUD {
     this._showPing = true;
     this._grenadeCount = 0;
     this._weapons = null;
+    this._healthRendered = null;
+    this._scoreRendered = null;
+    this._reloadProgressRendered = null;
+    this._matchBannerRendered = null;
+    this._netStatusRendered = null;
     this.bindingLabels = {
       grenade: 'G', reload: 'R',
       slots: ['1', '2', '3', '4', '5', '6', '7'],
@@ -180,10 +185,17 @@ export class HUD {
   }
 
   updateHealth(hp, max) {
-    const pct = Math.max(0, hp / max) * 100;
+    const safeMax = Number.isFinite(Number(max)) && Number(max) > 0 ? Number(max) : 1;
+    const safeHp = Number.isFinite(Number(hp)) ? Number(hp) : 0;
+    const pct = Math.min(100, Math.max(0, safeHp / safeMax) * 100);
+    const label = `${Math.ceil(Math.max(0, safeHp))} PV`;
+    const key = `${pct}:${label}`;
+    if (this._healthRendered === key) return false;
+    this._healthRendered = key;
     this.el.healthBar.style.width = `${pct}%`;
     this.el.healthBar.classList.toggle('low', pct < 35);
-    this.el.healthLabel.textContent = `${Math.ceil(hp)} PV`;
+    this.el.healthLabel.textContent = label;
+    return true;
   }
 
   updateAmmo(weapons) {
@@ -204,11 +216,19 @@ export class HUD {
   }
 
   setReloadProgress(p) {
-    document.getElementById('reload-bar').style.width = `${Math.round(p * 100)}%`;
+    const progress = Math.min(100, Math.max(0, Math.round((Number(p) || 0) * 100)));
+    if (this._reloadProgressRendered === progress) return false;
+    this._reloadProgressRendered = progress;
+    document.getElementById('reload-bar').style.width = `${progress}%`;
+    return true;
   }
 
   updateScore(kills, deaths) {
+    const key = `${kills}:${deaths}`;
+    if (this._scoreRendered === key) return false;
+    this._scoreRendered = key;
     this.el.score.innerHTML = `<span class="k">☠ ${kills}</span><span class="d">✖ ${deaths}</span>`;
+    return true;
   }
 
   updateMoney(n) {
@@ -304,9 +324,13 @@ export class HUD {
   setNetStatus(text, online) {
     const el = document.getElementById('net-status');
     if (!el) return;
+    const key = `${online ? 1 : 0}:${text}`;
+    if (this._netStatusRendered === key) return false;
+    this._netStatusRendered = key;
     el.textContent = text;
     el.classList.toggle('online', !!online);
     el.classList.toggle('offline', !online);
+    return true;
   }
 
   showScores(show) {
@@ -314,9 +338,12 @@ export class HUD {
   }
 
   setMatchBanner(text) {
+    if (this._matchBannerRendered === text) return false;
+    this._matchBannerRendered = text;
     const el = document.getElementById('match-banner');
     el.textContent = text;
     el.style.display = text ? 'block' : 'none';
+    return true;
   }
 
   showPodium(data) {

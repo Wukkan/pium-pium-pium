@@ -82,6 +82,19 @@ class Bot {
     this.stuckCheckAt = 0;
     this.nextPathCheckAt = 0;
     this.lastCheckPos = new THREE.Vector3();
+    this._waypointTarget = new THREE.Vector3();
+    this._scratch = {
+      from: new THREE.Vector3(),
+      to: new THREE.Vector3(),
+      direction: new THREE.Vector3(),
+      toTarget: new THREE.Vector3(),
+      forward: new THREE.Vector3(),
+      side: new THREE.Vector3(),
+      shotFrom: new THREE.Vector3(),
+      shotTo: new THREE.Vector3(),
+      shotEnd: new THREE.Vector3(),
+      rayHits: [],
+    };
     this.walkRef = { t: 0 };
 
     this.rig = makeHumanoid(color, name, (part) => ({ bot: this, part }));
@@ -134,7 +147,7 @@ class Bot {
       return true;
     }
     if (attackerPos) {
-      this.waypoint = attackerPos.clone();
+      this.waypoint = this._waypointTarget.copy(attackerPos);
       this.repathAt = performance.now() / 1000 + 5;
     }
     return false;
@@ -160,6 +173,7 @@ class Bot {
     // objetivo: el jugador u otro bot, el vivo visible más cercano
     // (el humano tiene preferencia ligera)
     const player = ctx.player;
+    const scratch = this._scratch;
     let target = null, isPlayer = false, dist = Infinity, best = Infinity;
     const considerar = (ent, entIsPlayer, alive, eyeY) => {
       if (!alive || ent === this) return;
@@ -167,14 +181,16 @@ class Bot {
       if (d > ENGAGE_DIST) return;
       const score = entIsPlayer ? d * 0.75 : d;
       if (score >= best) return;
-      const from = this.eyePos();
-      const to = new THREE.Vector3(ent.pos.x, ent.pos.y + eyeY, ent.pos.z);
-      const dir = new THREE.Vector3().subVectors(to, from);
+      const from = this.eyePos(scratch.from);
+      const to = scratch.to.set(ent.pos.x, ent.pos.y + eyeY, ent.pos.z);
+      const dir = scratch.direction.subVectors(to, from);
       const len = dir.length();
       dir.normalize();
       ctx.raycaster.set(from, dir);
       ctx.raycaster.far = len - 0.3;
-      if (ctx.raycaster.intersectObjects(ctx.occluders, false).length > 0) return;
+      scratch.rayHits.length = 0;
+      ctx.raycaster.intersectObjects(ctx.occluders, false, scratch.rayHits);
+      if (scratch.rayHits.length > 0) return;
       target = ent; isPlayer = entIsPlayer; dist = d; best = score;
     };
     considerar(player, true, !player.dead, 1.6);
@@ -184,14 +200,14 @@ class Bot {
     this._aimTarget = target;
 
     if (target) {
-      const toTarget = new THREE.Vector3().subVectors(target.pos, this.pos);
+      const toTarget = scratch.toTarget.subVectors(target.pos, this.pos);
       this.targetYaw = Math.atan2(toTarget.x, toTarget.z);
       if (now > this.strafeChangeAt) {
         this.strafeDir = Math.random() < 0.5 ? -1 : 1;
         this.strafeChangeAt = now + 0.8 + Math.random() * 1.4;
       }
-      const fwd = new THREE.Vector3(toTarget.x, 0, toTarget.z).normalize();
-      const side = new THREE.Vector3(-fwd.z, 0, fwd.x).multiplyScalar(this.strafeDir);
+      const fwd = scratch.forward.set(toTarget.x, 0, toTarget.z).normalize();
+      const side = scratch.side.set(-fwd.z, 0, fwd.x).multiplyScalar(this.strafeDir);
       let push = 0;
       if (dist > 26) push = 1;
       else if (dist < 9) push = -1;
@@ -207,7 +223,7 @@ class Bot {
         this.nextBurstAt = now + 0.7 + Math.random() * 1.1;
         this.nextShotAt = now + 0.15 + Math.random() * 0.25;
       }
-      this.waypoint = target.pos.clone(); // si lo pierde de vista, ir a por él
+      this.waypoint = this._waypointTarget.copy(target.pos); // si lo pierde de vista, ir a por él
       this.repathAt = now + 4;
     } else {
       let needsWaypoint = !this.waypoint || now > this.repathAt ||
@@ -220,16 +236,12 @@ class Bot {
         const nextWaypoint = selectReachableBotWaypoint(
           this.pos, ctx.waypoints, ctx.colliders, { body: BOT_BODY },
         );
-        this.waypoint = nextWaypoint?.clone
-          ? nextWaypoint.clone()
-          : nextWaypoint
-            ? new THREE.Vector3(nextWaypoint.x, nextWaypoint.y, nextWaypoint.z)
-            : null;
+        this.waypoint = nextWaypoint ? this._waypointTarget.copy(nextWaypoint) : null;
         this.repathAt = now + (this.waypoint ? 6 + Math.random() * 5 : 0.75);
         this.nextPathCheckAt = now + 0.75;
       }
       if (this.waypoint) {
-        const dir = new THREE.Vector3().subVectors(this.waypoint, this.pos);
+        const dir = scratch.direction.subVectors(this.waypoint, this.pos);
         dir.y = 0;
         if (dir.lengthSq() > 0.5) {
           dir.normalize();
@@ -287,8 +299,8 @@ class Bot {
   }
 
   shootAt(target, isPlayer, ctx, dist) {
-    const from = new THREE.Vector3(this.pos.x, this.pos.y + 1.3, this.pos.z);
-    const to = new THREE.Vector3(
+    const from = this._scratch.shotFrom.set(this.pos.x, this.pos.y + 1.3, this.pos.z);
+    const to = this._scratch.shotTo.set(
       target.pos.x,
       target.pos.y + 1.3 - Math.random() * 0.4,
       target.pos.z,
@@ -311,8 +323,10 @@ class Bot {
         }
       }
     } else {
-      end = to.clone().add(new THREE.Vector3(
-        (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 2.5, (Math.random() - 0.5) * 3,
+      end = this._scratch.shotEnd.copy(to).add(this._scratch.direction.set(
+        (Math.random() - 0.5) * 3,
+        (Math.random() - 0.5) * 2.5,
+        (Math.random() - 0.5) * 3,
       ));
     }
     ctx.effects.tracer(from, end, 0xff8866);

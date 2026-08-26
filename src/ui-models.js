@@ -83,7 +83,7 @@ const DEFAULT_SETTINGS = {
   soundEnabled: true,
   renderScale: 1,
   shadowsEnabled: true,
-  shadowQuality: 'high',
+  shadowQuality: 'medium',
   effectsQuality: 'balanced',
   invertY: false,
   showFps: false,
@@ -349,7 +349,7 @@ export function effectiveMasterVolume(settings = DEFAULT_SETTINGS) {
 }
 
 export function effectivePixelRatio(renderScale, deviceRatio = 1) {
-  return Math.min(2, Math.max(0.5, Number(renderScale) || DEFAULT_SETTINGS.renderScale) *
+  return Math.min(1.5, Math.max(0.5, Number(renderScale) || DEFAULT_SETTINGS.renderScale) *
     Math.max(1, Number(deviceRatio) || 1));
 }
 

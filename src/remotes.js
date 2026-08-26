@@ -152,6 +152,7 @@ export class Remotes {
   applySnapshot(snap, myId) {
     const seenPl = new Set(), seenBot = new Set();
     for (const p of snap.pl) {
+      if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
       if (p.id === myId) continue;
       seenPl.add(p.id);
       let ent = this.players.get(p.id);
@@ -168,6 +169,7 @@ export class Remotes {
       ent.applyState(p.p, p.ry, p.rx, p.s, !!p.al, p.hp);
     }
     for (const b of snap.bots) {
+      if (!b || typeof b !== 'object' || Array.isArray(b)) continue;
       seenBot.add(b.id);
       let ent = this.bots.get(b.id);
       if (ent && ent.color !== b.c) {

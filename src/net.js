@@ -3,10 +3,11 @@
 // ---------------------------------------------------------------------------
 
 import { isLobbyMode, isLobbyRoom } from './lobby-catalog.js';
-import { PROTOCOL_VERSION } from './shared/protocol.js';
+import { isServerMessageType, PROTOCOL_VERSION } from './shared/protocol.js';
 
 export function isProtocolMessage(value) {
-  return !!value && typeof value === 'object' && !Array.isArray(value) && typeof value.t === 'string';
+  return !!value && typeof value === 'object' && !Array.isArray(value) &&
+    isServerMessageType(value.t);
 }
 
 export function lobbyHelloMessage(name, skin, selection) {
@@ -36,14 +37,30 @@ export class Net {
     this._sendTimer = 0;
     this._heartbeatTimer = null;
     this._lastPongAt = 0;
+    this._cancelPendingConnect = null;
   }
 
   on(type, cb) { this.handlers[type] = cb; }
 
+  disconnect(code = 1000, reason = 'Conexión cerrada') {
+    const cancelPending = this._cancelPendingConnect;
+    this._cancelPendingConnect = null;
+    cancelPending?.();
+    const ws = this.ws;
+    this.ws = null;
+    this.connected = false;
+    this.stopHeartbeat();
+    this._sendTimer = 0;
+    if (!ws) return false;
+    try {
+      if (ws.readyState === 0 || ws.readyState === 1) ws.close(code, reason);
+    } catch { /* el socket ya no acepta operaciones */ }
+    return true;
+  }
+
   connect(name, skin, selection) {
     return new Promise((resolve, reject) => {
-      this.stopHeartbeat();
-      this.connected = false;
+      this.disconnect(1000, 'Conexión reemplazada');
       let hello;
       try {
         hello = lobbyHelloMessage(name, skin, selection);
@@ -59,9 +76,25 @@ export class Net {
       } catch (e) { reject(e); return; }
       this.ws = ws;
 
+      let cancelPending = null;
+      const releasePending = () => {
+        if (this._cancelPendingConnect === cancelPending) this._cancelPendingConnect = null;
+      };
       const timeout = setTimeout(() => {
-        if (!settled) { settled = true; ws.close(); reject(new Error('timeout')); }
+        if (!settled) {
+          settled = true;
+          releasePending();
+          ws.close();
+          reject(new Error('timeout'));
+        }
       }, 4000);
+      cancelPending = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error('conexión cancelada'));
+      };
+      this._cancelPendingConnect = cancelPending;
 
       ws.onopen = () => {
         if (this.ws !== ws) {
@@ -80,6 +113,7 @@ export class Net {
           if (m.mode !== hello.mode || m.room !== hello.room) {
             settled = true;
             clearTimeout(timeout);
+            releasePending();
             const error = new Error('room-mismatch');
             error.code = 'ROOM_MISMATCH';
             reject(error);
@@ -88,6 +122,7 @@ export class Net {
           }
           settled = true;
           clearTimeout(timeout);
+          releasePending();
           this.id = m.id;
           this.name = m.name;
           this.mode = m.mode;
@@ -102,6 +137,7 @@ export class Net {
         if ((m.t === 'full' || m.t === 'joinerr') && !settled) {
           settled = true;
           clearTimeout(timeout);
+          releasePending();
           const error = new Error(m.t === 'full' ? 'room-full' : 'join-error');
           error.code = m.code || (m.t === 'full' ? 'ROOM_FULL' : 'INVALID_ROOM');
           error.mode = m.mode;
@@ -115,14 +151,25 @@ export class Net {
       };
       ws.onerror = () => {
         if (this.ws !== ws) return;
-        if (!settled) { settled = true; clearTimeout(timeout); reject(new Error('error')); }
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          releasePending();
+          reject(new Error('error'));
+        }
       };
       ws.onclose = () => {
         if (this.ws !== ws) return;
         const wasConnected = this.connected;
+        this.ws = null;
         this.connected = false;
         this.stopHeartbeat();
-        if (!settled) { settled = true; clearTimeout(timeout); reject(new Error('cerrado')); }
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          releasePending();
+          reject(new Error('cerrado'));
+        }
         else if (wasConnected && this.handlers._close) this.handlers._close();
       };
     });

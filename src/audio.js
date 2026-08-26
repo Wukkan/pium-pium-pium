@@ -117,13 +117,26 @@ export class AudioSys {
 
   ensure() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') {
-        try {
-          const resumed = this.ctx.resume();
-          if (resumed?.catch) resumed.catch(() => {});
-        } catch { /* el juego continúa en silencio */ }
+      if (this.ctx.state === 'closed') {
+        // Un contexto cerrado no puede reanudarse. Descarta todo el grafo para
+        // que el siguiente bloque construya uno nuevo tras el gesto del usuario.
+        this.activeVoices.clear();
+        this.ctx = null;
+        this.master = null;
+        this.mix = null;
+        this.compressor = null;
+        this.limiter = null;
+        this.buses = null;
+        this.noiseBuffer = null;
+      } else {
+        if (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') {
+          try {
+            const resumed = this.ctx.resume();
+            if (resumed?.catch) resumed.catch(() => {});
+          } catch { /* el juego continúa en silencio */ }
+        }
+        return true;
       }
-      return true;
     }
     const AudioContextCtor = globalThis.window?.AudioContext || globalThis.window?.webkitAudioContext;
     if (typeof AudioContextCtor !== 'function') return false;

@@ -16,11 +16,11 @@ import { Net } from './net.js';
 import { Remotes } from './remotes.js';
 import { KitManager } from './kits.js';
 import {
-  combatAudioAllowed,
   GrenadeManager,
   explosionDamage,
   playSpatialBoom,
 } from './grenades.js';
+import { gameplayCapabilities, gameplayOverlayPolicy } from './gameplay-policy.js';
 import { Missions } from './missions.js';
 import { HATS, MAPS, MAX_BOTS, QUICK_CHAT, TOTAL_SLOTS } from './shared/mapdata.js';
 import { activateGroundedJumpPad } from './jump-pad-control.js';
@@ -51,6 +51,7 @@ import {
   lobbyCatalogState,
   lobbyJoinFailureAction,
   lobbySelectionState,
+  mergeLobbyRoomSnapshot,
   sanitizeLobbySelection,
 } from './lobby-catalog.js';
 import { gameplayControlActive, requestPointerLockSafe } from './game-entry.js';
@@ -75,7 +76,7 @@ if (!renderer) {
   throw mainRendererFailure || new Error('No se pudo iniciar el motor gráfico WebGL');
 }
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -315,6 +316,7 @@ const operatorPreview = {
   unavailable: false,
   failureReported: false,
   hasRendered: false,
+  dirty: true,
   motionClock: { t: 0, idle: 0 },
 };
 
@@ -365,6 +367,7 @@ function syncOperatorPreviewHost(screen = 'play') {
   else if (operatorPreview.renderer) setOperatorPreviewState('loading');
   else if (operatorPreview.unavailable) setOperatorPreviewState('unavailable');
   operatorPreview.renderAccumulator = 1 / 30;
+  operatorPreview.dirty = true;
   return host;
 }
 
@@ -442,6 +445,7 @@ function refreshOperatorPreview() {
     syncOperatorPreviewCamera();
     operatorPreview.motionClock.t = 0;
     operatorPreview.motionClock.idle = 0;
+    operatorPreview.dirty = true;
   } catch (error) {
     disableOperatorPreview(error);
   }
@@ -531,8 +535,10 @@ function disposeOperatorPreview() {
 }
 
 function renderOperatorPreview(dt) {
-  if (!operatorPreview.renderer || !operatorPreview.host) return;
+  if (!operatorPreview.renderer || !operatorPreview.host || state !== 'menu' || document.hidden) return;
   try {
+    const reducedMotion = document.body.classList.contains('reduced-motion');
+    if (reducedMotion && operatorPreview.hasRendered && !operatorPreview.dirty) return;
     operatorPreview.renderAccumulator += Math.max(0, dt);
     if (operatorPreview.renderAccumulator < 1 / 30) return;
     const previewDt = Math.min(0.1, operatorPreview.renderAccumulator);
@@ -548,7 +554,7 @@ function renderOperatorPreview(dt) {
       operatorPreview.camera.aspect = width / height;
       operatorPreview.camera.updateProjectionMatrix();
     }
-    if (operatorPreview.rig && !document.body.classList.contains('reduced-motion')) {
+    if (operatorPreview.rig && !reducedMotion) {
       animateHumanoid(
         operatorPreview.rig, previewDt, 0, operatorPreview.motionClock, false, 0,
       );
@@ -557,6 +563,7 @@ function renderOperatorPreview(dt) {
       operatorPreview.rig.group.rotation.y = operatorPreview.angle;
     }
     operatorPreview.renderer.render(operatorPreview.scene, operatorPreview.camera);
+    operatorPreview.dirty = false;
     if (!operatorPreview.hasRendered) {
       operatorPreview.hasRendered = true;
       setOperatorPreviewState('ready');
@@ -565,6 +572,8 @@ function renderOperatorPreview(dt) {
     disableOperatorPreview(error);
   }
 }
+
+addEventListener('resize', () => { operatorPreview.dirty = true; });
 
 let settings = readSettings(safeStorageGet('pium_settings'));
 let bindings = readBindings(safeStorageGet('pium_bindings_v1'));
@@ -725,6 +734,7 @@ function applySettings() {
   audio.setVoiceLimit({ low: 18, balanced: 28, high: 40 }[settings.effectsQuality] || 28);
   document.body.classList.toggle('reduced-motion', settings.reducedMotion);
   document.body.classList.toggle('high-contrast', settings.highContrast);
+  operatorPreview.dirty = true;
   liveWeaponPreviewManager.syncPreferences({
     reducedMotion: settings.reducedMotion,
     renderScale: settings.renderScale,
@@ -1466,12 +1476,26 @@ const playerEye = new THREE.Vector3();
 const remoteAudioForward = new THREE.Vector3();
 
 function combatAudioIsActive() {
-  return combatAudioAllowed({
+  return currentGameplayCapabilities().audio;
+}
+
+function currentGameplayCapabilities() {
+  return gameplayCapabilities({
     state,
+    hasControl: hasGameplayControl(),
+    connecting,
     dead: player.dead,
-    overlayOpen: chatOpen || buyOpen || botPanelOpen || podiumOpen || teamPickerOpen,
     hidden: document.hidden,
+    chatOpen,
+    buyOpen,
+    botPanelOpen,
+    podiumOpen,
+    teamPickerOpen,
   });
+}
+
+function currentOverlayPolicy() {
+  return gameplayOverlayPolicy({ chatOpen, buyOpen, botPanelOpen, podiumOpen, teamPickerOpen });
 }
 
 function playCombatSound(method, ...args) {
@@ -1515,19 +1539,19 @@ function saveLobbySelection() {
   safeStorageSet(LOBBY_SELECTION_STORAGE_KEY, JSON.stringify(lobbySelection));
 }
 
-function syncJoinedRoomOccupancy(rawHumans) {
-  if (!net.mode || !Number.isFinite(Number(rawHumans))) return false;
-  const players = Math.min(net.slots || TOTAL_SLOTS, Math.max(0, Math.trunc(Number(rawHumans))));
-  const index = lobbyRooms.findIndex((entry) =>
-    entry?.mode === net.mode && entry?.room === net.room);
-  if (index >= 0 && lobbyRooms[index].players === players) return false;
-  if (index < 0) {
-    lobbyRooms = [...lobbyRooms, { mode: net.mode, room: net.room, players }];
-  } else {
-    lobbyRooms = lobbyRooms.map((entry, entryIndex) =>
-      entryIndex === index ? { ...entry, players } : entry);
-  }
-  return true;
+function syncJoinedRoomSnapshot({ humans, bots, map, state: roomState } = {}) {
+  if (!net.mode) return false;
+  const merged = mergeLobbyRoomSnapshot(lobbyRooms, {
+    mode: net.mode,
+    room: net.room,
+  }, {
+    humans,
+    bots,
+    map,
+    state: roomState,
+  }, net.slots || TOTAL_SLOTS);
+  lobbyRooms = merged.rooms;
+  return merged.changed;
 }
 
 function renderLobbySelector() {
@@ -1692,7 +1716,7 @@ applySettings();
 renderLobbySelector();
 void refreshLobbyRooms();
 const lobbyPollTimer = setInterval(() => {
-  if (!joined && state === 'menu' && !connecting) void refreshLobbyRooms();
+  if (!document.hidden && !joined && state === 'menu' && !connecting) void refreshLobbyRooms();
 }, 3000);
 addEventListener('pagehide', (event) => {
   if (!event.persisted) {
@@ -1808,7 +1832,7 @@ function setupOffline() {
 }
 
 const ONLINE_NET_EVENTS = Object.freeze([
-  'snap', 'match', 'podium', 'podiumStage', 'votes', 'chat', 'pong', 'ammo',
+  'snap', 'match', 'podium', 'votes', 'chat', 'pong', 'ammo',
   'botcfg', 'cbox', 'gun', 'fire', 'kill', 'nade', 'ouch', 'spawn', 'med',
   'aviso', 'botbye', 'corr', 'hitok',
 ]);
@@ -1832,7 +1856,7 @@ function teardownOnlineSession(sessionToken = onlineSessionToken) {
   const hadOnlineSession = online || joined || !!remotes;
   onlineSessionToken++;
 
-  net.stopHeartbeat();
+  net.disconnect(1000, 'Sesión finalizada');
   clearOnlineSessionBindings();
   clearOnlineCrateRestores();
   grenades.clear();
@@ -1898,6 +1922,9 @@ function setupOnline() {
   player.netMode = true;
   player.onDeath = null;
   remotes = new Remotes(scene);
+  let destroyedCratesSignature = null;
+  let kitsSignature = null;
+  let botConfigSignature = null;
 
   weapons.getTargets = () => [...world.occluders, ...remotes.getHitMeshes()];
   weapons.onTargetHit = (data, dmg, isHead, point) => {
@@ -1914,26 +1941,49 @@ function setupOnline() {
   };
 
   net.on('snap', (m) => {
+    if (!Array.isArray(m.pl) || !Array.isArray(m.bots)) return;
     lastSnap = m;
     if (m.m?.map) loadWorldMap(m.m.map);
-    if (m.dc) {
-      const rotas = new Set(m.dc);
-      for (const id of world.crates.keys()) syncOnlineCrate(id, !rotas.has(id));
+    if (Array.isArray(m.dc)) {
+      const nextCratesSignature = m.dc.join('|');
+      if (nextCratesSignature !== destroyedCratesSignature) {
+        destroyedCratesSignature = nextCratesSignature;
+        const rotas = new Set(m.dc);
+        for (const id of world.crates.keys()) syncOnlineCrate(id, !rotas.has(id));
+      }
     }
     remotes.applySnapshot(m, net.id);
-    kitsMgr.sync(m.kits || []);
-    const me = m.pl.find((p) => p.id === net.id);
+    const safeKits = Array.isArray(m.kits) ? m.kits : [];
+    const nextKitsSignature = JSON.stringify(safeKits);
+    if (nextKitsSignature !== kitsSignature) {
+      kitsSignature = nextKitsSignature;
+      kitsMgr.sync(safeKits);
+    }
+    const me = m.pl.find((p) => p && typeof p === 'object' && p.id === net.id);
     if (me) {
-      kills = me.k; deaths = me.d;
-      myGunIdx = me.gi || 0;
+      kills = Number.isFinite(Number(me.k)) ? Math.max(0, Math.trunc(Number(me.k))) : kills;
+      deaths = Number.isFinite(Number(me.d)) ? Math.max(0, Math.trunc(Number(me.d))) : deaths;
+      myGunIdx = Number.isSafeInteger(me.gi) ? Math.max(0, me.gi) : 0;
       hud.updateScore(kills, deaths);
-      if (!player.dead) player.health = me.hp;
+      if (!player.dead && Number.isFinite(Number(me.hp))) player.health = Number(me.hp);
     }
     if (m.m) {
       matchInfo = m.m;
-      if (m.m.bc) receiveBotConfig(m.m.bc);
+      if (m.m.bc) {
+        const nextBotConfigSignature = JSON.stringify(m.m.bc);
+        if (nextBotConfigSignature !== botConfigSignature) {
+          botConfigSignature = nextBotConfigSignature;
+          receiveBotConfig(m.m.bc);
+        }
+      }
       hud.setMatchBanner(bannerText(matchInfo));
     }
+    if (syncJoinedRoomSnapshot({
+      humans: m.pl.length,
+      bots: m.bots.length,
+      map: m.m?.map,
+      state: m.m?.st,
+    })) renderLobbySelector();
     hud.setNetStatus(`🟢 ONLINE — ${m.pl.length}/${net.slots} jugadores · ${m.bots.length} bots`, true);
   });
 
@@ -1963,6 +2013,7 @@ function setupOnline() {
   });
 
   net.on('podium', (m) => {
+    if (!Array.isArray(m.rows)) return;
     if (botPanelOpen) setBotPanel(false, false);
     if (buyOpen) setBuyMenu(false, false);
     setChat(false);
@@ -1975,13 +2026,6 @@ function setupOnline() {
     hud.showPodium(m);
     hud.setPodiumStage(podiumStage, m.secs || 15);
     if (m.winner === net.name) missions.event('win');
-    startPodiumCountdown(m.secs || 15);
-  });
-
-  net.on('podiumStage', (m) => {
-    if (!podiumOpen) return;
-    podiumStage = m.stage || 'map';
-    hud.setPodiumStage(podiumStage, m.secs || 15);
     startPodiumCountdown(m.secs || 15);
   });
 
@@ -2093,12 +2137,14 @@ function setupOnline() {
   grenades.onExplode = () => {};
 
   net.on('ouch', (m) => {
+    if (!Number.isFinite(Number(m.hp)) || !Number.isFinite(Number(m.d))) return;
     player.health = m.hp;
     player.shakeTime = 0.25;
     hud.damageFlash(Math.min(0.8, 0.25 + m.d / 40));
   });
 
   net.on('spawn', (m) => {
+    if (!isFiniteVectorPayload(m.p)) return;
     if (m.map) loadWorldMap(m.map);
     net.acceptSpawn(m.sid);
     player.spawn(safePlayerSpawn(new THREE.Vector3(m.p[0], m.p[1], m.p[2])));
@@ -2112,6 +2158,7 @@ function setupOnline() {
   });
 
   net.on('med', (m) => {
+    if (!Number.isFinite(Number(m.hp))) return;
     player.health = m.hp;
     onHealed();
   });
@@ -2123,7 +2170,7 @@ function setupOnline() {
   });
 
   net.on('corr', (m) => {
-    if (m.sid !== net.spawnSequence || player.dead) return;
+    if (m.sid !== net.spawnSequence || player.dead || !isFiniteVectorPayload(m.p)) return;
     player.correctPosition(m.p);
   });
   net.startHeartbeat(3000);
@@ -2288,7 +2335,7 @@ function tryLock() {
     requestAnimationFrame(() => {
       if (attemptEpoch !== pointerLockAttemptEpoch) return;
       if (!ownsGameplayPointerLock() && state === 'playing' && !player.dead &&
-          !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen) {
+          !currentOverlayPolicy().modal) {
         setFallbackControls(true);
         showFallbackControlHint();
       }
@@ -2316,7 +2363,7 @@ playBtn.addEventListener('click', joinAndPlay);
 localPlayBtn?.addEventListener('click', startLocalTraining);
 renderer.domElement.addEventListener('click', () => {
   if (state === 'playing' && canRequestGameplayPointerLock() && !ownsGameplayPointerLock() && !player.dead &&
-      !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen) tryLock();
+      !currentOverlayPolicy().modal) tryLock();
 });
 nameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinAndPlay();
@@ -2325,7 +2372,7 @@ nameInput.addEventListener('keydown', (e) => {
 
 document.addEventListener('pointerlockchange', () => {
   if (ownsGameplayPointerLock()) {
-    if (buyOpen || botPanelOpen || podiumOpen || teamPickerOpen) {
+    if (currentOverlayPolicy().modal) {
       document.exitPointerLock();
       return;
     }
@@ -2337,8 +2384,7 @@ document.addEventListener('pointerlockchange', () => {
   } else if (document.pointerLockElement) {
     setFallbackControls(false);
   } else {
-    const gameplayCanFallback = state === 'playing' && !player.dead &&
-      !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;
+    const gameplayCanFallback = state === 'playing' && !player.dead && !currentOverlayPolicy().modal;
     if (!gameplayCanFallback) {
       setFallbackControls(false);
       return;
@@ -2351,7 +2397,7 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 document.addEventListener('pointerlockerror', () => {
-  if (state !== 'playing' || ownsGameplayPointerLock() || buyOpen || botPanelOpen || podiumOpen || teamPickerOpen) return;
+  if (state !== 'playing' || ownsGameplayPointerLock() || currentOverlayPolicy().modal) return;
   setFallbackControls(true);
   showFallbackControlHint();
 });
@@ -2453,7 +2499,7 @@ function renderRoomSummary() {
 }
 
 function refreshWeaponInputBlock() {
-  const blocked = chatOpen || buyOpen || botPanelOpen || podiumOpen || teamPickerOpen;
+  const blocked = currentOverlayPolicy().combat;
   if (blocked && !weapons.inputBlocked) weapons.clearInput();
   weapons.inputBlocked = blocked;
   hud.setCrosshairBlocked(blocked);
@@ -2476,7 +2522,12 @@ function receiveBotConfig(raw, acknowledged = false) {
   const mode = hasExplicitLock ? (raw.locked === true || raw.locked === 1 ? 'zombies' : 'ffa') : matchInfo.mode;
   botControl = botPanelState(raw, mode);
   if (acknowledged) botDraftDirty = false;
-  if (online && syncJoinedRoomOccupancy(botControl.humans)) renderLobbySelector();
+  if (online && syncJoinedRoomSnapshot({
+    humans: botControl.humans,
+    bots: botControl.active,
+    map: matchInfo.map,
+    state: matchInfo.st,
+  })) renderLobbySelector();
   else renderRoomSummary();
   if (botPanelOpen) renderBotPanel(acknowledged || !botDraftDirty);
 }
@@ -2880,7 +2931,6 @@ hud.updateMoney(0);
 hud.updateSlots(weapons);
 hud.updateGrenades(grenades.count);
 renderMenuPanels();
-renderMenuArsenal();
 showMenuScreen('play');
 
 // --- bucle de juego ---
@@ -2892,19 +2942,21 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     weapons.clearInput();
     audio.stopCombat();
+    lobbyRefreshController?.abort();
+  } else if (!joined && state === 'menu' && !connecting) {
+    void refreshLobbyRooms();
   }
 });
 
 function simulateStep(dt) {
   const playing = state === 'playing';
-  const inputEnabled = playing && hasGameplayControl() && !connecting && !player.dead &&
-    !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;
+  const capabilities = currentGameplayCapabilities();
 
   if (state !== 'menu') {
-    const launchedFromPad = activateGroundedJumpPad(player, world.jumpPads, inputEnabled);
+    const launchedFromPad = activateGroundedJumpPad(player, world.jumpPads, capabilities.movement);
     if (launchedFromPad) playCombatSound('jump');
-    player.update(dt, inputEnabled);
-    weapons.update(dt, inputEnabled);
+    player.update(dt, capabilities.movement);
+    weapons.update(dt, capabilities.combat);
     if (botsLocal) botsLocal.update(dt);
     if (botsLocal) kitsMgr.offlineUpdate(player, botsLocal, onHealed, onAmmoPicked);
   }

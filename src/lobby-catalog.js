@@ -276,3 +276,39 @@ export function lobbyJoinFailureAction(errorCode, {
     ? 'lobby'
     : 'offline';
 }
+
+export function mergeLobbyRoomSnapshot(rooms, selection, snapshot = {}, capacity = LOBBY_ROOM_CAPACITY) {
+  const list = Array.isArray(rooms) ? rooms : [];
+  const target = sanitizeLobbySelection(selection);
+  const rawHumans = snapshot && typeof snapshot === 'object'
+    ? (snapshot.humans ?? snapshot.players)
+    : undefined;
+  if (!Number.isFinite(Number(rawHumans))) return { rooms: list, changed: false };
+  const safeCapacity = Number.isSafeInteger(capacity) && capacity > 0
+    ? capacity
+    : LOBBY_ROOM_CAPACITY;
+  const players = Math.min(safeCapacity, Math.max(0, Math.trunc(Number(rawHumans))));
+  const index = list.findIndex((entry) =>
+    entry?.mode === target.mode && entry?.room === target.room);
+  const current = index >= 0 ? list[index] : {};
+  const rawBots = Number(snapshot.bots);
+  const next = {
+    ...current,
+    mode: target.mode,
+    room: target.room,
+    players,
+    bots: Number.isFinite(rawBots) ? Math.max(0, Math.trunc(rawBots)) : current.bots,
+    map: snapshot.map === 'arena' || snapshot.map === 'ciudad' ? snapshot.map : current.map,
+    state: typeof snapshot.state === 'string' ? snapshot.state : current.state,
+  };
+  if (index >= 0 && current.players === next.players && current.bots === next.bots &&
+      current.map === next.map && current.state === next.state) {
+    return { rooms: list, changed: false };
+  }
+  return {
+    rooms: index < 0
+      ? [...list, next]
+      : list.map((entry, entryIndex) => entryIndex === index ? next : entry),
+    changed: true,
+  };
+}

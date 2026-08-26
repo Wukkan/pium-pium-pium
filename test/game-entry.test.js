@@ -65,7 +65,9 @@ test('Pointer Lock promises report acceptance and rejection without throwing', a
 test('successful joining opens gameplay independently from Pointer Lock', () => {
   assert.match(mainSource, /if \(joined \|\| botsLocal\) \{ enterGameplayView\(\); return; \}/);
   assert.match(mainSource, /function enterGameplayView\(\)[\s\S]*?state = 'playing';[\s\S]*?hud\.showMenu\(false\);[\s\S]*?hud\.showHud\(true\);/);
-  assert.match(mainSource, /const inputEnabled = playing && hasGameplayControl\(\)/);
+  assert.match(mainSource, /const capabilities = currentGameplayCapabilities\(\)/);
+  assert.match(mainSource, /player\.update\(dt, capabilities\.movement\)/);
+  assert.match(mainSource, /weapons\.update\(dt, capabilities\.combat\)/);
   assert.match(mainSource, /player\.setFallbackLook\(fallbackControlsActive, renderer\.domElement\)/);
   assert.match(mainSource, /weapons\.setFallbackControls\(fallbackControlsActive, renderer\.domElement\)/);
 });
@@ -84,7 +86,7 @@ test('compact navigation buttons can shrink without horizontal overflow', () => 
 });
 
 test('a late Pointer Lock grant cannot capture the cursor over an overlay', () => {
-  assert.match(mainSource, /if \(ownsGameplayPointerLock\(\)\) \{\s*if \(buyOpen \|\| botPanelOpen \|\| podiumOpen \|\| teamPickerOpen\) \{\s*document\.exitPointerLock\(\);\s*return;/);
+  assert.match(mainSource, /if \(ownsGameplayPointerLock\(\)\) \{\s*if \(currentOverlayPolicy\(\)\.modal\) \{\s*document\.exitPointerLock\(\);\s*return;/);
 });
 
 test('unexpected Pointer Lock loss keeps the match active in compatible mouse mode', () => {
@@ -94,11 +96,11 @@ test('unexpected Pointer Lock loss keeps the match active in compatible mouse mo
   assert.doesNotMatch(lifecycle, /openMainMenuFromGame\(\)/);
   assert.match(
     lifecycle,
-    /buyOpen \|\| botPanelOpen \|\| podiumOpen \|\| teamPickerOpen[\s\S]*?setFallbackControls\(false\)[\s\S]*?return;/,
+    /currentOverlayPolicy\(\)\.modal[\s\S]*?setFallbackControls\(false\)[\s\S]*?return;/,
   );
   assert.match(
     lifecycle,
-    /const gameplayCanFallback = state === 'playing' && !player\.dead &&[\s\S]*?!buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;/,
+    /const gameplayCanFallback = state === 'playing' && !player\.dead && !currentOverlayPolicy\(\)\.modal;/,
   );
   assert.match(
     lifecycle,
@@ -131,7 +133,7 @@ test('online lifecycle owns one heartbeat and tears down the dead session', () =
   const teardown = mainSource.match(
     /function teardownOnlineSession\([\s\S]*?\n}\n\n\/\/ --- cableado modo ONLINE ---/,
   )?.[0] || '';
-  assert.match(teardown, /net\.stopHeartbeat\(\);/);
+  assert.match(teardown, /net\.disconnect\(1000, 'Sesión finalizada'\);/);
   assert.match(teardown, /remotes\?\.dispose\(\);\s*remotes = null;/);
   assert.match(teardown, /online = false;\s*joined = false;/);
   assert.match(teardown, /player\.netMode = false;/);

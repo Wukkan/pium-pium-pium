@@ -193,3 +193,49 @@ test('weapon HUD identifies the persistent knife instead of showing stale firear
   assert.match(hud.el.ammo.innerHTML, /^12 /);
   assert.equal(hud.el.weaponName.textContent, 'PISTOLA');
 });
+
+test('stable HUD values do not rewrite DOM state every simulation frame', () => {
+  let healthWidthWrites = 0;
+  let healthLabelWrites = 0;
+  let scoreWrites = 0;
+  const healthStyle = {};
+  Object.defineProperty(healthStyle, 'width', { set() { healthWidthWrites++; } });
+  const healthLabel = {};
+  Object.defineProperty(healthLabel, 'textContent', { set() { healthLabelWrites++; } });
+  const score = {};
+  Object.defineProperty(score, 'innerHTML', { set() { scoreWrites++; } });
+  const hud = Object.create(HUD.prototype);
+  hud.el = {
+    healthBar: { style: healthStyle, classList: { toggle() {} } },
+    healthLabel,
+    score,
+  };
+  hud._healthRendered = null;
+  hud._scoreRendered = null;
+
+  assert.equal(hud.updateHealth(100, 100), true);
+  assert.equal(hud.updateHealth(100, 100), false);
+  assert.equal(hud.updateScore(4, 2), true);
+  assert.equal(hud.updateScore(4, 2), false);
+  assert.equal(healthWidthWrites, 1);
+  assert.equal(healthLabelWrites, 1);
+  assert.equal(scoreWrites, 1);
+
+  assert.equal(hud.updateHealth(75, 100), true);
+  assert.equal(hud.updateScore(5, 2), true);
+  assert.equal(healthWidthWrites, 2);
+  assert.equal(scoreWrites, 2);
+});
+
+test('HUD clamps malformed health values before rendering', () => {
+  const hud = Object.create(HUD.prototype);
+  const widths = [];
+  hud.el = {
+    healthBar: { style: { set width(value) { widths.push(value); } }, classList: { toggle() {} } },
+    healthLabel: { textContent: '' },
+  };
+  hud._healthRendered = null;
+  hud.updateHealth(Infinity, 0);
+  assert.equal(widths[0], '0%');
+  assert.equal(hud.el.healthLabel.textContent, '0 PV');
+});

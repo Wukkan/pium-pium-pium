@@ -7,6 +7,7 @@ test('protocol messages reject null, arrays, and messages without a type', () =>
   assert.equal(isProtocolMessage([]), false);
   assert.equal(isProtocolMessage({}), false);
   assert.equal(isProtocolMessage({ t: 'snap' }), true);
+  assert.equal(isProtocolMessage({ t: 'evento-inventado' }), false);
 });
 
 test('lobby hello carries the exact protocol version, mode, and room', () => {
@@ -138,5 +139,58 @@ test('heartbeat closes a connection that stops acknowledging pings', () => {
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
     Date.now = originalNow;
+  }
+});
+
+test('disconnect has one owner and releases socket, heartbeat, and send cadence', () => {
+  const closed = [];
+  const net = new Net();
+  net.ws = { readyState: 1, close: (...args) => closed.push(args) };
+  net.connected = true;
+  net._sendTimer = 0.5;
+  net._heartbeatTimer = 123;
+  const originalClearInterval = globalThis.clearInterval;
+  const cleared = [];
+  globalThis.clearInterval = (timer) => cleared.push(timer);
+  try {
+    assert.equal(net.disconnect(1000, 'prueba'), true);
+    assert.deepEqual(closed, [[1000, 'prueba']]);
+    assert.deepEqual(cleared, [123]);
+    assert.equal(net.ws, null);
+    assert.equal(net.connected, false);
+    assert.equal(net._heartbeatTimer, null);
+    assert.equal(net._sendTimer, 0);
+    assert.equal(net.disconnect(), false);
+  } finally {
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+test('disconnect rejects an in-flight handshake immediately instead of waiting for timeout', async () => {
+  const previousLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  const previousWebSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
+  const sockets = [];
+  class PendingSocket {
+    constructor() { this.readyState = 0; sockets.push(this); }
+    close(...args) { this.readyState = 3; this.closeArgs = args; this.onclose?.(); }
+    send() {}
+  }
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { protocol: 'http:', host: 'localhost:5173' },
+  });
+  Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: PendingSocket });
+  try {
+    const net = new Net();
+    const connecting = net.connect('QA', {}, { mode: 'ffa', room: 1 });
+    assert.equal(net.disconnect(1000, 'prueba'), true);
+    await assert.rejects(connecting, /conexión cancelada/);
+    assert.deepEqual(sockets[0].closeArgs, [1000, 'prueba']);
+    assert.equal(net._cancelPendingConnect, null);
+  } finally {
+    if (previousLocation) Object.defineProperty(globalThis, 'location', previousLocation);
+    else delete globalThis.location;
+    if (previousWebSocket) Object.defineProperty(globalThis, 'WebSocket', previousWebSocket);
+    else delete globalThis.WebSocket;
   }
 });

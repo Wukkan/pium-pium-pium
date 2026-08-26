@@ -2,6 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pipeline } from 'node:stream';
+import { constants as zlibConstants, createBrotliCompress, createGzip } from 'node:zlib';
 import { WebSocketServer } from 'ws';
 import {
   buildMap, buildColliders, TOTAL_SLOTS, MAX_BOTS, BOT_NAMES, BOT_COLORS,
@@ -30,7 +32,13 @@ import {
   selectSafeSpawn,
 } from '../src/shared/spawn-safety.js';
 import { segmentBlocked } from '../src/shared/physics.js';
-import { PROTOCOL_VERSION } from '../src/shared/protocol.js';
+import { isClientMessageType, PROTOCOL_VERSION } from '../src/shared/protocol.js';
+import {
+  NETWORK_LIMITS,
+  outboundDeliveryAction,
+  sanitizeIdleSeconds,
+  websocketOriginAllowed,
+} from '../src/shared/network-limits.js';
 import {
   COMBAT_LIMITS,
   FIREARM_RULES,
@@ -52,7 +60,7 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.7.10';
+const GAME_VERSION = '1.8.0';
 const ZOMBIE_WAVES = 8;
 const configuredZombiePrep = Number(process.env.PIUM_ZOMBIE_PREP_SECONDS);
 const ZOMBIE_PREP_SECONDS = Number.isFinite(configuredZombiePrep)
@@ -69,8 +77,10 @@ const MOVEMENT_INITIAL_VERTICAL = 1.5;
 const MESSAGE_BUCKET_CAPACITY = 120;
 const MESSAGE_BUCKET_REFILL = 80;
 const MESSAGE_ABUSE_STRIKES = 3;
+const MAX_LOCAL_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 const GRAVITY = 24;
 const MOVEMENT_CONTACT_TOLERANCE = 0.004;
+const CLIENT_IDLE_SECONDS = sanitizeIdleSeconds(process.env.PIUM_CLIENT_IDLE_SECONDS);
 
 if (TOTAL_SLOTS !== LOBBY_ROOM_CAPACITY) {
   throw new Error(`Capacidad incoherente: mapa=${TOTAL_SLOTS}, lobby=${LOBBY_ROOM_CAPACITY}`);
@@ -94,6 +104,11 @@ const MIME = {
   '.mp3': 'audio/mpeg',
   '.ogg': 'audio/ogg',
 };
+const COMPRESSIBLE_EXTENSIONS = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt']);
+
+function staticEtag(stat) {
+  return `W/"${stat.size.toString(16)}-${Math.trunc(stat.mtimeMs).toString(16)}"`;
+}
 
 const server = http.createServer((req, res) => {
   let urlPath;
@@ -143,12 +158,38 @@ const server = http.createServer((req, res) => {
   if (req.method === 'PUT' && !process.env.RENDER && urlPath.startsWith('/_shots/')) {
     const name = path.basename(urlPath);
     if (!name.endsWith('.jpg') && !name.endsWith('.png')) { res.writeHead(403); res.end(); return; }
-    fs.mkdirSync(path.join(ROOT, '_shots'), { recursive: true });
     const chunks = [];
-    req.on('data', (c) => chunks.push(c));
+    let received = 0;
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      received += chunk.length;
+      if (received > MAX_LOCAL_SCREENSHOT_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      if (!tooLarge) chunks.push(chunk);
+    });
     req.on('end', () => {
-      fs.writeFileSync(path.join(ROOT, '_shots', name), Buffer.concat(chunks));
-      res.writeHead(204); res.end();
+      if (tooLarge) {
+        res.writeHead(413, { Connection: 'close' });
+        res.end('captura demasiado grande');
+        return;
+      }
+      const directory = path.join(ROOT, '_shots');
+      fs.mkdir(directory, { recursive: true }, (directoryError) => {
+        if (directoryError) {
+          res.writeHead(500); res.end('no se pudo preparar la captura'); return;
+        }
+        fs.writeFile(path.join(directory, name), Buffer.concat(chunks), (writeError) => {
+          if (writeError) { res.writeHead(500); res.end('no se pudo guardar la captura'); return; }
+          res.writeHead(204); res.end();
+        });
+      });
+    });
+    req.on('error', () => {
+      if (!res.headersSent) res.writeHead(400);
+      if (!res.writableEnded) res.end('carga interrumpida');
     });
     return;
   }
@@ -168,15 +209,57 @@ const server = http.createServer((req, res) => {
   if (!allowed || outsideRoot) {
     res.writeHead(403); res.end(); return;
   }
-  fs.readFile(file, (err, data) => {
-    if (err) { res.writeHead(404); res.end('no encontrado'); return; }
-    res.writeHead(200, {
-      'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': 'no-store',
+  fs.stat(file, (statError, stat) => {
+    if (statError || !stat.isFile()) { res.writeHead(404); res.end('no encontrado'); return; }
+    const etag = staticEtag(stat);
+    const extension = path.extname(file).toLowerCase();
+    const acceptedEncodings = String(req.headers['accept-encoding'] || '').toLowerCase();
+    const canCompress = stat.size >= 1024 && COMPRESSIBLE_EXTENSIONS.has(extension);
+    const contentEncoding = canCompress && acceptedEncodings.includes('br')
+      ? 'br'
+      : canCompress && acceptedEncodings.includes('gzip') ? 'gzip' : null;
+    const headers = {
+      'Content-Type': MIME[extension] || 'application/octet-stream',
+      // Revalidar evita contenido obsoleto entre despliegues, pero permite que
+      // el navegador conserve los 2+ MiB de módulos, modelos y audio y reciba
+      // un 304 sin volver a transferirlos en cada recarga.
+      'Cache-Control': 'public, max-age=0, must-revalidate',
+      'Content-Length': stat.size,
+      ETag: etag,
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'same-origin',
+    };
+    if (canCompress) headers.Vary = 'Accept-Encoding';
+    if (contentEncoding) {
+      headers['Content-Encoding'] = contentEncoding;
+      delete headers['Content-Length'];
+    }
+    if (req.headers['if-none-match'] === etag) {
+      delete headers['Content-Length'];
+      res.writeHead(304, headers);
+      res.end();
+      return;
+    }
+    if (req.method === 'HEAD') {
+      res.writeHead(200, headers);
+      res.end();
+      return;
+    }
+    if (!contentEncoding) {
+      fs.readFile(file, (readError, data) => {
+        if (readError) { res.writeHead(404); res.end('no encontrado'); return; }
+        res.writeHead(200, headers);
+        res.end(data);
+      });
+      return;
+    }
+    res.writeHead(200, headers);
+    const compressor = contentEncoding === 'br'
+      ? createBrotliCompress({ params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } })
+      : createGzip({ level: 6 });
+    pipeline(fs.createReadStream(file), compressor, res, (error) => {
+      if (error && !res.destroyed) res.destroy(error);
     });
-    res.end(req.method === 'HEAD' ? undefined : data);
   });
 });
 
@@ -1027,17 +1110,28 @@ function settleStaleVerticalPosition(player, time) {
 }
 
 function send(p, msg) {
-  if (p.ws.readyState === 1) p.ws.send(JSON.stringify(msg));
+  const action = outboundDeliveryAction({
+    readyState: p.ws.readyState,
+    bufferedAmount: p.ws.bufferedAmount,
+    type: msg?.t,
+  });
+  if (action === 'close') p.ws.close(1013, 'Cliente demasiado lento');
+  else if (action === 'send') p.ws.send(JSON.stringify(msg));
+  return action === 'send';
 }
 
 function broadcast(msg, exceptId = null) {
   const raw = JSON.stringify(msg);
   const isSnapshot = msg?.t === 'snap';
   for (const p of players.values()) {
-    if (p.id === exceptId || p.ws.readyState !== 1) continue;
-    // Un cliente lento no debe acumular segundos de snapshots obsoletos.
-    if (isSnapshot && Number(p.ws.bufferedAmount) > 256 * 1024) continue;
-    p.ws.send(raw);
+    if (p.id === exceptId) continue;
+    const action = outboundDeliveryAction({
+      readyState: p.ws.readyState,
+      bufferedAmount: p.ws.bufferedAmount,
+      type: isSnapshot ? 'snap' : msg?.t,
+    });
+    if (action === 'close') p.ws.close(1013, 'Cliente demasiado lento');
+    else if (action === 'send') p.ws.send(raw);
   }
 }
 
@@ -1143,6 +1237,7 @@ function attach(ws, hello) {
       try { m = JSON.parse(raw); } catch { return; }
     }
     if (!m || typeof m !== 'object' || Array.isArray(m)) return;
+    if (!isClientMessageType(m.t)) return;
 
     if (m.t === 'hola' && !me) {
       if (m.mode !== roomMode || m.room !== roomNumber) {
@@ -1179,6 +1274,7 @@ function attach(ws, hello) {
         hat: (m.skin && HATS[m.skin.h]) ? m.skin.h : 'none',
         skinColor: (m.skin && Number.isInteger(m.skin.c)) ? (m.skin.c & 0xffffff) : null,
         badge: '',
+        _lastMessageAt: now(),
       };
       resetCombatState(me);
       resetMessageBudget(me);
@@ -1204,6 +1300,7 @@ function attach(ws, hello) {
       return;
     }
     if (!me) return;
+    me._lastMessageAt = now();
 
     if (m.t === 'st') {
       // estado del jugador: posición, orientación, velocidad
@@ -1425,6 +1522,12 @@ function tick(t, dt, elapsed = dt) {
     return;
   }
 
+  for (const player of players.values()) {
+    if (t - player._lastMessageAt > CLIENT_IDLE_SECONDS && player.ws.readyState === 1) {
+      player.ws.close(4001, 'Sesión inactiva');
+    }
+  }
+
   modeTick(t);
   const nadeColliders = activeMovementColliders();
   for (const player of players.values()) {
@@ -1573,7 +1676,15 @@ function rejectJoin(ws, code, details = {}) {
   ws.close(1008, code);
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, request) => {
+  if (!websocketOriginAllowed(request.headers.origin, request.headers.host)) {
+    ws.close(1008, 'Origen no permitido');
+    return;
+  }
+  if (wss.clients.size > NETWORK_LIMITS.maxWebSocketConnections) {
+    ws.close(1013, 'Servidor ocupado');
+    return;
+  }
   let routed = false;
   const helloTimeout = setTimeout(() => {
     if (!routed && ws.readyState === 1) rejectJoin(ws, 'HELLO_REQUIRED');
@@ -1618,14 +1729,54 @@ wss.on('connection', (ws) => {
 });
 
 let last = Date.now() / 1000;
-setInterval(() => {
+const roomTickFailures = new Map();
+const roomTickTimer = setInterval(() => {
   const time = Date.now() / 1000;
   const elapsed = Math.max(0, time - last);
   const dt = Math.min(0.1, elapsed);
   last = time;
-  for (const room of roomRegistry.values()) room.tick(time, dt, elapsed);
+  for (const room of roomRegistry.values()) {
+    try {
+      room.tick(time, dt, elapsed);
+      roomTickFailures.delete(room.key);
+    } catch (error) {
+      // Una sala defectuosa no puede derribar las otras siete partidas.
+      const failure = roomTickFailures.get(room.key) || { lastLogAt: 0, suppressed: 0 };
+      failure.suppressed++;
+      if (time - failure.lastLogAt >= 5) {
+        console.error(`[sala:${room.key}] tick aislado (${failure.suppressed} fallo${failure.suppressed === 1 ? '' : 's'})`, error);
+        failure.lastLogAt = time;
+        failure.suppressed = 0;
+      }
+      roomTickFailures.set(room.key, failure);
+    }
+  }
 }, TICK * 1000);
 
 server.listen(PORT, () => {
   console.log(`PIUM PIUM PIUM multijugador en http://localhost:${PORT}`);
 });
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal}: cerrando salas y guardando ranking...`);
+  clearInterval(roomTickTimer);
+  for (const client of wss.clients) {
+    try { client.close(1012, 'Servidor reiniciándose'); } catch { /* ya cerrado */ }
+  }
+  const forceExit = setTimeout(() => process.exit(1), 9500);
+  forceExit.unref?.();
+  await Promise.race([
+    ranking.flush(),
+    new Promise((resolve) => setTimeout(resolve, 8000)),
+  ]).catch((error) => console.error('ranking: cierre incompleto', error));
+  server.close(() => {
+    clearTimeout(forceExit);
+    process.exit(0);
+  });
+}
+
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+process.once('SIGINT', () => { void shutdown('SIGINT'); });

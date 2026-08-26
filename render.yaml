@@ -4,6 +4,6 @@ services:
     runtime: node
     region: ohio
     plan: free
-    buildCommand: npm install
+    buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /salud

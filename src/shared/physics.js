@@ -81,24 +81,39 @@ export function moveBody(pos, vel, dt, halfX, halfZ, height, colliders) {
 export function segmentBlocked(a, b, colliders) {
   const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
   for (const c of colliders) {
-    let tmin = 0, tmax = 1, ok = true;
-    const axes = [
-      [a.x, dx, c.minX, c.maxX],
-      [a.y, dy, c.minY, c.maxY],
-      [a.z, dz, c.minZ, c.maxZ],
-    ];
-    for (const [o, d, lo, hi] of axes) {
-      if (Math.abs(d) < 1e-9) {
-        if (o < lo || o > hi) { ok = false; break; }
-      } else {
-        let t1 = (lo - o) / d, t2 = (hi - o) / d;
-        if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
-        tmin = Math.max(tmin, t1);
-        tmax = Math.min(tmax, t2);
-        if (tmin > tmax) { ok = false; break; }
-      }
+    let tmin = 0, tmax = 1;
+
+    if (Math.abs(dx) < 1e-9) {
+      if (a.x < c.minX || a.x > c.maxX) continue;
+    } else {
+      let t1 = (c.minX - a.x) / dx, t2 = (c.maxX - a.x) / dx;
+      if (t1 > t2) { const swap = t1; t1 = t2; t2 = swap; }
+      if (t1 > tmin) tmin = t1;
+      if (t2 < tmax) tmax = t2;
+      if (tmin > tmax) continue;
     }
-    if (ok) return true;
+
+    if (Math.abs(dy) < 1e-9) {
+      if (a.y < c.minY || a.y > c.maxY) continue;
+    } else {
+      let t1 = (c.minY - a.y) / dy, t2 = (c.maxY - a.y) / dy;
+      if (t1 > t2) { const swap = t1; t1 = t2; t2 = swap; }
+      if (t1 > tmin) tmin = t1;
+      if (t2 < tmax) tmax = t2;
+      if (tmin > tmax) continue;
+    }
+
+    if (Math.abs(dz) < 1e-9) {
+      if (a.z < c.minZ || a.z > c.maxZ) continue;
+    } else {
+      let t1 = (c.minZ - a.z) / dz, t2 = (c.maxZ - a.z) / dz;
+      if (t1 > t2) { const swap = t1; t1 = t2; t2 = swap; }
+      if (t1 > tmin) tmin = t1;
+      if (t2 < tmax) tmax = t2;
+      if (tmin > tmax) continue;
+    }
+
+    return true;
   }
   return false;
 }

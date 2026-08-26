@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { roundedBoxGeometry } from './rounded-geometry.js';
+export { combatAudioAllowed } from './gameplay-policy.js';
 
 // ---------------------------------------------------------------------------
 // Granadas: se lanzan con G, rebotan en el escenario y explotan a los 2.2 s.
@@ -19,12 +20,6 @@ export function validRemoteGrenadePayload(position, velocity) {
   const validVector = (value, maxAbs) => Array.isArray(value) && value.length === 3 &&
     value.every((component) => Number.isFinite(component) && Math.abs(component) <= maxAbs);
   return validVector(position, 10000) && validVector(velocity, 80);
-}
-
-export function combatAudioAllowed({
-  state = 'menu', dead = false, overlayOpen = false, hidden = false,
-} = {}) {
-  return state === 'playing' && !dead && !overlayOpen && !hidden;
 }
 
 export function playSpatialBoom(

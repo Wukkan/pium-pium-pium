@@ -157,7 +157,7 @@ test('settings are sanitized for a stable AAA menu profile', () => {
   })), {
     fov: 110, sensitivity: 0.001, masterVolume: 1,
     soundEnabled: true, renderScale: 1, shadowsEnabled: true,
-    shadowQuality: 'high', effectsQuality: 'balanced',
+    shadowQuality: 'medium', effectsQuality: 'balanced',
     invertY: true, showFps: true, showPing: true, aimMode: 'hold',
     bunnyHopEnabled: true, weaponBob: 1, screenShake: 1,
     crosshairVisible: true, crosshairStyle: 'classic', crosshairColor: '#ffffff',
@@ -170,7 +170,7 @@ test('settings are sanitized for a stable AAA menu profile', () => {
   assert.deepEqual(readSettings('broken'), {
     fov: 78, sensitivity: 0.0023, masterVolume: 0.45,
     soundEnabled: true, renderScale: 1, shadowsEnabled: true,
-    shadowQuality: 'high', effectsQuality: 'balanced',
+    shadowQuality: 'medium', effectsQuality: 'balanced',
     invertY: false, showFps: false, showPing: true, aimMode: 'hold',
     bunnyHopEnabled: true, weaponBob: 1, screenShake: 1,
     crosshairVisible: true, crosshairStyle: 'classic', crosshairColor: '#ffffff',
@@ -213,7 +213,7 @@ test('extended video, gameplay, and accessibility settings are sanitized', () =>
   assert.equal(settings.damageFlash, false);
   assert.equal(settings.highContrast, true);
   assert.equal(effectivePixelRatio(settings.renderScale, 3), 1.5);
-  assert.equal(effectivePixelRatio(1, 3), 2);
+  assert.equal(effectivePixelRatio(1, 3), 1.5);
 });
 
 test('custom crosshair settings accept safe colors and clamp every visual dimension', () => {

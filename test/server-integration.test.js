@@ -145,12 +145,12 @@ test('server exposes eight isolated fixed-mode rooms with strict ten-player admi
   await waitForServer(child);
 
   const health = await fetch(`http://127.0.0.1:${port}/salud`).then((response) => response.json());
-  assert.deepEqual(health, { ok: true, version: '1.7.10' });
+  assert.deepEqual(health, { ok: true, version: '1.8.0' });
 
   const roomsResponse = await fetch(`http://127.0.0.1:${port}/salas`);
   assert.equal(roomsResponse.headers.get('cache-control'), 'no-store');
   const lobby = await roomsResponse.json();
-  assert.equal(lobby.version, '1.7.10');
+  assert.equal(lobby.version, '1.8.0');
   assert.equal(lobby.capacity, LOBBY_ROOM_CAPACITY);
   assert.equal(lobby.totalRooms, LOBBY_TOTAL_ROOMS);
   assert.equal(lobby.rooms.length, LOBBY_TOTAL_ROOMS);
@@ -169,6 +169,32 @@ test('server exposes eight isolated fixed-mode rooms with strict ten-player admi
   const roomsPost = await fetch(`http://127.0.0.1:${port}/salas`, { method: 'POST' });
   assert.equal(roomsPost.status, 405);
   assert.equal(roomsPost.headers.get('allow'), 'GET, HEAD');
+
+  const staticUrl = `http://127.0.0.1:${port}/src/look-controls.js`;
+  const initialAsset = await fetch(staticUrl);
+  assert.equal(initialAsset.status, 200);
+  assert.equal(initialAsset.headers.get('cache-control'), 'public, max-age=0, must-revalidate');
+  assert.match(initialAsset.headers.get('vary') || '', /Accept-Encoding/i);
+  assert.match(initialAsset.headers.get('content-encoding') || '', /^(?:gzip|br)$/);
+  assert.match(initialAsset.headers.get('etag') || '', /^W\/["].+["].*$/);
+  const initialEtag = initialAsset.headers.get('etag');
+  const initialBody = await initialAsset.text();
+  assert.match(initialBody, /normalizeLookYaw/);
+
+  const revalidatedAsset = await fetch(staticUrl, { headers: { 'If-None-Match': initialEtag } });
+  assert.equal(revalidatedAsset.status, 304);
+  assert.equal(await revalidatedAsset.text(), '');
+  assert.equal(revalidatedAsset.headers.get('etag'), initialEtag);
+
+  const brotliAsset = await fetch(staticUrl, { headers: { 'Accept-Encoding': 'br' } });
+  assert.equal(brotliAsset.headers.get('content-encoding'), 'br');
+  assert.equal(await brotliAsset.text(), initialBody);
+
+  const oversizedShot = await fetch(`http://127.0.0.1:${port}/_shots/oversized.png`, {
+    method: 'PUT',
+    body: Buffer.alloc(5 * 1024 * 1024 + 1),
+  });
+  assert.equal(oversizedShot.status, 413);
 
   const invalid = await openClient(port);
   clients.push(invalid);
@@ -448,6 +474,38 @@ test('server rejects forged combat, incremental flight, and sustained message fl
   for (let index = 0; index < 500; index++) malformedFlood.ws.send(index % 3 === 0 ? '{' : index % 3 === 1 ? 'null' : '[]');
   const malformedCloseInfo = await Promise.race([malformedClosed, delay(2000).then(() => null)]);
   assert.deepEqual(malformedCloseInfo, { code: 1008, reason: 'Demasiados mensajes' });
+});
+
+test('server rejects foreign browser origins and releases idle room slots', async (t) => {
+  const { port, clients } = await launchTestServer(t, { PIUM_CLIENT_IDLE_SECONDS: '1' });
+
+  const foreign = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+    origin: 'https://foreign.example',
+  });
+  const foreignClose = await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('foreign origin close timeout')), 2500);
+    foreign.once('close', (code, reason) => {
+      clearTimeout(timeout);
+      resolve({ code, reason: String(reason) });
+    });
+    foreign.once('error', reject);
+  });
+  assert.deepEqual(foreignClose, { code: 1008, reason: 'Origen no permitido' });
+
+  const idle = await connectClient(port, 'IDLE_QA');
+  clients.push(idle);
+  const idleClose = await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('idle close timeout')), 3000);
+    idle.ws.once('close', (code, reason) => {
+      clearTimeout(timeout);
+      resolve({ code, reason: String(reason) });
+    });
+  });
+  assert.deepEqual(idleClose, { code: 4001, reason: 'Sesión inactiva' });
+
+  await delay(100);
+  const lobby = await fetch(`http://127.0.0.1:${port}/salas`).then((response) => response.json());
+  assert.equal(lobby.rooms.find(({ mode, room }) => mode === 'ffa' && room === 1).players, 0);
 });
 
 test('a player joining during podium receives the complete current podium payload', async (t) => {
