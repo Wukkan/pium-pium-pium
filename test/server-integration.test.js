@@ -145,12 +145,12 @@ test('server exposes eight isolated fixed-mode rooms with strict ten-player admi
   await waitForServer(child);
 
   const health = await fetch(`http://127.0.0.1:${port}/salud`).then((response) => response.json());
-  assert.deepEqual(health, { ok: true, version: '1.7.4' });
+  assert.deepEqual(health, { ok: true, version: '1.7.5' });
 
   const roomsResponse = await fetch(`http://127.0.0.1:${port}/salas`);
   assert.equal(roomsResponse.headers.get('cache-control'), 'no-store');
   const lobby = await roomsResponse.json();
-  assert.equal(lobby.version, '1.7.4');
+  assert.equal(lobby.version, '1.7.5');
   assert.equal(lobby.capacity, LOBBY_ROOM_CAPACITY);
   assert.equal(lobby.totalRooms, LOBBY_TOTAL_ROOMS);
   assert.equal(lobby.rooms.length, LOBBY_TOTAL_ROOMS);

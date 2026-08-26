@@ -85,6 +85,17 @@ test('early Pointer Lock cannot hide the lobby while the online handshake is pen
   );
 });
 
+test('held scoreboard input cancels every Tab repeat before browser focus can escape', () => {
+  assert.match(
+    mainSource,
+    /if \(!isAction\(e, 'scoreboard'\) \|\| !hasGameplayControl\(\) \|\| weapons\.inputBlocked\) return;\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*e\.preventDefault\(\);\s*if \(e\.repeat\) return;/,
+  );
+  assert.match(
+    mainSource,
+    /addEventListener\('keyup', \(e\) => \{\s*if \(!isAction\(e, 'scoreboard'\)\) return;\s*if \(hasGameplayControl\(\)\) e\.preventDefault\(\);\s*hud\.showScores\(false\);/,
+  );
+});
+
 test('online lifecycle owns one heartbeat and tears down the dead session', () => {
   assert.match(mainSource, /net\.startHeartbeat\(3000\);/);
   assert.doesNotMatch(mainSource, /setInterval\([^)]*sendPing|setInterval\([\s\S]{0,120}?net\.sendPing/);

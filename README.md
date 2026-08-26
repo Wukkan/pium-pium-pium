@@ -38,6 +38,8 @@ El parche **Rooftop Flow 1.7.3** reconstruye los accesos a techos, escaleras y e
 
 El parche **Safe Boot 1.7.4** impide que un contexto WebGL rechazado deje la portada congelada. El renderer principal y el operador reintentan con un perfil liviano, la tarjeta conserva un fallback personalizado mientras carga y un fallo del preview ya no detiene el juego. La portada muestra un estado real de arranque, ofrece reintento si el módulo no responde y añade **PROBAR EN LOCAL** para entrar inmediatamente con cinco bots aunque falle la conexión online.
 
+El parche **Scoreboard Lock 1.7.5** mantiene la partida activa al consultar el marcador. Todos los eventos repetidos de la tecla asignada al marcador se consumen antes de que el navegador pueda mover el foco o liberar Pointer Lock; al soltarla, solo se cierra la tabla y nunca se abre el menú principal.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.

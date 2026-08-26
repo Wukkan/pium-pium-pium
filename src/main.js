@@ -2297,30 +2297,34 @@ function refreshWorldRanking() {
 }
 
 addEventListener('keydown', (e) => {
-  if (isAction(e, 'scoreboard') && !e.repeat && hasGameplayControl() && !weapons.inputBlocked) {
-    e.preventDefault();
-    refreshWorldRanking();
-    const rows = [];
-    if (online && lastSnap) {
-      for (const p of lastSnap.pl) {
-        rows.push({ name: p.n, kills: p.k, deaths: p.d, isMe: p.id === net.id, isBot: false, alive: !!p.al });
-      }
-      rows.sort((a, b) => b.kills - a.kills);
-      for (const b of lastSnap.bots) {
-        rows.push({ name: b.n, kills: null, deaths: null, isMe: false, isBot: true, alive: !!b.al });
-      }
-    } else if (botsLocal) {
-      rows.push({ name: 'Tú', kills, deaths, isMe: true, isBot: false, alive: !player.dead });
-      for (const b of botsLocal.bots) {
-        rows.push({ name: b.name, kills: null, deaths: null, isMe: false, isBot: true, alive: !b.dead });
-      }
+  if (!isAction(e, 'scoreboard') || !hasGameplayControl() || weapons.inputBlocked) return;
+  // También cancelar el auto-repeat: un TAB repetido sin preventDefault mueve
+  // el foco del navegador, libera Pointer Lock y parece expulsar al menú.
+  e.preventDefault();
+  if (e.repeat) return;
+  refreshWorldRanking();
+  const rows = [];
+  if (online && lastSnap) {
+    for (const p of lastSnap.pl) {
+      rows.push({ name: p.n, kills: p.k, deaths: p.d, isMe: p.id === net.id, isBot: false, alive: !!p.al });
     }
-    hud.renderScores(rows);
-    hud.showScores(true);
+    rows.sort((a, b) => b.kills - a.kills);
+    for (const b of lastSnap.bots) {
+      rows.push({ name: b.n, kills: null, deaths: null, isMe: false, isBot: true, alive: !!b.al });
+    }
+  } else if (botsLocal) {
+    rows.push({ name: 'Tú', kills, deaths, isMe: true, isBot: false, alive: !player.dead });
+    for (const b of botsLocal.bots) {
+      rows.push({ name: b.name, kills: null, deaths: null, isMe: false, isBot: true, alive: !b.dead });
+    }
   }
+  hud.renderScores(rows);
+  hud.showScores(true);
 });
 addEventListener('keyup', (e) => {
-  if (isAction(e, 'scoreboard')) hud.showScores(false);
+  if (!isAction(e, 'scoreboard')) return;
+  if (hasGameplayControl()) e.preventDefault();
+  hud.showScores(false);
 });
 
 // teclas de modo: V cuchillo, M equipo, C chat, B compra, H bots, 1-6 en overlays
