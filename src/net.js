@@ -173,7 +173,10 @@ export class Net {
     this._sendTimer %= interval;
     this._send({
       t: 'st',
-      p: [+player.pos.x.toFixed(2), +player.pos.y.toFixed(2), +player.pos.z.toFixed(2)],
+      // Tres decimales conservan el milímetro de separación que moveBody deja
+      // sobre cubiertas. Con dos, algunas alturas de Arena (5.800000000000001)
+      // se serializaban dentro del techo y el servidor corregía la cámara.
+      p: [+player.pos.x.toFixed(3), +player.pos.y.toFixed(3), +player.pos.z.toFixed(3)],
       ry: +player.yaw.toFixed(2),
       rx: +player.pitch.toFixed(2),
       s: +player.horizontalSpeed().toFixed(1),

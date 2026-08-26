@@ -9,6 +9,8 @@ import {
 } from '../src/shared/mapdata.js';
 import { moveBody } from '../src/shared/physics.js';
 import { PLAYER_BODY } from '../src/shared/spawn-safety.js';
+import { activateGroundedJumpPad } from '../src/jump-pad-control.js';
+import { Player } from '../src/player.js';
 
 const DT = 1 / 60;
 const GRAVITY = 24;
@@ -76,9 +78,9 @@ const CITY_ROOFTOP_ROUTES = [
   },
   {
     label: 'southeast',
-    start: { x: 23.5, y: 0.001, z: 0 },
+    start: { x: 24, y: 0.001, z: 0 },
     direction: { x: 0, z: 1 },
-    lanes: [-1.4, 0, 1.4],
+    lanes: [-1.6, 0, 1.6],
     reached: (pos) => pos.z > 15 && pos.y >= 6.55,
   },
 ];
@@ -197,21 +199,30 @@ function launchToRoof(mapId, pad, direction, reached, speed = 7.2) {
   const pos = { x: pad.x, y: 0.201, z: pad.z };
   const vel = {
     x: direction.x / length * speed,
-    y: pad.power,
+    y: 0,
     z: direction.z / length * speed,
   };
+  const player = {
+    pos,
+    vel,
+    onGround: true,
+    _wasGrounded: true,
+    landingKick: 0.04,
+    sliding: false,
+    launchVertical: Player.prototype.launchVertical,
+    launchFromPad: Player.prototype.launchFromPad,
+  };
+  assert.equal(activateGroundedJumpPad(player, [pad], true), pad);
   let launches = 1;
 
   for (let frame = 0; frame < 240; frame++) {
-    vel.x = direction.x / length * speed;
-    vel.z = direction.z / length * speed;
     vel.y -= GRAVITY * DT;
     const result = moveBody(
       pos, vel, DT, PLAYER_BODY.halfX, PLAYER_BODY.halfZ, PLAYER_BODY.height, colliders,
     );
     if (result.onGround && jumpPadContainsPoint(pos, pad)) {
-      launches++;
-      vel.y = pad.power;
+      player.onGround = true;
+      if (activateGroundedJumpPad(player, [pad], true)) launches++;
     }
     if (result.onGround && reached(pos)) return { pos, launches };
   }
@@ -235,6 +246,26 @@ test('rooftop jump pads clear the eaves at full running speed', () => {
       (pos) => (north ? pos.z < -14 : pos.z > 14) && pos.y >= 5.55,
     );
     assert.equal(landing.launches, 1, 'pad retriggered after colliding with an eave');
+  }
+});
+
+test('directional roof pads work from rest while Space is held', () => {
+  const routes = [
+    {
+      mapId: 'arena',
+      pad: buildMap('arena').jumpPads.find((pad) => pad.x === 18),
+      reached: (pos) => pos.z < -19 && pos.y >= 5.75,
+    },
+    ...buildMap('ciudad').jumpPads.filter((pad) => Math.abs(pad.x) === 13).map((pad) => ({
+      mapId: 'ciudad',
+      pad,
+      reached: (pos) => (pad.z < 0 ? pos.z < -14 : pos.z > 14) && pos.y >= 5.55,
+    })),
+  ];
+
+  for (const route of routes) {
+    const result = launchToRoof(route.mapId, route.pad, { x: 0, z: 0 }, route.reached, 0);
+    assert.equal(result.launches, 1, `${route.mapId} standing launch retriggered`);
   }
 });
 

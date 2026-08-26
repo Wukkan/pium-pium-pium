@@ -30,4 +30,14 @@ test('map reload keeps shared arrays stable and disposes old GPU geometries', ()
   assert.equal(world.playerSpawns.length, 10);
   assert.ok(world.navigationPoints.some((point) =>
     Number.isInteger(point.navigationRoute) && Number.isInteger(point.navigationOrder)));
+  assert.deepEqual(world.renderStats, {
+    mapId: 'ciudad',
+    boxes: 100,
+    meshes: 27,
+    staticBatches: 13,
+    dynamicMeshes: 14,
+    geometries: 14,
+    shadowCasters: 21,
+    raycastProxies: 86,
+  });
 });

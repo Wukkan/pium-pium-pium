@@ -42,6 +42,30 @@ export function bodyOverlapsCollider(point, collider, body = PLAYER_BODY, margin
   );
 }
 
+// La física mantiene 0.001 m de separación, pero una posición recibida por red
+// puede perder unas milésimas por serialización. Ignora únicamente un contacto
+// superficial por la cara más cercana; atravesar una pared o techo sigue dando
+// una profundidad mayor y se rechaza.
+export function bodyPenetratesCollider(
+  point,
+  collider,
+  body = PLAYER_BODY,
+  contactTolerance = 0.004,
+) {
+  if (!bodyOverlapsCollider(point, collider, body)) return false;
+  const tolerance = Math.max(0, Number(contactTolerance) || 0);
+  const shape = bodyShape(body);
+  const overlapDepth = Math.min(
+    point.x + shape.halfX - collider.minX,
+    collider.maxX - (point.x - shape.halfX),
+    point.y + shape.height - collider.minY,
+    collider.maxY - point.y,
+    point.z + shape.halfZ - collider.minZ,
+    collider.maxZ - (point.z - shape.halfZ),
+  );
+  return overlapDepth > tolerance;
+}
+
 // Comprueba todo el trayecto del cuerpo, no solo el destino. Así un paquete de
 // red no puede "saltar" una pared fina. Los obstáculos bajos que la física del
 // cliente puede subir se permiten durante la interpolación; el destino todavía
@@ -50,6 +74,7 @@ function isBodySegmentClear(start, end, colliders, {
   body = PLAYER_BODY,
   sampleStep = 0.2,
   stepHeight = 0.56,
+  contactTolerance = 0,
 } = {}) {
   if (!finitePoint(start) || !finitePoint(end)) return false;
   const dx = end.x - start.x, dy = end.y - start.y, dz = end.z - start.z;
@@ -67,7 +92,10 @@ function isBodySegmentClear(start, end, colliders, {
       z: start.z + dz * ratio,
     };
     for (const collider of safeColliders) {
-      if (!bodyOverlapsCollider(point, collider, body)) continue;
+      const blocked = contactTolerance > 0
+        ? bodyPenetratesCollider(point, collider, body, contactTolerance)
+        : bodyOverlapsCollider(point, collider, body);
+      if (!blocked) continue;
       const rise = collider.maxY - point.y;
       if (rise > 0 && rise <= climb + POSITION_EPSILON) continue;
       return false;

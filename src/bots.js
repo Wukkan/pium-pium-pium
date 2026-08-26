@@ -17,7 +17,7 @@ import {
 } from './humanoid.js';
 import { hitReactionSide, stablePoseSide } from './character-motion.js';
 import {
-  BOT_NAMES, BOT_COLORS, MAX_BOTS, jumpPadContainsPoint,
+  BOT_NAMES, BOT_COLORS, MAX_BOTS, applyJumpPadImpulse, jumpPadContainsPoint,
 } from './shared/mapdata.js';
 
 // ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ class Bot {
     if (this.onGround) {
       for (const pad of ctx.jumpPads || []) {
         if (!jumpPadContainsPoint(this.pos, pad)) continue;
-        this.vel.y = pad.power;
+        applyJumpPadImpulse(this.vel, pad);
         this.onGround = false;
         break;
       }

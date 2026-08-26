@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
   buildMap, buildColliders, TOTAL_SLOTS, MAX_BOTS, BOT_NAMES, BOT_COLORS,
-  MAPS, HATS, QUICK_CHAT, badgeFor, jumpPadContainsPoint, jumpPadIntersectsSegment,
+  MAPS, HATS, QUICK_CHAT, applyJumpPadImpulse, badgeFor,
+  jumpPadContainsPoint, jumpPadIntersectsSegment,
 } from '../src/shared/mapdata.js';
 import {
   DEFAULT_BOT_CONFIG, effectiveBotCount, sanitizeBotConfigUpdate,
@@ -22,6 +23,7 @@ import {
   BOT_BODY,
   PLAYER_BODY,
   bodyOverlapsCollider,
+  bodyPenetratesCollider,
   colliderOccupied,
   isBodyPathClear,
   requireSafeSpawnPoints,
@@ -50,7 +52,7 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.7.5';
+const GAME_VERSION = '1.7.6';
 const ZOMBIE_WAVES = 8;
 const configuredZombiePrep = Number(process.env.PIUM_ZOMBIE_PREP_SECONDS);
 const ZOMBIE_PREP_SECONDS = Number.isFinite(configuredZombiePrep)
@@ -68,6 +70,7 @@ const MESSAGE_BUCKET_CAPACITY = 120;
 const MESSAGE_BUCKET_REFILL = 80;
 const MESSAGE_ABUSE_STRIKES = 3;
 const GRAVITY = 24;
+const MOVEMENT_CONTACT_TOLERANCE = 0.004;
 
 if (TOTAL_SLOTS !== LOBBY_ROOM_CAPACITY) {
   throw new Error(`Capacidad incoherente: mapa=${TOTAL_SLOTS}, lobby=${LOBBY_ROOM_CAPACITY}`);
@@ -985,8 +988,13 @@ function playerPositionAllowed(player, pos) {
   const activeColliders = activeMovementColliders();
   const vertical = verticalMoveState(player, pos, activeColliders, time);
   if (!vertical.allowed ||
-      activeColliders.some((collider) => bodyOverlapsCollider(pos, collider, PLAYER_BODY)) ||
-      !isBodyPathClear(player.pos, pos, activeColliders, { body: PLAYER_BODY })) return false;
+      activeColliders.some((collider) => bodyPenetratesCollider(
+        pos, collider, PLAYER_BODY, MOVEMENT_CONTACT_TOLERANCE,
+      )) ||
+      !isBodyPathClear(player.pos, pos, activeColliders, {
+        body: PLAYER_BODY,
+        contactTolerance: MOVEMENT_CONTACT_TOLERANCE,
+      })) return false;
 
   player._horizontalBudget = Math.max(0, player._horizontalBudget - horizontalCost);
   player._verticalBudget = Math.max(0, player._verticalBudget - verticalCost);
@@ -1209,7 +1217,7 @@ function attach(ws, hello) {
         } else {
           send(me, {
             t: 'corr', sid: me.spawnSeq,
-            p: [+me.pos.x.toFixed(2), +me.pos.y.toFixed(2), +me.pos.z.toFixed(2)],
+            p: [+me.pos.x.toFixed(3), +me.pos.y.toFixed(3), +me.pos.z.toFixed(3)],
           });
         }
       }
@@ -1433,7 +1441,8 @@ function tick(t, dt, elapsed = dt) {
       if (!b.dead && b.onGround) {
         for (const pad of mapData.jumpPads) {
           if (jumpPadContainsPoint(b.pos, pad)) {
-            b.vel.y = pad.power;
+            applyJumpPadImpulse(b.vel, pad);
+            b.onGround = false;
             break;
           }
         }

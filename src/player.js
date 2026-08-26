@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { moveBody } from './shared/physics.js';
 import { PLAYER_BODY, selectSafeSpawn } from './shared/spawn-safety.js';
+import { applyJumpPadImpulse } from './shared/mapdata.js';
 import { DEFAULT_BINDINGS } from './input-bindings.js';
 
 // ---------------------------------------------------------------------------
@@ -18,6 +19,14 @@ const JUMP_VEL = 8.6;
 const EYE_STAND = 1.62;
 const EYE_SLIDE = 0.95;
 const { halfX: HALF_X, halfZ: HALF_Z, height: HEIGHT } = PLAYER_BODY;
+
+export function landingCameraKick(fallSpeed, intensity = 1) {
+  const safeSpeed = Math.max(0, Number(fallSpeed) || 0);
+  const safeIntensity = Math.max(0, Math.min(1, Number(intensity) || 0));
+  // Un salto normal aterriza cerca de 8.6 m/s: no debe desplazar la mira. La
+  // respuesta visual empieza únicamente en caídas o aterrizajes de pad duros.
+  return Math.min(0.05, Math.max(0, safeSpeed - 9) * 0.003) * safeIntensity;
+}
 
 export class Player {
   constructor(camera, world) {
@@ -67,7 +76,11 @@ export class Player {
     this._wasGrounded = true;
     this._jumpWasHeld = false;
 
-    addEventListener('keydown', (e) => { this.keys[e.code] = true; });
+    addEventListener('keydown', (e) => {
+      const capturesGameplay = !!document.pointerLockElement || this.fallbackLookActive;
+      if (capturesGameplay && Object.values(this.bindings).includes(e.code)) e.preventDefault();
+      this.keys[e.code] = true;
+    });
     addEventListener('keyup', (e) => { this.keys[e.code] = false; });
     addEventListener('blur', () => { this.keys = {}; this._jumpWasHeld = false; });
     document.addEventListener('pointerlockchange', () => {
@@ -153,6 +166,27 @@ export class Player {
     this.sliding = false;
     this.slideTime = 0;
     this.onGround = false;
+    return true;
+  }
+
+  launchVertical(power) {
+    const impulse = Number(power);
+    if (!Number.isFinite(impulse) || impulse <= 0) return false;
+    this.vel.y = Math.max(this.vel.y, impulse);
+    this.onGround = false;
+    this._wasGrounded = false;
+    this.landingKick = 0;
+    if (this.sliding) {
+      this.sliding = false;
+      this.slideTime = 0;
+      this.slideCooldown = Math.max(this.slideCooldown, 0.5);
+    }
+    return true;
+  }
+
+  launchFromPad(pad) {
+    if (!this.launchVertical(pad?.power)) return false;
+    applyJumpPadImpulse(this.vel, pad);
     return true;
   }
 
@@ -281,7 +315,7 @@ export class Player {
     const res = moveBody(this.pos, this.vel, dt, HALF_X, HALF_Z, HEIGHT, this.world.colliders);
     this.onGround = res.onGround;
     if (!wasGrounded && this.onGround) {
-      this.landingKick = Math.min(0.075, Math.max(0, fallSpeed - 5) * 0.0045);
+      this.landingKick = landingCameraKick(fallSpeed, this.screenShake);
       if (this.onLand) this.onLand();
       if (fallSpeed > 16 && this.onHardLand) this.onHardLand(fallSpeed);
     }

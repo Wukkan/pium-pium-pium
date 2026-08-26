@@ -43,7 +43,7 @@ test('state messages carry the accepted spawn sequence and stop while dead', () 
 
   const player = {
     dead: false,
-    pos: { x: 1, y: 0.1, z: 2 },
+    pos: { x: 1.2346, y: 5.801, z: -2.3456 },
     yaw: 0.2,
     pitch: -0.1,
     sliding: false,
@@ -52,6 +52,7 @@ test('state messages carry the accepted spawn sequence and stop while dead', () 
   net.tickState(1, player);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].sid, 7);
+  assert.deepEqual(sent[0].p, [1.235, 5.801, -2.346]);
 
   player.dead = true;
   net._sendTimer = 0;

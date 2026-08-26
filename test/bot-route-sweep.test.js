@@ -147,6 +147,48 @@ test('Ciudad zombie can cross from the northeast roof to the southwest roof', {
   });
 });
 
+for (const route of [
+  {
+    label: 'Arena outer waypoint threshold',
+    mapId: 'arena',
+    start: { x: 30, y: 0.1, z: -15 },
+    target: { x: 34, y: 0.1, z: 32 },
+    seconds: 20,
+  },
+  {
+    label: 'Ciudad west outer bend',
+    mapId: 'ciudad',
+    start: { x: -20, y: 5.7, z: 19 },
+    target: { x: -30, y: 0.1, z: -30 },
+    seconds: 44,
+  },
+  {
+    label: 'Ciudad east outer bend',
+    mapId: 'ciudad',
+    start: { x: 0, y: 0.1, z: -20 },
+    target: { x: 30, y: 0.1, z: 30 },
+    seconds: 36,
+  },
+  {
+    label: 'Ciudad west bend exact approach to east street',
+    mapId: 'ciudad',
+    start: { x: -30, y: 0.1, z: 20 },
+    target: { x: 30, y: 0.1, z: 0 },
+    seconds: 55,
+  },
+  {
+    label: 'Ciudad west bend exact approach to northeast street',
+    mapId: 'ciudad',
+    start: { x: -30, y: 0.1, z: 20 },
+    target: { x: 30, y: 0.1, z: -20 },
+    seconds: 55,
+  },
+]) {
+  test(`${route.label} does not deadlock near a bend`, { timeout: 5_000 }, () => {
+    assertRouteReaches(route);
+  });
+}
+
 test('representative 15 Hz sweep connects every bot spawn to player spawns', {
   timeout: 10_000,
 }, () => {

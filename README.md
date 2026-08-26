@@ -40,6 +40,8 @@ El parche **Safe Boot 1.7.4** impide que un contexto WebGL rechazado deje la por
 
 El parche **Scoreboard Lock 1.7.5** mantiene la partida activa al consultar el marcador. Todos los eventos repetidos de la tecla asignada al marcador se consumen antes de que el navegador pueda mover el foco o liberar Pointer Lock; al soltarla, solo se cierra la tabla y nunca se abre el menú principal.
 
+El parche **Dual Map Roofline 1.7.6** estabiliza por separado los recorridos elevados de Arena y Ciudad. Los saltadores ganan prioridad sobre Espacio, aportan dirección mínima tanto a jugadores como a bots y conservan funcional toda su superficie visible; los aterrizajes normales ya no desplazan la cámara. La red mantiene precisión milimétrica y tolerancia de contacto para evitar correcciones falsas sobre techos. Ciudad corrige el último carril de su escalera sureste y ambos mapas eliminan ciclos de navegación en esquinas. La geometría estática se agrupa sin alterar colliders, cajas destruibles ni raycasts: Arena baja de 125 a 34 mallas y Ciudad de 100 a 27, con presupuestos de sombra independientes.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.

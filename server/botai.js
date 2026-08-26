@@ -1,6 +1,7 @@
 import { moveBody, segmentBlocked } from '../src/shared/physics.js';
 import { BOT_BODY } from '../src/shared/spawn-safety.js';
 import {
+  BOT_WAYPOINT_REACHED_DISTANCE,
   botWaypointReachable,
   findBotNavigationRoute,
   selectReachableBotWaypoint,
@@ -151,8 +152,21 @@ export class ServerBot {
       // Conserva la ruta completa elegida por A*. Recalcular un waypoint
       // independiente en cada rellano producía oscilaciones, especialmente al
       // bajar de una azotea: dos candidatos parecían alternadamente mejores.
+      const nextRoutePoint = this.navigationRoute[1] || null;
+      const nextSegmentReady = !nextRoutePoint || botWaypointReachable(
+        this.pos, nextRoutePoint, ctx.colliders, BOT_BODY,
+      );
+      const waypointDistance = this.waypoint
+        ? Math.hypot(this.pos.x - this.waypoint.x, this.pos.z - this.waypoint.z)
+        : Infinity;
+      // En una esquina, el siguiente tramo puede no ser visible hasta llegar
+      // prácticamente al centro del bend. A esa distancia se consume el nodo
+      // aunque la comprobación anticipada falle y se fuerza un repath; así no
+      // existe una zona muerta entre 0 y 5 cm.
+      const forceWaypointHandoff = waypointDistance <= 0.05;
       const waypointReached = this.waypoint &&
-        Math.hypot(this.pos.x - this.waypoint.x, this.pos.z - this.waypoint.z) < 0.72 &&
+        (nextSegmentReady && waypointDistance <= BOT_WAYPOINT_REACHED_DISTANCE ||
+          forceWaypointHandoff) &&
         Math.abs(this.pos.y - this.waypoint.y) < 0.3;
       const targetChanged = this.navigationTarget !== target;
       const targetMoved = this.navigationGoal && Math.hypot(
@@ -173,6 +187,7 @@ export class ServerBot {
         this.waypoint = this.navigationRoute[0] ? { ...this.navigationRoute[0] } : null;
         this.vel.x = 0;
         this.vel.z = 0;
+        if (forceWaypointHandoff && !nextSegmentReady) this.nextPathCheckAt = 0;
       }
 
       const pathCheckDue = t >= this.nextPathCheckAt;
@@ -215,7 +230,9 @@ export class ServerBot {
       const fl = Math.hypot(dx, dz) || 1;
       const pendingLevelChange = !this.directChase && this.waypoint &&
         Math.abs(this.pos.y - this.waypoint.y) >= 0.3;
-      if (fl >= 0.7 || (pendingLevelChange && fl > 0.05)) {
+      if ((!this.directChase && this.waypoint && fl > 0.05) ||
+          (this.directChase && fl >= BOT_WAYPOINT_REACHED_DISTANCE) ||
+          (pendingLevelChange && fl > 0.05)) {
         moveX = dx / fl; moveZ = dz / fl;
       }
       const meleeTarget = { x: target.pos.x, y: target.pos.y + 1, z: target.pos.z };

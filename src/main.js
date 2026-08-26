@@ -22,9 +22,8 @@ import {
   playSpatialBoom,
 } from './grenades.js';
 import { Missions } from './missions.js';
-import {
-  HATS, MAPS, MAX_BOTS, QUICK_CHAT, TOTAL_SLOTS, jumpPadContainsPoint,
-} from './shared/mapdata.js';
+import { HATS, MAPS, MAX_BOTS, QUICK_CHAT, TOTAL_SLOTS } from './shared/mapdata.js';
+import { activateGroundedJumpPad } from './jump-pad-control.js';
 import {
   BOT_BODY,
   PLAYER_BODY,
@@ -672,6 +671,7 @@ function applySettings() {
   player.invertY = settings.invertY;
   player.bunnyHopEnabled = settings.bunnyHopEnabled;
   player.screenShake = settings.reducedMotion ? 0 : settings.screenShake;
+  if (settings.reducedMotion) player.landingKick = 0;
   weapons.setFov(settings.fov);
   const bindingsSignature = JSON.stringify(bindings);
   if (bindingsSignature !== appliedBindingsSignature) {
@@ -2829,18 +2829,9 @@ function simulateStep(dt) {
     !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;
 
   if (state !== 'menu') {
+    const launchedFromPad = activateGroundedJumpPad(player, world.jumpPads, inputEnabled);
+    if (launchedFromPad) playCombatSound('jump');
     player.update(dt, inputEnabled);
-    // saltadores
-    if (inputEnabled && player.onGround) {
-      for (const pad of world.jumpPads) {
-        if (jumpPadContainsPoint(player.pos, pad)) {
-          player.vel.y = pad.power;
-          player.onGround = false;
-          playCombatSound('jump');
-          break;
-        }
-      }
-    }
     weapons.update(dt, inputEnabled);
     if (botsLocal) botsLocal.update(dt);
     if (botsLocal) kitsMgr.offlineUpdate(player, botsLocal, onHealed, onAmmoPicked);

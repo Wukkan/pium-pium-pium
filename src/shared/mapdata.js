@@ -35,6 +35,31 @@ export function jumpPadContainsPoint(point, pad) {
     Math.abs(point.y - pad.y) < JUMP_PAD_TRIGGER_HEIGHT;
 }
 
+export function applyJumpPadImpulse(velocity, pad) {
+  if (!velocity || !finitePadPoint(pad)) return false;
+  const power = Number(pad.power);
+  if (!Number.isFinite(power) || power <= 0) return false;
+  velocity.x = Number.isFinite(Number(velocity.x)) ? Number(velocity.x) : 0;
+  velocity.y = Math.max(Number.isFinite(Number(velocity.y)) ? Number(velocity.y) : 0, power);
+  velocity.z = Number.isFinite(Number(velocity.z)) ? Number(velocity.z) : 0;
+
+  const directionX = Number(pad.direction?.x);
+  const directionZ = Number(pad.direction?.z);
+  const directionLength = Math.hypot(directionX, directionZ);
+  const minimumSpeed = Math.max(0, Number(pad.minHorizontalSpeed) || 0);
+  if (directionLength > 0 && minimumSpeed > 0) {
+    const nx = directionX / directionLength;
+    const nz = directionZ / directionLength;
+    const forwardSpeed = velocity.x * nx + velocity.z * nz;
+    if (forwardSpeed < minimumSpeed) {
+      const boost = minimumSpeed - forwardSpeed;
+      velocity.x += nx * boost;
+      velocity.z += nz * boost;
+    }
+  }
+  return true;
+}
+
 // El servidor recibe posiciones discretas. Esta prueba analítica confirma que
 // el segmento entre ambas cruzó el mismo cilindro que usa el cliente, sin
 // ampliar de forma invisible el área que autoriza un salto vertical.
@@ -216,10 +241,12 @@ function buildArena() {
 
   // saltadores: te lanzan a la plataforma central y al tejado NE
   const jumpPads = [
-    { x: 12, y: 0, z: 0, power: 13 },
+    { x: 12, y: 0, z: 0, power: 13, direction: { x: -1, z: 0 }, minHorizontalSpeed: 6 },
     // Separado de la escalera NE y con altura útil para alcanzar la azotea.
-    { x: 18, y: 0, z: -13, power: 18 },
+    { x: 18, y: 0, z: -13, power: 18, direction: { x: 0, z: -1 }, minHorizontalSpeed: 6 },
   ];
+  // 1.6 × 1.6 queda completamente dentro del trigger circular (incluidas las
+  // cuatro esquinas), así toda la superficie amarilla es funcional.
   for (const p of jumpPads) box(p.x, 0.1, p.z, 1.6, 0.2, 1.6, C.pad);
 
   const waypoints = [
@@ -319,7 +346,9 @@ function buildCiudad() {
   // cuadrante SE
   box(19, 3, 20, 12, 6, 14, C.building1);
   box(19, 6.3, 20, 13, 0.6, 15, C.roof);
-  stairs(23.5, 1.25, 0, 1, 4, 6.5, C.building1);
+  // Medio metro hacia el este evita que el carril interior penetre 0.1 m en
+  // el tablero del puente al alcanzar los últimos peldaños.
+  stairs(24, 1.25, 0, 1, 4, 6.5, C.building1);
   box(30, 2, 8, 6, 4, 6, C.building2);
   box(30, 4.3, 8, 7, 0.6, 7, C.roof);
 
@@ -357,8 +386,8 @@ function buildCiudad() {
   const jumpPads = [
     // Con 4.5 m de aproximación horizontal se gana altura antes de cruzar el
     // alero; en z=±12 el jugador rápido golpeaba su cara inferior.
-    { x: 13, y: 0, z: -8, power: 17.5 },
-    { x: -13, y: 0, z: 8, power: 17.5 },
+    { x: 13, y: 0, z: -8, power: 17.5, direction: { x: 0, z: -1 }, minHorizontalSpeed: 6 },
+    { x: -13, y: 0, z: 8, power: 17.5, direction: { x: 0, z: 1 }, minHorizontalSpeed: 6 },
     { x: 0, y: 0, z: -6, power: 12 },
   ];
   for (const p of jumpPads) box(p.x, 0.1, p.z, 1.6, 0.2, 1.6, C.pad);

@@ -1,7 +1,8 @@
 import { BOT_BODY, isDirectBodyPathClear } from './spawn-safety.js';
 import { moveBody } from './physics.js';
 
-const MINIMUM_WAYPOINT_DISTANCE = 0.45;
+export const BOT_WAYPOINT_REACHED_DISTANCE = 0.45;
+const MINIMUM_WAYPOINT_DISTANCE = BOT_WAYPOINT_REACHED_DISTANCE;
 const ROUTE_EPSILON = 1e-6;
 const MAX_PLANAR_EDGE = 48;
 const PLANAR_NEIGHBORS = 20;

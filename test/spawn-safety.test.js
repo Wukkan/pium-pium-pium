@@ -6,6 +6,7 @@ import {
   BOT_BODY,
   PLAYER_BODY,
   bodyOverlapsCollider,
+  bodyPenetratesCollider,
   colliderOccupied,
   inspectSpawnPoint,
   isBodyPathClear,
@@ -140,6 +141,36 @@ test('movement path validation accepts the axis-resolved route around an arena p
   assert.equal(colliders.some((collider) => bodyOverlapsCollider(start, collider, PLAYER_BODY)), false);
   assert.equal(colliders.some((collider) => bodyOverlapsCollider(end, collider, PLAYER_BODY)), false);
   assert.equal(isBodyPathClear(start, end, colliders, { body: PLAYER_BODY }), true);
+});
+
+test('network contact tolerance preserves every surface in Arena and Ciudad', () => {
+  for (const mapId of MAP_IDS) {
+    const map = buildMap(mapId);
+    const colliders = buildColliders(map.boxes);
+    for (let index = 0; index < colliders.length; index++) {
+      const collider = colliders[index];
+      const settled = {
+        x: Number(((collider.minX + collider.maxX) / 2).toFixed(3)),
+        y: Number((collider.maxY + 0.001).toFixed(3)),
+        z: Number(((collider.minZ + collider.maxZ) / 2).toFixed(3)),
+      };
+      assert.equal(
+        bodyPenetratesCollider(settled, collider, PLAYER_BODY, 0.004),
+        false,
+        `${mapId} surface ${index} became solid after network serialization`,
+      );
+    }
+  }
+
+  const wall = { minX: 0, maxX: 1, minY: 0, maxY: 4, minZ: -2, maxZ: 2 };
+  assert.equal(bodyPenetratesCollider({ x: -0.377, y: 0.1, z: 0 }, wall, PLAYER_BODY, 0.004), false);
+  assert.equal(bodyPenetratesCollider({ x: -0.36, y: 0.1, z: 0 }, wall, PLAYER_BODY, 0.004), true);
+  assert.equal(isBodyPathClear(
+    { x: -0.381, y: 0.1, z: -1 },
+    { x: -0.377, y: 0.1, z: 1 },
+    [wall],
+    { body: PLAYER_BODY, contactTolerance: 0.004 },
+  ), true);
 });
 
 test('maximin selection avoids the previous point and chooses away from live occupants', () => {

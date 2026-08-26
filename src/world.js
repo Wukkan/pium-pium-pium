@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { collisionSafeBoxGeometry } from './rounded-geometry.js';
+import { mergeMapGeometries } from './geometry-batch.js';
 import { buildMap, buildColliders, COLORS } from './shared/mapdata.js';
 import {
   BOT_BODY,
@@ -15,10 +16,17 @@ import {
 
 const BUILDING_COLORS = new Set([COLORS.building1, COLORS.building2, COLORS.building3]);
 
+function castsUsefulShadow(box) {
+  if (box.color === COLORS.ground || box.color === COLORS.street || box.color === COLORS.pad) {
+    return false;
+  }
+  return box.h < 6.5;
+}
+
 // Los perfiles controlan la franja de iluminación suave junto a cada arista.
 // La geometría del mapa permanece rectangular y completa para coincidir con
 // los colliders; solo cambian sus normales, nunca el volumen de cobertura.
-function roundingProfile(box) {
+export function roundingProfile(box) {
   if (box.crate) return { ratio: 0.14, maxRadius: 0.22 };
   if (box.color === COLORS.ground || box.color === COLORS.street) {
     return { ratio: 0.05, maxRadius: 0.06 };
@@ -55,6 +63,7 @@ export function buildWorld(scene) {
     navigationPoints: [],
     jumpPads: [],
     crates: new Map(), // id -> {mesh, collider}
+    renderStats: null,
     load,
     setCrate,
   };
@@ -62,6 +71,11 @@ export function buildWorld(scene) {
   const group = new THREE.Group();
   scene.add(group);
   const materialCache = new Map();
+  const activeGeometries = new Set();
+  // Los batches reducen draw calls, pero son costosos para raycast porque su
+  // bounding box abarca todo el mapa. Estos proxies unitarios conservan el
+  // descarte AABB por pieza y comparten una sola geometría liviana.
+  const occluderGeometry = new THREE.BoxGeometry(1, 1, 1);
 
   const mat = (color) => {
     if (!materialCache.has(color)) {
@@ -101,11 +115,10 @@ export function buildWorld(scene) {
 
     world.mapId = mapId;
 
-    // Liberar las geometrías del mapa anterior antes de reconstruirlo. Los
-    // materiales se conservan en caché y se reutilizan entre mapas.
-    group.traverse((object) => {
-      if (object !== group && object.geometry?.dispose) object.geometry.dispose();
-    });
+    // Liberar cada recurso GPU una sola vez. Las cajas de igual tamaño pueden
+    // compartir geometría, mientras que los lotes estáticos ya están unidos.
+    for (const geometry of activeGeometries) geometry.dispose();
+    activeGeometries.clear();
 
     // vaciar lo anterior
     group.clear();
@@ -120,24 +133,76 @@ export function buildWorld(scene) {
 
     world.colliders.push(...colliders);
 
-    for (const b of data.boxes) {
-      const mesh = new THREE.Mesh(
-        collisionSafeBoxGeometry(b.w, b.h, b.d, roundingProfile(b)),
-        mat(b.color),
-      );
-      mesh.position.set(b.x, b.y, b.z);
-      mesh.castShadow = b.h < 6.5;
-      mesh.receiveShadow = true;
-      if (b.crate) {
-        mesh.userData = { crate: b.crate };
-        world.crates.set(b.crate, {
-          mesh,
-          collider: colliders.find((c) => c.crate === b.crate),
-        });
+    const staticBatches = new Map();
+    const sharedDynamicGeometry = new Map();
+    for (const [boxIndex, b] of data.boxes.entries()) {
+      const castShadow = castsUsefulShadow(b);
+      if (!b.crate) {
+        const occluder = new THREE.Mesh(occluderGeometry, mat(b.color));
+        occluder.position.set(b.x, b.y, b.z);
+        occluder.scale.set(b.w, b.h, b.d);
+        occluder.userData = { mapOccluder: true, boxIndex };
+        occluder.updateMatrix();
+        occluder.matrixAutoUpdate = false;
+        occluder.updateMatrixWorld(true);
+        occluder.matrixWorldAutoUpdate = false;
+        world.occluders.push(occluder);
+
+        const key = `${b.color}|${castShadow ? 1 : 0}`;
+        if (!staticBatches.has(key)) staticBatches.set(key, { color: b.color, castShadow, parts: [] });
+        const geometry = collisionSafeBoxGeometry(b.w, b.h, b.d, roundingProfile(b));
+        geometry.translate(b.x, b.y, b.z);
+        staticBatches.get(key).parts.push(geometry);
+        continue;
       }
+
+      const profile = roundingProfile(b);
+      const geometryKey = `${b.w}|${b.h}|${b.d}|${profile.ratio}|${profile.maxRadius}`;
+      let geometry = sharedDynamicGeometry.get(geometryKey);
+      if (!geometry) {
+        geometry = collisionSafeBoxGeometry(b.w, b.h, b.d, profile);
+        sharedDynamicGeometry.set(geometryKey, geometry);
+        activeGeometries.add(geometry);
+      }
+      const mesh = new THREE.Mesh(geometry, mat(b.color));
+      mesh.position.set(b.x, b.y, b.z);
+      mesh.castShadow = castShadow;
+      mesh.receiveShadow = true;
+      mesh.userData = { crate: b.crate };
+      mesh.updateMatrix();
+      mesh.matrixAutoUpdate = false;
+      world.crates.set(b.crate, {
+        mesh,
+        collider: colliders.find((c) => c.crate === b.crate),
+      });
       group.add(mesh);
       world.occluders.push(mesh);
     }
+
+    for (const batch of staticBatches.values()) {
+      const geometry = mergeMapGeometries(batch.parts);
+      for (const part of batch.parts) part.dispose();
+      if (!geometry) continue;
+      activeGeometries.add(geometry);
+      const mesh = new THREE.Mesh(geometry, mat(batch.color));
+      mesh.castShadow = batch.castShadow;
+      mesh.receiveShadow = true;
+      mesh.userData = { mapBatch: true, sourceBoxes: batch.parts.length };
+      mesh.updateMatrix();
+      mesh.matrixAutoUpdate = false;
+      group.add(mesh);
+    }
+
+    world.renderStats = Object.freeze({
+      mapId,
+      boxes: data.boxes.length,
+      meshes: group.children.length,
+      staticBatches: staticBatches.size,
+      dynamicMeshes: world.crates.size,
+      geometries: activeGeometries.size,
+      shadowCasters: group.children.filter((mesh) => mesh.castShadow).length,
+      raycastProxies: world.occluders.filter((mesh) => mesh.userData.mapOccluder).length,
+    });
 
     const toVec = (p) => {
       const point = new THREE.Vector3(p.x, p.y, p.z);
