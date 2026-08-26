@@ -12,6 +12,15 @@ test('gameplay control remains active with Pointer Lock or the compatible fallba
   assert.equal(gameplayControlActive(null, true), true);
 });
 
+test('only the game canvas may own Pointer Lock for gameplay input', () => {
+  const canvas = {};
+  const unrelatedElement = {};
+  assert.equal(gameplayControlActive(canvas, false, canvas), true);
+  assert.equal(gameplayControlActive(unrelatedElement, false, canvas), false);
+  assert.equal(gameplayControlActive(unrelatedElement, true, canvas), true);
+  assert.equal(gameplayControlActive(null, true, canvas), true);
+});
+
 test('compatible mouse mode hides the free cursor instead of drawing a second crosshair', () => {
   assert.match(indexSource, /body\.fallback-controls #app > canvas\s*\{\s*cursor: none;/);
   assert.doesNotMatch(indexSource, /body\.fallback-controls #app > canvas\s*\{\s*cursor: crosshair;/);
@@ -75,7 +84,26 @@ test('compact navigation buttons can shrink without horizontal overflow', () => 
 });
 
 test('a late Pointer Lock grant cannot capture the cursor over an overlay', () => {
-  assert.match(mainSource, /if \(document\.pointerLockElement\) \{\s*if \(buyOpen \|\| botPanelOpen \|\| podiumOpen \|\| teamPickerOpen\) \{\s*document\.exitPointerLock\(\);\s*return;/);
+  assert.match(mainSource, /if \(ownsGameplayPointerLock\(\)\) \{\s*if \(buyOpen \|\| botPanelOpen \|\| podiumOpen \|\| teamPickerOpen\) \{\s*document\.exitPointerLock\(\);\s*return;/);
+});
+
+test('unexpected Pointer Lock loss keeps the match active in compatible mouse mode', () => {
+  const lifecycle = mainSource.match(
+    /document\.addEventListener\('pointerlockchange',[\s\S]*?\n\}\);/,
+  )?.[0] || '';
+  assert.doesNotMatch(lifecycle, /openMainMenuFromGame\(\)/);
+  assert.match(
+    lifecycle,
+    /buyOpen \|\| botPanelOpen \|\| podiumOpen \|\| teamPickerOpen[\s\S]*?setFallbackControls\(false\)[\s\S]*?return;/,
+  );
+  assert.match(
+    lifecycle,
+    /const gameplayCanFallback = state === 'playing' && !player\.dead &&[\s\S]*?!buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;/,
+  );
+  assert.match(
+    lifecycle,
+    /if \([^)]*!gameplayCanFallback\) \{[\s\S]*?setFallbackControls\(false\);[\s\S]*?return;[\s\S]*?setFallbackControls\(true\);/,
+  );
 });
 
 test('early Pointer Lock cannot hide the lobby while the online handshake is pending', () => {

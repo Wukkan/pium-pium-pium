@@ -1460,6 +1460,7 @@ let kills = 0, deaths = 0;
 let state = 'menu'; // menu | playing | dead
 let fallbackControlsActive = false;
 let fallbackControlHintShown = false;
+let pointerLockAttemptEpoch = 0;
 
 const playerEye = new THREE.Vector3();
 const remoteAudioForward = new THREE.Vector3();
@@ -2076,6 +2077,7 @@ function setupOnline() {
       resetStreak();
       player.dead = true;
       player.health = 0;
+      player.resetFallbackLookMotion();
       hud.showDeath(true, m.kn);
       state = 'dead';
       audio.death();
@@ -2236,27 +2238,37 @@ function startLocalTraining() {
 }
 
 function setFallbackControls(active) {
-  fallbackControlsActive = !!active;
+  const nextActive = !!active;
+  if (!nextActive) pointerLockAttemptEpoch++;
+  fallbackControlsActive = nextActive;
   document.body.classList.toggle('fallback-controls', fallbackControlsActive);
   player.setFallbackLook(fallbackControlsActive, renderer.domElement);
   weapons.setFallbackControls(fallbackControlsActive, renderer.domElement);
 }
 
+function ownsGameplayPointerLock() {
+  return document.pointerLockElement === renderer.domElement;
+}
+
+function canRequestGameplayPointerLock() {
+  return typeof renderer.domElement.requestPointerLock === 'function';
+}
+
 function hasGameplayControl() {
-  return gameplayControlActive(document.pointerLockElement, fallbackControlsActive);
+  return gameplayControlActive(document.pointerLockElement, fallbackControlsActive, renderer.domElement);
 }
 
 function showFallbackControlHint() {
   if (fallbackControlHintShown) return;
   fallbackControlHintShown = true;
-  hud.info('Partida activa · modo compatible de mouse habilitado');
+  hud.info('Mouse compatible · acerca el cursor al borde para seguir girando sin límite');
 }
 
 function enterGameplayView() {
   state = 'playing';
   hud.showMenu(false);
   hud.showHud(true);
-  setFallbackControls(!document.pointerLockElement);
+  setFallbackControls(!ownsGameplayPointerLock());
   if (!tryLock()) showFallbackControlHint();
 }
 
@@ -2265,13 +2277,22 @@ function tryLock() {
     setFallbackControls(false);
     return true;
   }
+  if (!canRequestGameplayPointerLock()) {
+    if (state === 'playing' && !fallbackControlsActive) setFallbackControls(true);
+    return false;
+  }
   if (state === 'playing') setFallbackControls(true);
+  const attemptEpoch = ++pointerLockAttemptEpoch;
   const attempt = requestPointerLockSafe(renderer.domElement);
-  void attempt.completion.then((locked) => {
-    if (!locked && state === 'playing' && !document.pointerLockElement) {
-      setFallbackControls(true);
-      showFallbackControlHint();
-    }
+  void attempt.completion.then(() => {
+    requestAnimationFrame(() => {
+      if (attemptEpoch !== pointerLockAttemptEpoch) return;
+      if (!ownsGameplayPointerLock() && state === 'playing' && !player.dead &&
+          !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen) {
+        setFallbackControls(true);
+        showFallbackControlHint();
+      }
+    });
   });
   return attempt.requested;
 }
@@ -2294,7 +2315,7 @@ function openMainMenuFromGame() {
 playBtn.addEventListener('click', joinAndPlay);
 localPlayBtn?.addEventListener('click', startLocalTraining);
 renderer.domElement.addEventListener('click', () => {
-  if (state === 'playing' && !document.pointerLockElement && !player.dead &&
+  if (state === 'playing' && canRequestGameplayPointerLock() && !ownsGameplayPointerLock() && !player.dead &&
       !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen) tryLock();
 });
 nameInput.addEventListener('keydown', (e) => {
@@ -2303,7 +2324,7 @@ nameInput.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('pointerlockchange', () => {
-  if (document.pointerLockElement) {
+  if (ownsGameplayPointerLock()) {
     if (buyOpen || botPanelOpen || podiumOpen || teamPickerOpen) {
       document.exitPointerLock();
       return;
@@ -2313,11 +2334,26 @@ document.addEventListener('pointerlockchange', () => {
     if (state === 'menu') state = 'playing';
     hud.showMenu(false);
     hud.showHud(true);
-  } else {
+  } else if (document.pointerLockElement) {
     setFallbackControls(false);
-    if (buyOpen || botPanelOpen || podiumOpen || teamPickerOpen) return;
-    openMainMenuFromGame();
+  } else {
+    const gameplayCanFallback = state === 'playing' && !player.dead &&
+      !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen;
+    if (!gameplayCanFallback) {
+      setFallbackControls(false);
+      return;
+    }
+    // La pérdida espontánea de Pointer Lock no expulsa al jugador. Se pasa al
+    // modo compatible; otro Escape abre el menú de forma explícita.
+    setFallbackControls(true);
+    showFallbackControlHint();
   }
+});
+
+document.addEventListener('pointerlockerror', () => {
+  if (state !== 'playing' || ownsGameplayPointerLock() || buyOpen || botPanelOpen || podiumOpen || teamPickerOpen) return;
+  setFallbackControls(true);
+  showFallbackControlHint();
 });
 
 // marcador con TAB (partida actual + top mundial)

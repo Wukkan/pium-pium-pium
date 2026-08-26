@@ -1412,7 +1412,8 @@ export class WeaponSystem {
   }
 
   hasGameplayControl(event = null) {
-    if (document.pointerLockElement) return true;
+    if (document.pointerLockElement &&
+        (!this.fallbackControlSurface || document.pointerLockElement === this.fallbackControlSurface)) return true;
     if (!this.fallbackControls) return false;
     if (!event || !this.fallbackControlSurface) return true;
     return this.fallbackControlSurface.contains?.(event.target) === true;

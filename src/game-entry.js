@@ -1,8 +1,11 @@
 // Entrada robusta al combate: Pointer Lock mejora el control del mouse, pero
 // nunca debe decidir si la partida puede mostrarse o aceptar teclado.
 
-export function gameplayControlActive(pointerLockElement, fallbackActive = false) {
-  return !!pointerLockElement || !!fallbackActive;
+export function gameplayControlActive(pointerLockElement, fallbackActive = false, requiredElement = null) {
+  const ownsPointerLock = requiredElement
+    ? pointerLockElement === requiredElement
+    : !!pointerLockElement;
+  return ownsPointerLock || !!fallbackActive;
 }
 
 export function requestPointerLockSafe(target) {

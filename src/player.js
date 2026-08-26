@@ -3,6 +3,13 @@ import { moveBody } from './shared/physics.js';
 import { PLAYER_BODY, selectSafeSpawn } from './shared/spawn-safety.js';
 import { applyJumpPadImpulse } from './shared/mapdata.js';
 import { DEFAULT_BINDINGS } from './input-bindings.js';
+import {
+  clampLookPitch,
+  fallbackEdgeIntent,
+  fallbackEdgeTurn,
+  normalizeLookYaw,
+  sanitizeMouseDelta,
+} from './look-controls.js';
 
 // ---------------------------------------------------------------------------
 // Jugador en primera persona: WASD + salto + bunny-hop + deslizamiento.
@@ -67,6 +74,9 @@ export class Player {
     this.fallbackLookSurface = null;
     this.fallbackPointerX = null;
     this.fallbackPointerY = null;
+    this.fallbackTurnX = 0;
+    this.fallbackTurnY = 0;
+    this._fallbackSurfaceLeave = () => this.resetFallbackLookMotion();
 
     this.onJump = null;
     this.onLand = null;
@@ -77,53 +87,99 @@ export class Player {
     this._jumpWasHeld = false;
 
     addEventListener('keydown', (e) => {
-      const capturesGameplay = !!document.pointerLockElement || this.fallbackLookActive;
+      const ownsPointerLock = !!document.pointerLockElement &&
+        (!this.fallbackLookSurface || document.pointerLockElement === this.fallbackLookSurface);
+      const capturesGameplay = ownsPointerLock || this.fallbackLookActive;
       if (capturesGameplay && Object.values(this.bindings).includes(e.code)) e.preventDefault();
       this.keys[e.code] = true;
     });
     addEventListener('keyup', (e) => { this.keys[e.code] = false; });
-    addEventListener('blur', () => { this.keys = {}; this._jumpWasHeld = false; });
+    addEventListener('blur', () => {
+      this.keys = {};
+      this._jumpWasHeld = false;
+      this.resetFallbackLookMotion();
+    });
     document.addEventListener('pointerlockchange', () => {
-      if (!document.pointerLockElement) {
+      this.resetFallbackLookMotion();
+      if (document.pointerLockElement !== this.fallbackLookSurface) {
         this.keys = {};
         this._jumpWasHeld = false;
       }
     });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.keys = {};
+        this._jumpWasHeld = false;
+        this.resetFallbackLookMotion();
+      }
+    });
     addEventListener('mousemove', (e) => {
-      const locked = !!document.pointerLockElement;
+      const locked = !!document.pointerLockElement &&
+        (!this.fallbackLookSurface || document.pointerLockElement === this.fallbackLookSurface);
       const overFallbackSurface = this.fallbackLookActive &&
         (!this.fallbackLookSurface || this.fallbackLookSurface.contains?.(e.target));
-      if (!locked && !overFallbackSurface) return;
-      const limit = locked ? Number.POSITIVE_INFINITY : 80;
+      if (this.dead) {
+        this.resetFallbackLookMotion();
+        return;
+      }
+      if (!locked && !overFallbackSurface) {
+        if (this.fallbackLookActive) this.resetFallbackLookMotion();
+        return;
+      }
       let rawX = Number(e.movementX);
       let rawY = Number(e.movementY);
       if (!locked) {
         const clientX = Number(e.clientX);
         const clientY = Number(e.clientY);
-        if (Number.isFinite(clientX) && Number.isFinite(this.fallbackPointerX)) {
-          const clientDeltaX = clientX - this.fallbackPointerX;
-          if (!Number.isFinite(rawX) || (rawX === 0 && clientDeltaX !== 0)) rawX = clientDeltaX;
-        }
-        if (Number.isFinite(clientY) && Number.isFinite(this.fallbackPointerY)) {
-          const clientDeltaY = clientY - this.fallbackPointerY;
-          if (!Number.isFinite(rawY) || (rawY === 0 && clientDeltaY !== 0)) rawY = clientDeltaY;
-        }
+        // Sin Pointer Lock, las coordenadas absolutas son la fuente estable.
+        // Algunos navegadores reutilizan movementX/Y y causan saltos o inversión.
+        rawX = Number.isFinite(clientX) && Number.isFinite(this.fallbackPointerX)
+          ? clientX - this.fallbackPointerX
+          : 0;
+        rawY = Number.isFinite(clientY) && Number.isFinite(this.fallbackPointerY)
+          ? clientY - this.fallbackPointerY
+          : 0;
         this.fallbackPointerX = Number.isFinite(clientX) ? clientX : null;
         this.fallbackPointerY = Number.isFinite(clientY) ? clientY : null;
+        const rect = this.fallbackLookSurface?.getBoundingClientRect?.();
+        const left = Number(rect?.left) || 0;
+        const top = Number(rect?.top) || 0;
+        const width = Number(rect?.width) || Number(globalThis.innerWidth) || 0;
+        const height = Number(rect?.height) || Number(globalThis.innerHeight) || 0;
+        this.fallbackTurnX = fallbackEdgeIntent(clientX, left, width);
+        this.fallbackTurnY = fallbackEdgeIntent(clientY, top, height);
+      } else {
+        this.fallbackTurnX = 0;
+        this.fallbackTurnY = 0;
       }
-      const movementX = Math.max(-limit, Math.min(limit, Number.isFinite(rawX) ? rawX : 0));
-      const movementY = Math.max(-limit, Math.min(limit, Number.isFinite(rawY) ? rawY : 0));
-      this.yaw -= movementX * this.sensitivity;
-      this.pitch += (this.invertY ? 1 : -1) * movementY * this.sensitivity;
-      this.pitch = Math.max(-1.55, Math.min(1.55, this.pitch));
+      const movementX = sanitizeMouseDelta(rawX, locked);
+      const movementY = sanitizeMouseDelta(rawY, locked);
+      this.yaw = normalizeLookYaw(this.yaw - movementX * this.sensitivity);
+      this.pitch = clampLookPitch(
+        this.pitch + (this.invertY ? 1 : -1) * movementY * this.sensitivity,
+        this.pitch,
+      );
     });
   }
 
   setFallbackLook(active, surface = null) {
-    this.fallbackLookActive = !!active;
-    this.fallbackLookSurface = surface || null;
+    const nextActive = !!active;
+    const nextSurface = surface || null;
+    if (this.fallbackLookActive === nextActive && this.fallbackLookSurface === nextSurface) return;
+    this.fallbackLookSurface?.removeEventListener?.('mouseleave', this._fallbackSurfaceLeave);
+    this.fallbackLookActive = nextActive;
+    this.fallbackLookSurface = nextSurface;
+    if (this.fallbackLookActive) {
+      this.fallbackLookSurface?.addEventListener?.('mouseleave', this._fallbackSurfaceLeave);
+    }
+    this.resetFallbackLookMotion();
+  }
+
+  resetFallbackLookMotion() {
     this.fallbackPointerX = null;
     this.fallbackPointerY = null;
+    this.fallbackTurnX = 0;
+    this.fallbackTurnY = 0;
   }
 
   setBindings(bindings) {
@@ -133,6 +189,7 @@ export class Player {
   }
 
   spawn(point) {
+    this.resetFallbackLookMotion();
     this.pos.copy(point);
     this.vel.set(0, 0, 0);
     this.health = this.maxHealth;
@@ -208,11 +265,24 @@ export class Player {
     if (this.health <= 0) {
       this.health = 0;
       this.dead = true;
+      this.resetFallbackLookMotion();
       if (this.onDeath) this.onDeath(attackerName);
     }
   }
 
   update(dt, inputEnabled) {
+    const ownsPointerLock = document.pointerLockElement === this.fallbackLookSurface;
+    if (inputEnabled && this.fallbackLookActive && !ownsPointerLock) {
+      this.yaw = normalizeLookYaw(
+        this.yaw - fallbackEdgeTurn(this.fallbackTurnX, this.sensitivity, dt),
+        this.yaw,
+      );
+      this.pitch = clampLookPitch(
+        this.pitch + (this.invertY ? 1 : -1) *
+          fallbackEdgeTurn(this.fallbackTurnY, this.sensitivity, dt),
+        this.pitch,
+      );
+    }
     const k = this.keys;
     const bind = this.bindings;
     const fwd = inputEnabled ? (k[bind.moveForward] ? 1 : 0) - (k[bind.moveBackward] ? 1 : 0) : 0;
