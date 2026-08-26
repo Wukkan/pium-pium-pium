@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
   buildMap, buildColliders, TOTAL_SLOTS, MAX_BOTS, BOT_NAMES, BOT_COLORS,
-  MAPS, HATS, QUICK_CHAT, badgeFor,
+  MAPS, HATS, QUICK_CHAT, badgeFor, jumpPadContainsPoint, jumpPadIntersectsSegment,
 } from '../src/shared/mapdata.js';
 import {
   DEFAULT_BOT_CONFIG, effectiveBotCount, sanitizeBotConfigUpdate,
@@ -50,8 +50,12 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.7.2';
+const GAME_VERSION = '1.7.3';
 const ZOMBIE_WAVES = 8;
+const configuredZombiePrep = Number(process.env.PIUM_ZOMBIE_PREP_SECONDS);
+const ZOMBIE_PREP_SECONDS = Number.isFinite(configuredZombiePrep)
+  ? Math.max(0.05, Math.min(30, configuredZombiePrep))
+  : 5;
 const MAX_ZOMBIES_PER_WAVE = 4 + 2 * ZOMBIE_WAVES;
 const MIN_ZOMBIE_SPAWNS = MAX_ZOMBIES_PER_WAVE + TOTAL_SLOTS;
 const MOVEMENT_HORIZONTAL_RATE = 18;
@@ -210,6 +214,11 @@ function loadMap(mapId) {
     margin: 0.05,
     label: `${mapId}.waypoints`,
   });
+  requireSafeSpawnPoints(nextMapData.navigationPoints || nextMapData.waypoints, nextColliders, {
+    body: BOT_BODY,
+    margin: 0.01,
+    label: `${mapId}.navigationPoints`,
+  });
   const nextZombieSpawns = requireSafeSpawnPoints([
     ...nextMapData.botSpawns,
     ...nextMapData.playerSpawns,
@@ -280,7 +289,10 @@ const match = {
   mapVotes: new Map(),        // playerId -> mapa votado
   teamScores: { r: 0, b: 0 },
   wave: 0,
-  waveBreakAt: 0,
+  // Las salas nacen ya preparadas para su primera oleada. Mientras están
+  // vacías pauseRoomTimers desplaza este deadline, de modo que el conteo
+  // comienza al entrar el primer humano y nunca queda bloqueado en wave=0.
+  waveBreakAt: roomMode === 'zombies' ? Date.now() / 1000 + ZOMBIE_PREP_SECONDS : 0,
   podiumPayload: null,
 };
 
@@ -335,7 +347,7 @@ function startMatch(mapId = match.map) {
   match.mapVotes = new Map();
   match.teamScores = { r: 0, b: 0 };
   match.wave = 0;
-  match.waveBreakAt = roomMode === 'zombies' ? now() + 5 : 0;
+  match.waveBreakAt = roomMode === 'zombies' ? now() + ZOMBIE_PREP_SECONDS : 0;
   match.podiumPayload = null;
   bots.length = 0;
   kits.length = 0;
@@ -933,10 +945,7 @@ function bodySupportedAt(pos, activeColliders) {
 function jumpPadPowerNear(start, end) {
   let power = 0;
   for (const pad of mapData?.jumpPads || []) {
-    const startDistance = Math.hypot(start.x - pad.x, start.z - pad.z);
-    const endDistance = Math.hypot(end.x - pad.x, end.z - pad.z);
-    if (Math.min(startDistance, endDistance) <= 1.8 &&
-        Math.min(Math.abs(start.y - pad.y), Math.abs(end.y - pad.y)) <= 1.2) {
+    if (jumpPadIntersectsSegment(start, end, pad)) {
       power = Math.max(power, Number(pad.power) || 0);
     }
   }
@@ -1363,7 +1372,7 @@ function attach(ws, hello) {
 // --- bucle de simulación ---
 const botCtx = {
   colliders,
-  get waypoints() { return mapData?.waypoints || []; },
+  get waypoints() { return mapData?.navigationPoints || mapData?.waypoints || []; },
   get players() { return [...players.values()]; },
   get bots() { return bots; },
   onShoot(bot, from, to) {
@@ -1423,8 +1432,7 @@ function tick(t, dt, elapsed = dt) {
       // saltadores: también lanzan a los bots
       if (!b.dead && b.onGround) {
         for (const pad of mapData.jumpPads) {
-          const dx = b.pos.x - pad.x, dz = b.pos.z - pad.z;
-          if (dx * dx + dz * dz < 1.3 && Math.abs(b.pos.y - pad.y) < 0.8) {
+          if (jumpPadContainsPoint(b.pos, pad)) {
             b.vel.y = pad.power;
             break;
           }

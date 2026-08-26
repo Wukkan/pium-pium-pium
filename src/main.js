@@ -22,7 +22,9 @@ import {
   playSpatialBoom,
 } from './grenades.js';
 import { Missions } from './missions.js';
-import { HATS, MAPS, MAX_BOTS, QUICK_CHAT, TOTAL_SLOTS } from './shared/mapdata.js';
+import {
+  HATS, MAPS, MAX_BOTS, QUICK_CHAT, TOTAL_SLOTS, jumpPadContainsPoint,
+} from './shared/mapdata.js';
 import {
   BOT_BODY,
   PLAYER_BODY,
@@ -2654,8 +2656,7 @@ function simulateStep(dt) {
     // saltadores
     if (inputEnabled && player.onGround) {
       for (const pad of world.jumpPads) {
-        const dx = player.pos.x - pad.x, dz = player.pos.z - pad.z;
-        if (dx * dx + dz * dz < 1.3 && Math.abs(player.pos.y - pad.y) < 0.8) {
+        if (jumpPadContainsPoint(player.pos, pad)) {
           player.vel.y = pad.power;
           player.onGround = false;
           playCombatSound('jump');

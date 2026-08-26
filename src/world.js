@@ -52,6 +52,7 @@ export function buildWorld(scene) {
     playerSpawns: [],
     botSpawns: [],
     waypoints: [],
+    navigationPoints: [],
     jumpPads: [],
     crates: new Map(), // id -> {mesh, collider}
     load,
@@ -91,6 +92,12 @@ export function buildWorld(scene) {
       margin: 0.05,
       label: `${mapId}.waypoints`,
     });
+    const navigationSource = data.navigationPoints || data.waypoints;
+    requireSafeSpawnPoints(
+      navigationSource,
+      colliders,
+      { body: BOT_BODY, margin: 0.01, label: `${mapId}.navigationPoints` },
+    );
 
     world.mapId = mapId;
 
@@ -107,6 +114,7 @@ export function buildWorld(scene) {
     world.playerSpawns.length = 0;
     world.botSpawns.length = 0;
     world.waypoints.length = 0;
+    world.navigationPoints.length = 0;
     world.jumpPads.length = 0;
     world.crates.clear();
 
@@ -131,10 +139,16 @@ export function buildWorld(scene) {
       world.occluders.push(mesh);
     }
 
-    const toVec = (p) => new THREE.Vector3(p.x, p.y, p.z);
+    const toVec = (p) => {
+      const point = new THREE.Vector3(p.x, p.y, p.z);
+      if (Number.isInteger(p.navigationRoute)) point.navigationRoute = p.navigationRoute;
+      if (Number.isInteger(p.navigationOrder)) point.navigationOrder = p.navigationOrder;
+      return point;
+    };
     world.playerSpawns.push(...playerSpawns.map(toVec));
     world.botSpawns.push(...botSpawns.map(toVec));
     world.waypoints.push(...waypoints.map(toVec));
+    world.navigationPoints.push(...navigationSource.map(toVec));
     world.jumpPads.push(...data.jumpPads);
   }
 

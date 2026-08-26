@@ -1,5 +1,10 @@
 import { moveBody, segmentBlocked } from '../src/shared/physics.js';
 import { BOT_BODY } from '../src/shared/spawn-safety.js';
+import {
+  botWaypointReachable,
+  findBotNavigationRoute,
+  selectReachableBotWaypoint,
+} from '../src/shared/bot-navigation.js';
 
 // ---------------------------------------------------------------------------
 // IA de los bots en el SERVIDOR. Es el mismo comportamiento que tenía el
@@ -45,6 +50,11 @@ export class ServerBot {
     this.nextShotAt = 0;
     this.nextBurstAt = 0;
     this.stuckCheckAt = 0;
+    this.nextPathCheckAt = 0;
+    this.navigationTarget = null;
+    this.navigationGoal = null;
+    this.navigationRoute = [];
+    this.directChase = false;
     this.lastCheckPos = { x: 0, y: 0, z: 0 };
     this.onGround = false;
 
@@ -65,6 +75,11 @@ export class ServerBot {
     this.speed = 0;
     this.repathAt = 0;
     this.stuckCheckAt = 0;
+    this.nextPathCheckAt = 0;
+    this.navigationTarget = null;
+    this.navigationGoal = null;
+    this.navigationRoute = [];
+    this.directChase = false;
     this.lastCheckPos = { ...sp };
     this.burstLeft = 0;
     this.nextShotAt = 0;
@@ -133,11 +148,76 @@ export class ServerBot {
     this.engaging = !!target;
 
     if (target && this.zombie) {
-      // zombi: correr directo al jugador y arañar de cerca
-      const dx = target.pos.x - this.pos.x, dz = target.pos.z - this.pos.z;
+      // Conserva la ruta completa elegida por A*. Recalcular un waypoint
+      // independiente en cada rellano producía oscilaciones, especialmente al
+      // bajar de una azotea: dos candidatos parecían alternadamente mejores.
+      const waypointReached = this.waypoint &&
+        Math.hypot(this.pos.x - this.waypoint.x, this.pos.z - this.waypoint.z) < 0.72 &&
+        Math.abs(this.pos.y - this.waypoint.y) < 0.3;
+      const targetChanged = this.navigationTarget !== target;
+      const targetMoved = this.navigationGoal && Math.hypot(
+        target.pos.x - this.navigationGoal.x,
+        target.pos.y - this.navigationGoal.y,
+        target.pos.z - this.navigationGoal.z,
+      ) > 4;
+
+      if (targetChanged) {
+        this.navigationTarget = target;
+        this.navigationRoute = [];
+        this.waypoint = null;
+        this.directChase = false;
+      }
+
+      if (waypointReached) {
+        this.navigationRoute.shift();
+        this.waypoint = this.navigationRoute[0] ? { ...this.navigationRoute[0] } : null;
+        this.vel.x = 0;
+        this.vel.z = 0;
+      }
+
+      const pathCheckDue = t >= this.nextPathCheckAt;
+      const routeSegmentBlocked = pathCheckDue && this.waypoint &&
+        !botWaypointReachable(this.pos, this.waypoint, ctx.colliders, BOT_BODY);
+      const needsRoute = targetChanged || targetMoved || routeSegmentBlocked ||
+        (!this.directChase && !this.waypoint) || pathCheckDue;
+      if (needsRoute) {
+        const canChaseDirectly = botWaypointReachable(
+          this.pos, target.pos, ctx.colliders, BOT_BODY,
+        );
+        if (canChaseDirectly) {
+          this.directChase = true;
+          this.navigationRoute = [];
+          this.waypoint = null;
+        } else if (targetChanged || targetMoved || routeSegmentBlocked || !this.waypoint) {
+          const route = findBotNavigationRoute(
+            this.pos,
+            ctx.waypoints,
+            ctx.colliders,
+            { body: BOT_BODY, goal: target.pos, allowPartial: true },
+          );
+          this.navigationRoute = route;
+          this.waypoint = route[0] ? { ...route[0] } : null;
+          this.directChase = false;
+          // Al cambiar de tramo se elimina la inercia lateral que podría
+          // recortar la esquina de un edificio o una baranda.
+          this.vel.x = 0;
+          this.vel.z = 0;
+        } else {
+          this.directChase = false;
+        }
+        this.navigationGoal = { ...target.pos };
+        this.nextPathCheckAt = t + (this.waypoint || this.directChase ? 0.5 : 0.75);
+      }
+      const chasePoint = this.directChase ? target.pos : this.waypoint;
+      const dx = chasePoint ? chasePoint.x - this.pos.x : 0;
+      const dz = chasePoint ? chasePoint.z - this.pos.z : 0;
       this.targetYaw = Math.atan2(dx, dz);
       const fl = Math.hypot(dx, dz) || 1;
-      moveX = dx / fl; moveZ = dz / fl;
+      const pendingLevelChange = !this.directChase && this.waypoint &&
+        Math.abs(this.pos.y - this.waypoint.y) >= 0.3;
+      if (fl >= 0.7 || (pendingLevelChange && fl > 0.05)) {
+        moveX = dx / fl; moveZ = dz / fl;
+      }
       const meleeTarget = { x: target.pos.x, y: target.pos.y + 1, z: target.pos.z };
       if (targetDist < 1.9 && t >= this.nextMeleeAt &&
           !segmentBlocked(this.eyePos(), meleeTarget, ctx.colliders)) {
@@ -145,6 +225,9 @@ export class ServerBot {
         ctx.onHitTarget(this, targetKind, target, this.meleeDmg);
       }
     } else if (target) {
+      this.navigationTarget = null;
+      this.navigationGoal = null;
+      this.navigationRoute = [];
       const dx = target.pos.x - this.pos.x, dz = target.pos.z - this.pos.z;
       this.targetYaw = Math.atan2(dx, dz);
 
@@ -170,19 +253,30 @@ export class ServerBot {
         this.nextShotAt = t + 0.15 + Math.random() * 0.25;
       }
     } else {
-      if (!this.waypoint || t > this.repathAt ||
-          (this.pos.x - this.waypoint.x) ** 2 + (this.pos.z - this.waypoint.z) ** 2 < 2.5) {
-        const waypoints = Array.isArray(ctx.waypoints) ? ctx.waypoints : [];
-        const nextWaypoint = waypoints[Math.floor(Math.random() * waypoints.length)];
-        if (!nextWaypoint) return;
-        this.waypoint = { ...nextWaypoint };
-        this.repathAt = t + 6 + Math.random() * 5;
+      this.navigationTarget = null;
+      this.navigationGoal = null;
+      this.navigationRoute = [];
+      let needsWaypoint = !this.waypoint || t > this.repathAt ||
+        (this.pos.x - this.waypoint.x) ** 2 + (this.pos.z - this.waypoint.z) ** 2 < 2.5;
+      if (!needsWaypoint && t >= this.nextPathCheckAt) {
+        needsWaypoint = !botWaypointReachable(this.pos, this.waypoint, ctx.colliders, BOT_BODY);
+        this.nextPathCheckAt = t + 0.75;
       }
-      const dx = this.waypoint.x - this.pos.x, dz = this.waypoint.z - this.pos.z;
-      const l = Math.hypot(dx, dz);
-      if (l > 0.7) {
-        moveX = dx / l; moveZ = dz / l;
-        this.targetYaw = Math.atan2(moveX, moveZ);
+      if (needsWaypoint) {
+        const nextWaypoint = selectReachableBotWaypoint(
+          this.pos, ctx.waypoints, ctx.colliders, { body: BOT_BODY },
+        );
+        this.waypoint = nextWaypoint ? { ...nextWaypoint } : null;
+        this.repathAt = t + (this.waypoint ? 6 + Math.random() * 5 : 0.75);
+        this.nextPathCheckAt = t + 0.75;
+      }
+      if (this.waypoint) {
+        const dx = this.waypoint.x - this.pos.x, dz = this.waypoint.z - this.pos.z;
+        const l = Math.hypot(dx, dz);
+        if (l > 0.7) {
+          moveX = dx / l; moveZ = dz / l;
+          this.targetYaw = Math.atan2(moveX, moveZ);
+        }
       }
     }
 
@@ -191,6 +285,9 @@ export class ServerBot {
       const moved = (this.pos.x - this.lastCheckPos.x) ** 2 + (this.pos.z - this.lastCheckPos.z) ** 2;
       if ((moveX !== 0 || moveZ !== 0) && moved < 0.09) {
         if (this.onGround) this.vel.y = 8.4;
+        this.waypoint = null;
+        this.navigationRoute = [];
+        this.directChase = false;
         this.repathAt = 0;
       }
       this.lastCheckPos = { ...this.pos };

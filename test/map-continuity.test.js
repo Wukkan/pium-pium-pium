@@ -79,12 +79,39 @@ test('city bridge, roof and rails have continuous support', () => {
   }
 
   const northEastRoof = findBox(boxes, 19, -19, COLORS.roof);
+  const southEastRoof = findBox(boxes, 19, 20, COLORS.roof);
+  const northApproach = findBox(boxes, 19, -11.75, COLORS.platform);
   const bridge = findBox(boxes, 19, 0, COLORS.platform);
-  assertVerticalContact(northEastRoof, bridge, 'city northeast roof/bridge');
+  const southApproach = findBox(boxes, 19, 11.75, COLORS.platform);
+  assertVerticalContact(northEastRoof, northApproach, 'city northeast roof/bridge approach');
+  assertVerticalContact(northApproach, bridge, 'city north approach/bridge');
+  assertVerticalContact(bridge, southApproach, 'city bridge/south approach');
+  assertVerticalContact(southApproach, southEastRoof, 'city south approach/southeast roof');
 
-  const rails = boxes.filter((box) => box.color === COLORS.barrier && box.d === 26);
+  const rails = boxes.filter((box) => box.color === COLORS.barrier && box.d === 21.2);
   assert.equal(rails.length, 2, 'city bridge must keep both rails');
   for (const [index, rail] of rails.entries()) {
     assertVerticalContact(bridge, rail, `city bridge/rail ${index + 1}`);
+  }
+});
+
+test('destructible crates never interpenetrate static map cover', () => {
+  for (const mapId of ['arena', 'ciudad']) {
+    const boxes = buildMap(mapId).boxes;
+    const crates = boxes.filter((box) => box.crate);
+    const staticCover = boxes.filter((box) => !box.crate);
+    for (const crate of crates) {
+      const a = bounds(crate);
+      for (const cover of staticCover) {
+        const b = bounds(cover);
+        const overlapX = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+        const overlapY = Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY);
+        const overlapZ = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
+        assert.ok(
+          overlapX <= 1e-6 || overlapY <= 1e-6 || overlapZ <= 1e-6,
+          `${mapId} ${crate.crate} intersects static cover at (${cover.x}, ${cover.y}, ${cover.z})`,
+        );
+      }
+    }
   }
 });

@@ -11,6 +11,7 @@ test('map reload keeps shared arrays stable and disposes old GPU geometries', ()
     playerSpawns: world.playerSpawns,
     botSpawns: world.botSpawns,
     waypoints: world.waypoints,
+    navigationPoints: world.navigationPoints,
   };
   const mapGroup = scene.children.find((child) => child.isGroup);
   const oldGeometries = mapGroup.children.map((mesh) => mesh.geometry);
@@ -24,6 +25,9 @@ test('map reload keeps shared arrays stable and disposes old GPU geometries', ()
   assert.equal(world.playerSpawns, refs.playerSpawns);
   assert.equal(world.botSpawns, refs.botSpawns);
   assert.equal(world.waypoints, refs.waypoints);
+  assert.equal(world.navigationPoints, refs.navigationPoints);
   assert.equal(world.mapId, 'ciudad');
   assert.equal(world.playerSpawns.length, 10);
+  assert.ok(world.navigationPoints.some((point) =>
+    Number.isInteger(point.navigationRoute) && Number.isInteger(point.navigationOrder)));
 });

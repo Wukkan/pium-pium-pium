@@ -76,6 +76,10 @@ function isBodySegmentClear(start, end, colliders, {
   return true;
 }
 
+export function isDirectBodyPathClear(start, end, colliders, options = {}) {
+  return isBodySegmentClear(start, end, colliders, options);
+}
+
 export function isBodyPathClear(start, end, colliders, options = {}) {
   if (!finitePoint(start) || !finitePoint(end)) return false;
   if (isBodySegmentClear(start, end, colliders, options)) return true;

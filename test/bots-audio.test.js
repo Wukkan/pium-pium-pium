@@ -94,3 +94,37 @@ test('local bots render toward logical +Z while preserving their combat yaw', ()
     else globalThis.document = previousDocument;
   }
 });
+
+test('local bots use the same jump pads as authoritative bots', () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = canvasDocument();
+  let manager;
+  try {
+    const floor = { minX: -5, maxX: 5, minY: -1, maxY: 0, minZ: -5, maxZ: 5 };
+    const padCollider = { minX: -0.8, maxX: 0.8, minY: 0, maxY: 0.2, minZ: -0.8, maxZ: 0.8 };
+    manager = new BotManager(
+      { add() {}, remove() {} },
+      {
+        botSpawns: [new THREE.Vector3(3, 0.1, 3)],
+        colliders: [floor, padCollider],
+        occluders: [],
+        waypoints: [new THREE.Vector3(3, 0.1, 2)],
+        jumpPads: [{ x: 0, y: 0, z: 0, power: 18 }],
+      },
+      { dead: true, pos: new THREE.Vector3(20, 0, 20) },
+      {},
+      null,
+      1,
+    );
+    const bot = manager.bots[0];
+    bot.pos.set(0, 0.201, 0);
+    bot.vel.set(0, 0, 0);
+    bot.update(1 / 60, manager.ctx);
+    assert.equal(bot.vel.y, 18);
+    assert.equal(bot.onGround, false);
+  } finally {
+    manager?.setCount(0);
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});

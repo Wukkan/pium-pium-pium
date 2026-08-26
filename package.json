@@ -1,7 +1,7 @@
 {
   "name": "pium-pium-pium",
   "private": true,
-  "version": "1.7.2",
+  "version": "1.7.3",
   "type": "module",
   "description": "Shooter multijugador original para navegador con combate táctico, bots configurables y ajustes completos",
   "scripts": {

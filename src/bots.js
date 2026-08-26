@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { moveBody } from './shared/physics.js';
 import { BOT_BODY, selectSafeSpawn } from './shared/spawn-safety.js';
 import {
+  botWaypointReachable,
+  selectReachableBotWaypoint,
+} from './shared/bot-navigation.js';
+import {
   animateHumanoid,
   animateHumanoidDeath,
   disposeHumanoid,
@@ -12,7 +16,9 @@ import {
   triggerHumanoidShot,
 } from './humanoid.js';
 import { hitReactionSide, stablePoseSide } from './character-motion.js';
-import { BOT_NAMES, BOT_COLORS, MAX_BOTS } from './shared/mapdata.js';
+import {
+  BOT_NAMES, BOT_COLORS, MAX_BOTS, jumpPadContainsPoint,
+} from './shared/mapdata.js';
 
 // ---------------------------------------------------------------------------
 // Bots LOCALES: solo se usan en modo sin conexión (cuando no hay servidor).
@@ -74,6 +80,7 @@ class Bot {
     this.nextShotAt = 0;
     this.nextBurstAt = 0;
     this.stuckCheckAt = 0;
+    this.nextPathCheckAt = 0;
     this.lastCheckPos = new THREE.Vector3();
     this.walkRef = { t: 0 };
 
@@ -94,6 +101,7 @@ class Bot {
     this.waypoint = null;
     this.repathAt = 0;
     this.stuckCheckAt = 0;
+    this.nextPathCheckAt = 0;
     this.lastCheckPos.copy(point);
     this.onGround = false;
     this.burstLeft = 0;
@@ -202,23 +210,39 @@ class Bot {
       this.waypoint = target.pos.clone(); // si lo pierde de vista, ir a por él
       this.repathAt = now + 4;
     } else {
-      if (!this.waypoint || now > this.repathAt ||
-          this.pos.distanceToSquared(this.waypoint) < 2.5) {
-        this.waypoint = ctx.waypoints[Math.floor(Math.random() * ctx.waypoints.length)].clone();
-        this.repathAt = now + 6 + Math.random() * 5;
+      let needsWaypoint = !this.waypoint || now > this.repathAt ||
+        this.pos.distanceToSquared(this.waypoint) < 2.5;
+      if (!needsWaypoint && now >= this.nextPathCheckAt) {
+        needsWaypoint = !botWaypointReachable(this.pos, this.waypoint, ctx.colliders, BOT_BODY);
+        this.nextPathCheckAt = now + 0.75;
       }
-      const dir = new THREE.Vector3().subVectors(this.waypoint, this.pos);
-      dir.y = 0;
-      if (dir.lengthSq() > 0.5) {
-        dir.normalize();
-        moveX = dir.x; moveZ = dir.z;
-        this.targetYaw = Math.atan2(dir.x, dir.z);
+      if (needsWaypoint) {
+        const nextWaypoint = selectReachableBotWaypoint(
+          this.pos, ctx.waypoints, ctx.colliders, { body: BOT_BODY },
+        );
+        this.waypoint = nextWaypoint?.clone
+          ? nextWaypoint.clone()
+          : nextWaypoint
+            ? new THREE.Vector3(nextWaypoint.x, nextWaypoint.y, nextWaypoint.z)
+            : null;
+        this.repathAt = now + (this.waypoint ? 6 + Math.random() * 5 : 0.75);
+        this.nextPathCheckAt = now + 0.75;
+      }
+      if (this.waypoint) {
+        const dir = new THREE.Vector3().subVectors(this.waypoint, this.pos);
+        dir.y = 0;
+        if (dir.lengthSq() > 0.5) {
+          dir.normalize();
+          moveX = dir.x; moveZ = dir.z;
+          this.targetYaw = Math.atan2(dir.x, dir.z);
+        }
       }
     }
 
     if (now > this.stuckCheckAt) {
       if ((moveX !== 0 || moveZ !== 0) && this.pos.distanceToSquared(this.lastCheckPos) < 0.09) {
         if (this.onGround) this.vel.y = 8.4;
+        this.waypoint = null;
         this.repathAt = 0;
       }
       this.lastCheckPos.copy(this.pos);
@@ -233,6 +257,14 @@ class Bot {
 
     const res = moveBody(this.pos, this.vel, dt, HALF, HALF, HEIGHT, ctx.colliders);
     this.onGround = res.onGround;
+    if (this.onGround) {
+      for (const pad of ctx.jumpPads || []) {
+        if (!jumpPadContainsPoint(this.pos, pad)) continue;
+        this.vel.y = pad.power;
+        this.onGround = false;
+        break;
+      }
+    }
     if (this.pos.y < -30) this.spawn(ctx.pickSpawn(this));
 
     let dy = this.targetYaw - this.yaw;
@@ -304,7 +336,8 @@ export class BotManager {
       onBotDeath: null, // (bot) — para soltar kits de vida
       colliders: world.colliders,
       occluders: world.occluders,
-      waypoints: world.waypoints,
+      waypoints: world.navigationPoints?.length ? world.navigationPoints : world.waypoints,
+      jumpPads: world.jumpPads,
       botSpawns: this.botSpawns,
       pickSpawn: (exclude) => this.pickSpawn(exclude),
       raycaster: new THREE.Raycaster(),

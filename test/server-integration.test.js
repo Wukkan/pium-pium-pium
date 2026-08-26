@@ -145,12 +145,12 @@ test('server exposes eight isolated fixed-mode rooms with strict ten-player admi
   await waitForServer(child);
 
   const health = await fetch(`http://127.0.0.1:${port}/salud`).then((response) => response.json());
-  assert.deepEqual(health, { ok: true, version: '1.7.2' });
+  assert.deepEqual(health, { ok: true, version: '1.7.3' });
 
   const roomsResponse = await fetch(`http://127.0.0.1:${port}/salas`);
   assert.equal(roomsResponse.headers.get('cache-control'), 'no-store');
   const lobby = await roomsResponse.json();
-  assert.equal(lobby.version, '1.7.2');
+  assert.equal(lobby.version, '1.7.3');
   assert.equal(lobby.capacity, LOBBY_ROOM_CAPACITY);
   assert.equal(lobby.totalRooms, LOBBY_TOTAL_ROOMS);
   assert.equal(lobby.rooms.length, LOBBY_TOTAL_ROOMS);
@@ -466,4 +466,24 @@ test('a player joining during podium receives the complete current podium payloa
   assert.deepEqual(latePodium.rows, originalPodium.rows);
   assert.equal(latePodium.stage, 'map');
   assert.ok(latePodium.secs >= 1 && latePodium.secs <= 15);
+});
+
+test('a fresh zombie room starts its first wave after the preparation countdown', async (t) => {
+  const { port, clients } = await launchTestServer(t, {
+    PIUM_ZOMBIE_PREP_SECONDS: '0.05',
+  });
+  const player = await connectClient(port, 'ZOMBIE_START_QA', 'zombies', 1);
+  clients.push(player);
+
+  const wave = await player.waitFor(
+    (message) => message.t === 'match' && message.wv === 1,
+    3000,
+  );
+  assert.equal(wave.zl, 6);
+  const snapshot = await player.waitFor(
+    (message) => message.t === 'snap' &&
+      message.bots.filter((bot) => bot.z === 1 && bot.al === 1).length === 6,
+    3000,
+  );
+  assert.equal(snapshot.m.wv, 1);
 });

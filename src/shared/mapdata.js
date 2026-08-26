@@ -5,6 +5,8 @@
 
 export const TOTAL_SLOTS = 10; // jugadores + bots suman esto como máximo
 export const MAX_BOTS = 5;     // tope de bots aunque haya pocos jugadores
+export const JUMP_PAD_TRIGGER_RADIUS_SQ = 1.3;
+export const JUMP_PAD_TRIGGER_HEIGHT = 0.8;
 
 export const MAPS = { arena: 'ARENA', ciudad: 'CIUDAD' };
 
@@ -23,6 +25,54 @@ export const COLORS = {
   pad: 0xffd24d,
 };
 
+const finitePadPoint = (point) => !!point && Number.isFinite(point.x) &&
+  Number.isFinite(point.y) && Number.isFinite(point.z);
+
+export function jumpPadContainsPoint(point, pad) {
+  if (!finitePadPoint(point) || !finitePadPoint(pad)) return false;
+  const dx = point.x - pad.x, dz = point.z - pad.z;
+  return dx * dx + dz * dz < JUMP_PAD_TRIGGER_RADIUS_SQ &&
+    Math.abs(point.y - pad.y) < JUMP_PAD_TRIGGER_HEIGHT;
+}
+
+// El servidor recibe posiciones discretas. Esta prueba analítica confirma que
+// el segmento entre ambas cruzó el mismo cilindro que usa el cliente, sin
+// ampliar de forma invisible el área que autoriza un salto vertical.
+export function jumpPadIntersectsSegment(start, end, pad) {
+  if (!finitePadPoint(start) || !finitePadPoint(end) || !finitePadPoint(pad)) return false;
+  const dx = end.x - start.x, dz = end.z - start.z;
+  const fx = start.x - pad.x, fz = start.z - pad.z;
+  const a = dx * dx + dz * dz;
+  const b = 2 * (fx * dx + fz * dz);
+  const c = fx * fx + fz * fz - JUMP_PAD_TRIGGER_RADIUS_SQ;
+  let horizontalMin = 0, horizontalMax = 1;
+
+  if (a <= 1e-9) {
+    if (c >= 0) return false;
+  } else {
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant <= 0) return false;
+    const root = Math.sqrt(discriminant);
+    horizontalMin = Math.max(0, (-b - root) / (2 * a));
+    horizontalMax = Math.min(1, (-b + root) / (2 * a));
+    if (horizontalMin >= horizontalMax) return false;
+  }
+
+  const dy = end.y - start.y;
+  const fy = start.y - pad.y;
+  let verticalMin = 0, verticalMax = 1;
+  if (Math.abs(dy) <= 1e-9) {
+    if (Math.abs(fy) >= JUMP_PAD_TRIGGER_HEIGHT) return false;
+  } else {
+    const first = (-JUMP_PAD_TRIGGER_HEIGHT - fy) / dy;
+    const second = (JUMP_PAD_TRIGGER_HEIGHT - fy) / dy;
+    verticalMin = Math.max(0, Math.min(first, second));
+    verticalMax = Math.min(1, Math.max(first, second));
+    if (verticalMin >= verticalMax) return false;
+  }
+  return Math.max(horizontalMin, verticalMin) < Math.min(horizontalMax, verticalMax);
+}
+
 // -------------------------------------------------------------------------
 // Constructores de mapa. Cada uno devuelve:
 //   boxes: [{x,y,z,w,h,d,color,collide,crate?}]  (crate = id de caja destruible)
@@ -32,6 +82,17 @@ export const COLORS = {
 
 function makeBuilder() {
   const boxes = [];
+  const navigationRoutes = [];
+  const navigationRoute = (points) => {
+    const routeId = navigationRoutes.length;
+    const route = points.map((point, navigationOrder) => ({
+      ...point,
+      navigationRoute: routeId,
+      navigationOrder,
+    }));
+    navigationRoutes.push(route);
+    return route;
+  };
   let crateSerial = 0;
   const box = (x, y, z, w, h, d, color, collide = true) => {
     boxes.push({ x, y, z, w, h, d, color, collide });
@@ -46,20 +107,29 @@ function makeBuilder() {
   const stairs = (x, z, dirX, dirZ, width, totalH, color) => {
     const stepH = 0.5, stepD = 0.9;
     const n = Math.ceil(totalH / stepH);
+    const route = [{
+      x: x - dirX * stepD,
+      y: 0.001,
+      z: z - dirZ * stepD,
+    }];
     for (let i = 0; i < n; i++) {
       const h = stepH * (i + 1);
-      box(x + dirX * stepD * i, h / 2, z + dirZ * stepD * i,
+      const stepX = x + dirX * stepD * i;
+      const stepZ = z + dirZ * stepD * i;
+      box(stepX, h / 2, stepZ,
         dirX !== 0 ? stepD : width, h, dirZ !== 0 ? stepD : width, color);
+      route.push({ x: stepX, y: h + 0.001, z: stepZ });
     }
+    return navigationRoute(route);
   };
-  return { boxes, box, crate, stairs };
+  return { boxes, box, crate, stairs, navigationRoutes, navigationRoute };
 }
 
 // --- MAPA 1: ARENA (el clásico) ---
 function buildArena() {
   const C = COLORS;
   const SIZE = 76;
-  const { boxes, box, crate, stairs } = makeBuilder();
+  const { boxes, box, crate, stairs, navigationRoutes, navigationRoute } = makeBuilder();
 
   const H = 7, T = 2;
   // El suelo continúa bajo los muros; no se limita a tocar su borde interior.
@@ -72,26 +142,31 @@ function buildArena() {
 
   // plataforma central con torre
   box(0, 1.5, 0, 16, 3, 16, C.platform);
-  box(0, 3.75, -6.5, 16, 1.5, 3, C.accent);
+  // El parapeto norte conserva cobertura a ambos lados, pero deja un vano
+  // real frente a la escalera. El bloque único anterior cerraba el rellano.
+  box(-5.5, 3.75, -6.5, 5, 1.5, 3, C.accent);
+  box(5.5, 3.75, -6.5, 5, 1.5, 3, C.accent);
   box(-5, 4.25, 3, 3, 2.5, 3, C.building3);
   box(5, 4.25, 3, 3, 2.5, 3, C.building3);
-  stairs(0, 12, 0, -1, 6, 3, C.platform);
-  stairs(0, -12, 0, 1, 6, 3, C.platform);
+  // Los últimos peldaños terminan justo en la fachada. No deben penetrar el
+  // AABB macizo de la plataforma o el jugador queda atrapado bajo el rellano.
+  stairs(0, 12.95, 0, -1, 6, 3, C.platform);
+  stairs(0, -12.95, 0, 1, 6, 3, C.platform);
 
   // edificios de esquina
   box(24, 2.5, -24, 12, 5, 10, C.building1);
   box(24, 5.4, -24, 13, 0.8, 11, C.roof);
-  stairs(24, -15.5, 0, -1, 4, 5, C.building1);
+  stairs(24, -9.05, 0, -1, 4, 5.5, C.building1);
 
   box(-24, 2.5, 24, 12, 5, 10, C.building2);
   box(-24, 5.4, 24, 13, 0.8, 11, C.roof);
-  stairs(-24, 15.5, 0, 1, 4, 5, C.building2);
+  stairs(-24, 9.05, 0, 1, 4, 5.5, C.building2);
 
   box(-25, 2, -25, 10, 4, 10, C.building3);
   // El alero solapa exactamente base y torre: no queda una franja flotante.
   box(-25, 4.6, -25, 11, 1.2, 11, C.roof);
   box(-27.5, 5.7, -27.5, 5, 1, 5, C.building3);
-  stairs(-25, -16.5, 0, -1, 4, 4, C.building3);
+  stairs(-25, -10.95, 0, -1, 4, 5, C.building3);
 
   box(25, 1.25, 25, 12, 2.5, 12, C.building1);
   box(25, 3, 19.5, 12, 1, 1, C.barrier);
@@ -103,8 +178,11 @@ function buildArena() {
   crate(8, -18); crate(9.7, -18); crate(8.85, -18, 2);
   crate(-8, 18); crate(-18, 2); crate(-18, 3.7);
   crate(18, 14); crate(30, -5); crate(30, -6.7); crate(30, -5.85, 2);
-  crate(-30, -8); crate(-5, -22); crate(-6.7, -22);
-  crate(22, -8); crate(-15, -15); crate(15, 22); crate(16.7, 22);
+  // Fuera del pilar de la galería: destruirla ya no cambia una colisión
+  // compuesta e impredecible.
+  crate(-27, -8); crate(-5, -22); crate(-6.7, -22);
+  // Mantiene libre todo el ancho del acceso NE.
+  crate(18, -8); crate(-14, -15); crate(15, 22); crate(16.7, 22);
 
   // barreras bajas
   box(0, 0.6, 22, 8, 1.2, 1, C.barrier);
@@ -125,7 +203,9 @@ function buildArena() {
   box(37.55, 6.9, 6, 0.4, 0.8, 6, C.barrier);
   // Mástil continuo desde la plataforma, sin el hueco vertical anterior.
   box(35, 8.45, 6, 0.3, 3.9, 0.3, C.roof);
-  stairs(24, 6, 1, 0, 3, 6.5, C.platform);
+  // Doce peldaños y un último step-up de 0.5 mantienen el acceso continuo sin
+  // añadir geometría innecesaria al presupuesto del mapa.
+  stairs(21.9, 6, 1, 0, 3, 6, C.platform);
 
   // pasaje cubierto (muro oeste): galería con techo sobre pilares
   for (let i = 0; i < 5; i++) {
@@ -137,9 +217,45 @@ function buildArena() {
   // saltadores: te lanzan a la plataforma central y al tejado NE
   const jumpPads = [
     { x: 12, y: 0, z: 0, power: 13 },
-    { x: 24, y: 0, z: -13, power: 15 },
+    // Separado de la escalera NE y con altura útil para alcanzar la azotea.
+    { x: 18, y: 0, z: -13, power: 18 },
   ];
   for (const p of jumpPads) box(p.x, 0.1, p.z, 1.6, 0.2, 1.6, C.pad);
+
+  const waypoints = [
+    { x: 0, y: 3.1, z: 0 }, { x: 0, y: 0.1, z: 20 },
+    { x: 0, y: 0.1, z: -20 }, { x: 20, y: 0.1, z: 0 },
+    { x: -20, y: 0.1, z: 0 }, { x: 18, y: 0.1, z: 18 },
+    { x: -18, y: 0.1, z: -18 }, { x: 18, y: 0.1, z: -18 },
+    { x: -18, y: 0.1, z: 18 }, { x: 34, y: 0.1, z: 32 },
+    { x: -34, y: 0.1, z: -33 }, { x: 30, y: 0.1, z: -30 },
+    { x: -30, y: 0.1, z: 30 }, { x: 10, y: 0.1, z: -25 },
+    { x: -31, y: 0.1, z: 0 },
+    // La plataforma SE no tiene una subida fisica; no se publica como nodo
+    // para evitar spawns/rutas zombis aislados sobre ella.
+    { x: 34, y: 6.6, z: 6 }, { x: 30, y: 0.1, z: -10 },
+  ];
+  // Circuito exterior continuo. Las estructuras de Arena separan algunos
+  // waypoints visualmente cercanos (en especial la escalera NE y la galería
+  // oeste); esta cadena ofrece una salida terrestre determinista sin usar
+  // falsas diagonales a través de edificios o huecos.
+  navigationRoute([
+    { x: 32, y: 0.1, z: -34 }, { x: 32, y: 0.1, z: -12 },
+    { x: 32, y: 0.1, z: 0 }, { x: 32, y: 0.1, z: 16 },
+    { x: 32, y: 0.1, z: 34 }, { x: 0, y: 0.1, z: 34 },
+    { x: -20, y: 0.1, z: 34 }, { x: -35, y: 0.1, z: 34 },
+    { x: -35, y: 0.1, z: 20 }, { x: -35, y: 0.1, z: 0 },
+    { x: -35, y: 0.1, z: -20 }, { x: -35, y: 0.1, z: -34 },
+    { x: -18, y: 0.1, z: -34 }, { x: 0, y: 0.1, z: -34 },
+    { x: 18, y: 0.1, z: -34 }, { x: 32, y: 0.1, z: -34 },
+  ]);
+  const navigationPoints = [
+    ...waypoints,
+    ...navigationRoutes.flat(),
+    // Rellano explícito del alero suroeste; evita que la torre del tejado
+    // invalide el enlace largo desde el último peldaño.
+    { x: -25, y: 5.201, z: -20 },
+  ];
 
   return {
     boxes,
@@ -149,7 +265,7 @@ function buildArena() {
       { x: 30, y: 0.1, z: 0 }, { x: -26, y: 0.1, z: 0 },
       { x: 34, y: 0.1, z: 32 }, { x: -34, y: 0.1, z: -33 },
       { x: 33.5, y: 0.1, z: -33.5 }, { x: -33, y: 0.1, z: 33 },
-      { x: 32, y: 0.1, z: 13 }, { x: -26, y: 0.1, z: -13 },
+      { x: 32, y: 0.1, z: 13 }, { x: -20, y: 0.1, z: -13 },
     ],
     botSpawns: [
       { x: 24, y: 5.9, z: -24 }, { x: -24, y: 5.9, z: 24 },
@@ -158,17 +274,8 @@ function buildArena() {
       { x: 30, y: 0.1, z: -15 }, { x: 0, y: 0.1, z: -32 },
       { x: 15, y: 0.1, z: 28 }, { x: -28, y: 0.1, z: -5 },
     ],
-    waypoints: [
-      { x: 0, y: 3.1, z: 0 }, { x: 0, y: 0.1, z: 20 },
-      { x: 0, y: 0.1, z: -20 }, { x: 20, y: 0.1, z: 0 },
-      { x: -20, y: 0.1, z: 0 }, { x: 18, y: 0.1, z: 18 },
-      { x: -18, y: 0.1, z: -18 }, { x: 18, y: 0.1, z: -18 },
-      { x: -18, y: 0.1, z: 18 }, { x: 34, y: 0.1, z: 32 },
-      { x: -34, y: 0.1, z: -33 }, { x: 30, y: 0.1, z: -30 },
-      { x: -30, y: 0.1, z: 30 }, { x: 10, y: 0.1, z: -25 },
-      { x: -31, y: 0.1, z: 0 }, { x: 25, y: 2.6, z: 25 },
-      { x: 34, y: 6.6, z: 6 },
-    ],
+    waypoints,
+    navigationPoints,
   };
 }
 
@@ -176,7 +283,7 @@ function buildArena() {
 function buildCiudad() {
   const C = COLORS;
   const SIZE = 72;
-  const { boxes, box, crate, stairs } = makeBuilder();
+  const { boxes, box, crate, stairs, navigationRoutes, navigationRoute } = makeBuilder();
 
   const H = 8, T = 2;
   // La calle base continúa bajo los muros para formar una cubeta cerrada.
@@ -192,26 +299,27 @@ function buildCiudad() {
   box(19, 2.5, -19, 14, 5, 12, C.building1);
   // La azotea alcanza la cara inferior del puente (y=5.7).
   box(19, 5.35, -19, 15, 0.7, 13, C.roof);
-  stairs(19, -11.5, 0, -1, 4, 5, C.building1);
+  // Fuera de la proyección del puente para conservar altura de cabeza.
+  stairs(24, -3.05, 0, -1, 4, 5.5, C.building1);
   box(30, 3.5, -28, 8, 7, 8, C.building3);
 
   // cuadrante NO
   box(-19, 3, -20, 12, 6, 14, C.building2);
   box(-19, 6.3, -20, 13, 0.6, 15, C.roof);
-  stairs(-24.5, -11.5, 0, -1, 4, 6, C.building2);
+  stairs(-23.5, -1.25, 0, -1, 4, 6.5, C.building2);
   box(-30, 2, -8, 6, 4, 6, C.building1);
   box(-30, 4.3, -8, 7, 0.6, 7, C.roof);
 
   // cuadrante SO
   box(-20, 2.5, 19, 14, 5, 12, C.building3);
   box(-20, 5.3, 19, 15, 0.6, 13, C.roof);
-  stairs(-20, 11.5, 0, 1, 4, 5, C.building3);
+  stairs(-20, 3.05, 0, 1, 4, 5.5, C.building3);
   box(-30, 3.5, 29, 8, 7, 8, C.building2);
 
   // cuadrante SE
   box(19, 3, 20, 12, 6, 14, C.building1);
   box(19, 6.3, 20, 13, 0.6, 15, C.roof);
-  stairs(24.5, 11.5, 0, 1, 4, 6, C.building1);
+  stairs(23.5, 1.25, 0, 1, 4, 6.5, C.building1);
   box(30, 2, 8, 6, 4, 6, C.building2);
   box(30, 4.3, 8, 7, 0.6, 7, C.roof);
 
@@ -223,16 +331,20 @@ function buildCiudad() {
   box(8, 0.6, -8, 1, 1.2, 5, C.barrier);
   box(-8, 0.6, 8, 1, 1.2, 5, C.barrier);
 
-  // puente entre azoteas NE y SE (cruza la calle este)
-  box(19, 5.9, 0, 4, 0.4, 26, C.platform);
-  box(21.1, 6.5, 0, 0.4, 0.8, 26, C.barrier);
-  box(16.9, 6.5, 0, 0.4, 0.8, 26, C.barrier);
+  // Puente entre azoteas NE y SE. Los tres tramos absorben la diferencia de
+  // altura en pasos de 0.25 o menos. Las barandas se retiran de las juntas y
+  // el tablero es más ancho para que sus carriles extremos sean transitables.
+  box(19, 5.8, -11.75, 5.2, 0.2, 1.6, C.platform);
+  box(19, 6, 0, 5.2, 0.2, 22.4, C.platform);
+  box(19, 6.225, 11.75, 5.2, 0.25, 1.6, C.platform);
+  box(21.45, 6.5, 0, 0.3, 0.8, 21.2, C.barrier);
+  box(16.55, 6.5, 0, 0.3, 0.8, 21.2, C.barrier);
 
   // cajas por las calles (destruibles)
   crate(6, -14); crate(7.7, -14); crate(6.85, -14, 2);
   crate(-6, 14); crate(-7.7, 14);
   crate(-14, -6); crate(14, 6); crate(15.7, 6);
-  crate(5, -26); crate(-5, 26); crate(-26, 5); crate(26, -5);
+  crate(5, -26); crate(-5, 26); crate(-26, 5); crate(27, -2);
   crate(6.7, -26); crate(-6.7, 26);
 
   // callejón cubierto al sur (túnel urbano)
@@ -243,11 +355,57 @@ function buildCiudad() {
 
   // saltadores a las azoteas
   const jumpPads = [
-    { x: 12, y: 0, z: -12, power: 14 },
-    { x: -12, y: 0, z: 12, power: 14 },
+    // Con 4.5 m de aproximación horizontal se gana altura antes de cruzar el
+    // alero; en z=±12 el jugador rápido golpeaba su cara inferior.
+    { x: 13, y: 0, z: -8, power: 17.5 },
+    { x: -13, y: 0, z: 8, power: 17.5 },
     { x: 0, y: 0, z: -6, power: 12 },
   ];
   for (const p of jumpPads) box(p.x, 0.1, p.z, 1.6, 0.2, 1.6, C.pad);
+
+  const waypoints = [
+    { x: 0, y: 0.1, z: 6 }, { x: 0, y: 0.1, z: 24 },
+    { x: 0, y: 0.1, z: -24 }, { x: 24, y: 0.1, z: 0 },
+    { x: -24, y: 0.1, z: 0 }, { x: 19, y: 5.7, z: -19 },
+    { x: -20, y: 5.7, z: 19 }, { x: 19, y: 6.2, z: 0 },
+    { x: 28, y: 0.1, z: 28 }, { x: -28, y: 0.1, z: -28 },
+    { x: 30, y: 0.1, z: -20 }, { x: -30, y: 0.1, z: 20 },
+    { x: 0, y: 0.1, z: 31 }, { x: -30, y: 0.1, z: -16 },
+    { x: -34, y: 0.1, z: -34 }, { x: -34, y: 0.1, z: 34 },
+    { x: 34, y: 0.1, z: -34 },
+    { x: -6, y: 0.1, z: -2 },
+  ];
+  navigationRoute([
+    { x: 19, y: 5.701, z: -13 },
+    { x: 19, y: 5.901, z: -11.75 },
+    { x: 19, y: 6.101, z: 0 },
+    { x: 19, y: 6.351, z: 11.75 },
+    { x: 19, y: 6.601, z: 13 },
+    { x: 19, y: 6.601, z: 20 },
+  ]);
+  // Anillo exterior con giros físicos alrededor de las cuatro manzanas. Los
+  // antiguos puntos de esquina estaban aislados por los edificios; esta ruta
+  // permite alcanzar todos los spawns sin diagonales falsas sobre fachadas.
+  navigationRoute([
+    { x: 35, y: 0.1, z: -34 }, { x: 35, y: 0.1, z: -20 },
+    { x: 35, y: 0.1, z: -4 }, { x: 35, y: 0.1, z: 4 },
+    { x: 35, y: 0.1, z: 20 }, { x: 35, y: 0.1, z: 34 },
+    { x: 0, y: 0.1, z: 34 }, { x: -35, y: 0.1, z: 34 },
+    { x: -35, y: 0.1, z: 20 }, { x: -35, y: 0.1, z: 4 },
+    { x: -35, y: 0.1, z: -4 }, { x: -35, y: 0.1, z: -20 },
+    { x: -35, y: 0.1, z: -34 }, { x: 0, y: 0.1, z: -34 },
+    { x: 35, y: 0.1, z: -34 },
+  ]);
+  const navigationPoints = [
+    ...waypoints,
+    ...navigationRoutes.flat(),
+    // Corredores a ras de calle alrededor de las manzanas. Mantienen a los
+    // zombis en su nivel cuando rodean una fachada, sin confundir una escalera
+    // con un atajo hacia otro objetivo del suelo.
+    { x: 0, y: 0.1, z: -4 }, { x: 26.5, y: 0.1, z: -4 },
+    { x: 0, y: 0.1, z: 4 }, { x: 26.5, y: 0.1, z: 4 },
+    { x: -26, y: 0.1, z: -4 }, { x: -24, y: 0.1, z: 4 },
+  ];
 
   return {
     boxes,
@@ -262,22 +420,12 @@ function buildCiudad() {
     botSpawns: [
       { x: 19, y: 5.7, z: -19 }, { x: -20, y: 5.7, z: 19 },
       { x: 0, y: 0.1, z: -20 }, { x: 0, y: 0.1, z: 20 },
-      { x: 26, y: 0.1, z: -10 }, { x: -26, y: 0.1, z: 10 },
+      { x: 28, y: 0.1, z: -10 }, { x: -26, y: 0.1, z: 10 },
       { x: 4, y: 0.1, z: 0 }, { x: 19, y: 6.2, z: 0 },
       { x: -30, y: 0.1, z: 20 }, { x: 30, y: 0.1, z: -20 },
     ],
-    waypoints: [
-      { x: 0, y: 0.1, z: 6 }, { x: 0, y: 0.1, z: 24 },
-      { x: 0, y: 0.1, z: -24 }, { x: 24, y: 0.1, z: 0 },
-      { x: -24, y: 0.1, z: 0 }, { x: 19, y: 5.7, z: -19 },
-      { x: -20, y: 5.7, z: 19 }, { x: 19, y: 6.2, z: 0 },
-      { x: 28, y: 0.1, z: 28 }, { x: -28, y: 0.1, z: -28 },
-      { x: 30, y: 0.1, z: -20 }, { x: -30, y: 0.1, z: 20 },
-      { x: 0, y: 0.1, z: 31 }, { x: -30, y: 0.1, z: -16 },
-      { x: -34, y: 0.1, z: -34 }, { x: 34, y: 0.1, z: 34 },
-      { x: -34, y: 0.1, z: 34 }, { x: 34, y: 0.1, z: -34 },
-      { x: -6, y: 0.1, z: -2 },
-    ],
+    waypoints,
+    navigationPoints,
   };
 }
 
