@@ -50,7 +50,7 @@ import * as ranking from './ranking.js';
 const PORT = process.env.PORT || 5173;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TICK = 1 / 15;
-const GAME_VERSION = '1.7.1';
+const GAME_VERSION = '1.7.2';
 const ZOMBIE_WAVES = 8;
 const MAX_ZOMBIES_PER_WAVE = 4 + 2 * ZOMBIE_WAVES;
 const MIN_ZOMBIE_SPAWNS = MAX_ZOMBIES_PER_WAVE + TOTAL_SLOTS;

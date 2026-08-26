@@ -571,11 +571,11 @@ test('fire and reload stay blocked until the equip animation is complete', () =>
   weapon.equipProgress = 1;
   weapon.reload();
   assert.equal(weapon.reloading, true);
-  assert.equal(calls.reload, 1);
+  assert.equal(calls.reload, 0, 'reload animation must not add an unrequested sound');
   assert.deepEqual(calls.reloading, [true]);
 });
 
-test('an empty weapon emits one dry click per physical trigger press', () => {
+test('an empty weapon stays silent and releases each physical trigger press', () => {
   let dryClicks = 0;
   const weapon = Object.create(WeaponSystem.prototype);
   Object.assign(weapon, {
@@ -591,18 +591,18 @@ test('an empty weapon emits one dry click per physical trigger press', () => {
   });
 
   weapon.fire();
-  assert.equal(dryClicks, 1);
+  assert.equal(dryClicks, 0);
   assert.equal(weapon.triggerDown, false);
 
   for (let frame = 0; frame < 20; frame++) {
     if (weapon.triggerDown) weapon.fire();
   }
-  assert.equal(dryClicks, 1, 'holding the empty trigger must stay silent');
+  assert.equal(dryClicks, 0, 'holding the empty trigger must stay silent');
 
   weapon.triggerDown = true;
   weapon.lastShot = -Infinity;
   weapon.fire();
-  assert.equal(dryClicks, 2, 'a new press may provide one new dry click');
+  assert.equal(dryClicks, 0, 'a new empty press must remain silent');
   assert.equal(weapon.triggerDown, false);
 });
 
@@ -710,5 +710,5 @@ test('economy instance restores, exports and emits only persistent player choice
   assert.equal(changes.length, 3);
   assert.equal(changes[2].equipped, 'shotgun');
   assert.equal(changes[2].owned.shotgun, true);
-  assert.equal(calls.bought, 1);
+  assert.equal(calls.bought, 0, 'buy feedback must stay silent');
 });

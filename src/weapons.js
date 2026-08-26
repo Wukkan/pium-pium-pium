@@ -1350,16 +1350,14 @@ export class WeaponSystem {
     const def = WEAPON_DEFS[key];
     if (this.money < def.price) {
       this.hud.announce(`🔒 Te faltan $${def.price - this.money} para la ${def.name}`);
-      this.audio.dry();
       return;
     }
     this.money -= def.price;
     this.owned[key] = true;
-    this.audio.buy();
     this.hud.announce(`✔ ${def.name} desbloqueada`);
     this.hud.updateMoney(this.money);
     this.hud.updateSlots(this);
-    if (!this.forcedKey) this._equip(key);
+    if (!this.forcedKey) this._equip(key, true);
     this._emitEconomyChange();
   }
 
@@ -1368,22 +1366,31 @@ export class WeaponSystem {
     if (this.forcedKey) {
       // En búsqueda del arma no se cambia la selección impuesta, pero cualquier
       // tecla de arma sí permite volver del cuchillo a esa arma.
-      if (this.knifeEquipped) this.unequipKnife(true);
+      if (this.knifeEquipped) {
+        this.unequipKnife(true);
+        this._playWeaponSwitch();
+      }
       return;
     }
     if (key === this.current && !this.knifeEquipped) return;
     if (weaponSelectionAction(!!this.owned[key]) === 'open-buy') {
-      if (this.knifeEquipped) this.unequipKnife(true);
+      if (this.knifeEquipped) {
+        this.unequipKnife(true);
+        this._playWeaponSwitch();
+      }
       if (typeof this.onOpenBuy === 'function') this.onOpenBuy(key);
       else this.hud.announce(`Pulsa ${keyCodeLabel(this.bindings.openArsenal)} para abrir el arsenal y comprar armas`);
-      this.audio.dry();
       return;
     }
-    this._equip(key);
+    this._equip(key, true);
     this._emitEconomyChange();
   }
 
-  _equip(key) {
+  _playWeaponSwitch() {
+    if (typeof this.audio?.weaponSwitch === 'function') this.audio.weaponSwitch();
+  }
+
+  _equip(key, playSound = false) {
     const leavingKnife = this.knifeEquipped;
     if (leavingKnife) this.unequipKnife(false);
     if (key === this.current) {
@@ -1395,6 +1402,7 @@ export class WeaponSystem {
       this.hud.updateAmmo(this);
       this.hud.updateSlots(this);
       this._syncViewmodelVisibility();
+      if (playSound) this._playWeaponSwitch();
       return;
     }
     // El ADS pertenece al arma anterior. Durante el cambio se cierra la mira;
@@ -1414,6 +1422,7 @@ export class WeaponSystem {
     this.hud.updateSlots(this);
     this.hud.setReloading(false);
     this._syncViewmodelVisibility();
+    if (playSound) this._playWeaponSwitch();
   }
 
   cycleWeapon(delta) {
@@ -1421,6 +1430,7 @@ export class WeaponSystem {
     if (this.forcedKey) {
       if (!this.knifeEquipped) return false;
       this.unequipKnife(true);
+      this._playWeaponSwitch();
       return true;
     }
     const available = this.slots.filter((key) => this.owned[key]);
@@ -1445,7 +1455,7 @@ export class WeaponSystem {
       this.forcedKey = nextKey;
       this.state[nextKey].ammo = WEAPON_DEFS[nextKey].mag;
       this.state[nextKey].reserve = WEAPON_DEFS[nextKey].reserve;
-      this._equip(nextKey);
+      this._equip(nextKey, true);
       this.hud.updateAmmo(this);
       return;
     }
@@ -1459,7 +1469,7 @@ export class WeaponSystem {
         ? 'pistol'
         : this.slots.find((slot) => this.owned[slot]) || 'pistol';
       this.preForcedKey = null;
-      this._equip(previousOwned || fallback);
+      this._equip(previousOwned || fallback, true);
       this.hud.updateAmmo(this);
     }
   }
@@ -1471,7 +1481,6 @@ export class WeaponSystem {
         st.ammo >= def.mag || st.reserve <= 0 || this.player.dead) return;
     this.reloading = true;
     this.reloadEnd = performance.now() / 1000 + def.reloadTime;
-    this.audio.reload();
     this.hud.setReloading(true);
   }
 
@@ -1508,6 +1517,7 @@ export class WeaponSystem {
     applyKnifeMeleePose(this.knifeModel, meleeAnimationState(KNIFE_READY_PROGRESS));
     this._syncViewmodelVisibility(false);
     this.hud.updateAmmo(this);
+    this._playWeaponSwitch();
     return true;
   }
 
@@ -1630,10 +1640,8 @@ export class WeaponSystem {
         this.reloading || now - this.lastShot < 60 / def.rpm) return;
     if (st.ammo <= 0) {
       this.lastShot = now;
-      // Un clic vacío produce una sola respuesta. Sin esto, mantener el botón
-      // repite el sonido seco a la cadencia completa del arma cuando no queda reserva.
+      // Mantener el botón no debe relanzar acciones mientras no queda reserva.
       this.triggerDown = false;
-      this.audio.dry();
       this.reload();
       return;
     }
@@ -1670,7 +1678,6 @@ export class WeaponSystem {
     const acc = new Map();
     const crateHits = [];
     let firstEnd = null;
-    let impactSound = null;
 
     for (let i = 0; i < pellets; i++) {
       const dir = shotDirectionWithSpread(this.camera.quaternion, spread);
@@ -1693,17 +1700,14 @@ export class WeaponSystem {
           acc.set(key, entry);
         } else if (data.crate) {
           this.effects.impact(hit.point, 0xc09858, 3, 'wood');
-          impactSound ||= 'wood';
           crateHits.push(data.crate);
         } else {
           this.effects.impact(hit.point, 0xd8d0b8, pellets > 1 ? 2 : 5, 'concrete');
-          impactSound ||= 'concrete';
         }
       }
       if (!firstEnd) firstEnd = end;
     }
 
-    if (impactSound && this.audio.impact) this.audio.impact(impactSound);
     if (this.onShot) this.onShot(muzzle, firstEnd, def.kind);
     // WebSocket conserva el orden: el servidor debe conocer el disparo antes
     // de autorizar cualquiera de sus impactos (incluidos los perdigones).

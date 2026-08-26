@@ -139,7 +139,6 @@ function safePlayerSpawn(preferred = null, occupants = []) {
 }
 
 function onHealed() {
-  audio.medkit();
   hud.announce('+25 PV ❤');
   missions.event('kit');
 }
@@ -148,7 +147,6 @@ function onAmmoPicked(amount = 20) {
   const added = weapons.addAmmo(amount);
   if (added > 0) hud.announce(`📦 Munición +${added}`);
   else hud.announce('📦 Ya llevas la munición al máximo');
-  audio.buy();
 }
 
 // lanzagranadas → proyectil de impacto
@@ -1014,7 +1012,6 @@ function renderLoadoutPanel() {
 const missions = new Missions((amount, txt) => {
   weapons.addMoney(amount);
   hud.announce(`✅ Misión cumplida: ${txt} (+$${amount})`);
-  audio.buy();
   renderMenuPanels();
 });
 
@@ -1124,7 +1121,6 @@ function renderMenuPanels() {
         weapons.money -= def.price;
         saveArsenalEconomy();
         skin.ownedHats.push(id);
-        audio.ensure(); audio.buy();
       }
       skin.hat = id;
       saveSkin();
@@ -1160,7 +1156,6 @@ function renderMenuPanels() {
         weapons.money -= COLORS_PRICE;
         saveArsenalEconomy();
         skin.colorsUnlocked = true;
-        audio.ensure(); audio.buy();
       }
       skin.color = c;
       saveSkin();
@@ -1200,7 +1195,6 @@ function onMyKill(isHead, victimName, weaponKind = '') {
   if ([3, 5, 8, 10, 15, 20].includes(streak)) {
     bonus = streak * 25;
     hud.announce(`🔥 ¡RACHA x${streak}! (+$${bonus})`);
-    playCombatSound('streak', streak);
   }
   weapons.addMoney(earned + bonus);
   // misiones
@@ -1258,7 +1252,6 @@ function doKnife() {
           const dmg = calcDmg(pos, ent.rig.group.rotation.y, kind);
           effects.popup(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
           hud.hitmarker(false);
-          playCombatSound('hit', dmg >= 100);
           net.sendHit(kind, ent.id, dmg, dmg >= 100, 'knife');
           return;
         }
@@ -1270,7 +1263,6 @@ function doKnife() {
         const killed = bot.takeDamage(dmg, player.pos);
         effects.popup(bot.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)), String(dmg), dmg >= 100);
         hud.hitmarker(killed);
-        playCombatSound('hit', dmg >= 100);
         if (killed) {
           missions.event('knifekill');
           if (offlineBotKilled) offlineBotKilled(bot, false);
@@ -1280,7 +1272,6 @@ function doKnife() {
     }
   };
   if (!weapons.beginMelee(strike)) return false;
-  playCombatSound('knife');
   return true;
 }
 
@@ -1538,10 +1529,9 @@ function localBotStatus(count) {
 
 function setupOffline() {
   online = false;
-  const botAudio = {
-    shotAt: (...args) => playCombatSound('shotAt', ...args),
-  };
-  botsLocal = new BotManager(scene, world, player, effects, botAudio, 5);
+  // Los bots conservan destello y trazadora, pero no entran en la mezcla. Sus
+  // ráfagas automáticas simultáneas eran la única fuente pseudoambiental.
+  botsLocal = new BotManager(scene, world, player, effects, null, 5);
   receiveBotConfig({
     enabled: true,
     count: botsLocal.bots.length,
@@ -1567,7 +1557,6 @@ function setupOffline() {
     hud.updateScore(kills, deaths);
     hud.killfeed('Tú', bot.name, true);
     hud.announce(isHead ? `☠ HEADSHOT — ${bot.name}` : `☠ Eliminaste a ${bot.name}`);
-    playCombatSound('kill');
     onMyKill(isHead, bot.name);
   };
 
@@ -1577,7 +1566,6 @@ function setupOffline() {
     effects.popup(point, String(dmg), isHead);
     effects.impact(point, 0xcc4444, 4, 'flesh');
     hud.hitmarker(killed);
-    playCombatSound('hit', isHead);
     if (killed) localBotKilled(data.bot, isHead);
   };
   weapons.onShot = (a, b, kind) => {
@@ -1623,6 +1611,7 @@ function setupOffline() {
     hud.killfeed(killerName, 'Tú', false);
     hud.showDeath(true, killerName);
     state = 'dead';
+    audio.death();
     setTimeout(() => {
       if (state !== 'dead') return;
       hud.showDeath(false);
@@ -1632,6 +1621,7 @@ function setupOffline() {
       hud.updateHealth(player.health, player.maxHealth);
       state = hasGameplayControl() ? 'playing' : 'menu';
       if (state === 'menu') hud.showMenu(true);
+      audio.respawn();
     }, 2600);
   };
   hud.setNetStatus(localBotStatus(botsLocal.bots.length), false);
@@ -1736,7 +1726,6 @@ function setupOnline() {
     effects.popup(point, String(dmg), isHead);
     effects.impact(point, 0xcc4444, 4, 'flesh');
     hud.hitmarker(false);
-    playCombatSound('hit', isHead);
     net.sendHit(data.net.kind, data.net.id, dmg, isHead, weapons.def.kind);
   };
   weapons.onShot = (a, b, kind) => {
@@ -1807,7 +1796,6 @@ function setupOnline() {
     hud.showPodium(m);
     hud.setPodiumStage(podiumStage, m.secs || 15);
     if (m.winner === net.name) missions.event('win');
-    audio.streak(4); // fanfarria de fin de partida
     startPodiumCountdown(m.secs || 15);
   });
 
@@ -1836,7 +1824,6 @@ function setupOnline() {
   net.on('chat', (m) => {
     if (QUICK_CHAT[m.i] !== undefined) {
       hud.info(`💬 ${m.n}: ${QUICK_CHAT[m.i]}`);
-      audio.chat();
     }
   });
 
@@ -1883,7 +1870,9 @@ function setupOnline() {
     else if (m.id != null) remotes?.triggerShot('pl', m.id);
     player.eyePosition(playerEye);
     camera.getWorldDirection(remoteAudioForward);
-    playCombatSound('shotAt', m.k, a, playerEye, remoteAudioForward, 0.7);
+    // Los disparos humanos remotos sí son información de combate. Los bots del
+    // servidor quedan solo en VFX para impedir un fondo automático constante.
+    if (m.bid == null) playCombatSound('shotAt', m.k, a, playerEye, remoteAudioForward, 0.7);
   });
 
   net.on('hitok', (m) => {
@@ -1892,7 +1881,6 @@ function setupOnline() {
     const point = ent.rig.group.position.clone().add(new THREE.Vector3(0, 1.4, 0));
     effects.popup(point, String(Math.max(0, Math.round(m.d))), false);
     hud.hitmarker(false);
-    playCombatSound('hit', false);
   });
 
   net.on('kill', (m) => {
@@ -1901,7 +1889,6 @@ function setupOnline() {
     if (soyYo) {
       hud.hitmarker(true);
       hud.announce(m.h ? `☠ HEADSHOT — ${m.vn}` : `☠ Eliminaste a ${m.vn}`);
-      playCombatSound('kill');
       onMyKill(!!m.h, m.vn, m.w);
     }
     if (m.vid === net.id) {
@@ -1913,6 +1900,7 @@ function setupOnline() {
       player.health = 0;
       hud.showDeath(true, m.kn);
       state = 'dead';
+      audio.death();
     }
   });
 
@@ -1928,7 +1916,6 @@ function setupOnline() {
     player.health = m.hp;
     player.shakeTime = 0.25;
     hud.damageFlash(Math.min(0.8, 0.25 + m.d / 40));
-    playCombatSound('damaged');
   });
 
   net.on('spawn', (m) => {
@@ -1941,6 +1928,7 @@ function setupOnline() {
     hud.updateHealth(player.health, player.maxHealth);
     state = hasGameplayControl() ? 'playing' : 'menu';
     if (state === 'menu') hud.showMenu(true);
+    audio.respawn();
   });
 
   net.on('med', (m) => {
@@ -2628,10 +2616,8 @@ player.onHardLand = (speed) => {
 };
 
 player.onJump = () => playCombatSound('jump');
-player.onLand = () => playCombatSound('land');
 player.onDamaged = (amount) => {
   hud.damageFlash(Math.min(0.8, 0.25 + amount / 40));
-  playCombatSound('damaged');
 };
 
 // posición inicial de la cámara para el fondo del menú

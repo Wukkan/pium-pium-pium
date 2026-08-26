@@ -5,6 +5,17 @@
 
 export const MAX_AUDIO_VOICES = 28;
 export const AUDIO_FLOOR = 0.00001;
+export const ALLOWED_AUDIO_EVENTS = Object.freeze([
+  'shot',
+  'shotAt',
+  'boom',
+  'boomAt',
+  'nadeThrow',
+  'weaponSwitch',
+  'jump',
+  'death',
+  'respawn',
+]);
 export const AUDIO_MIX_PROFILE = Object.freeze({
   headroom: 0.72,
   compressorThreshold: -10,
@@ -102,10 +113,6 @@ export class AudioSys {
     this.activeVoices = new Set();
     this.maxVoices = MAX_AUDIO_VOICES;
     this.voiceSerial = 0;
-    this.lastImpactAt = Number.NEGATIVE_INFINITY;
-    this.lastHitAt = Number.NEGATIVE_INFINITY;
-    this.lastKillAt = Number.NEGATIVE_INFINITY;
-    this.lastDryAt = Number.NEGATIVE_INFINITY;
   }
 
   ensure() {
@@ -142,14 +149,14 @@ export class AudioSys {
 
       this.buses = {
         weapons: this.ctx.createGain(),
-        impacts: this.ctx.createGain(),
+        grenades: this.ctx.createGain(),
         movement: this.ctx.createGain(),
-        ui: this.ctx.createGain(),
+        lifecycle: this.ctx.createGain(),
       };
       this.buses.weapons.gain.value = 0.92;
-      this.buses.impacts.gain.value = 0.82;
+      this.buses.grenades.gain.value = 0.82;
       this.buses.movement.gain.value = 0.72;
-      this.buses.ui.gain.value = 0.78;
+      this.buses.lifecycle.gain.value = 0.78;
       for (const bus of Object.values(this.buses)) bus.connect(this.mix);
 
       const len = Math.ceil(this.ctx.sampleRate * 1.25);
@@ -189,7 +196,14 @@ export class AudioSys {
 
   stopCombat(fade = 0.01) {
     for (const voice of [...this.activeVoices]) {
-      if (voice.bus === 'ui') continue;
+      if (voice.bus === 'lifecycle') continue;
+      this._releaseVoice(voice, fade);
+      this.activeVoices.delete(voice);
+    }
+  }
+
+  stopAll(fade = 0.01) {
+    for (const voice of [...this.activeVoices]) {
       this._releaseVoice(voice, fade);
       this.activeVoices.delete(voice);
     }
@@ -244,7 +258,7 @@ export class AudioSys {
       priority,
       serial: this.voiceSerial++,
       envelope: options.envelope || null,
-      bus: options.bus || 'ui',
+      bus: options.bus || 'lifecycle',
       startAt: Number.isFinite(Number(options.startAt))
         ? Number(options.startAt)
         : (Number(this.ctx?.currentTime) || 0),
@@ -258,7 +272,7 @@ export class AudioSys {
     return true;
   }
 
-  _route(busName = 'ui', spatial = null) {
+  _route(busName = 'lifecycle', spatial = null) {
     const bus = this.buses?.[busName] || this.master;
     if (!spatial) return bus;
     const filter = this.ctx.createBiquadFilter();
@@ -285,6 +299,9 @@ export class AudioSys {
     if (safeGain <= 0) return false;
     const t = this.ctx.currentTime + Math.max(0, Number(options.delay) || 0);
     const src = this.ctx.createBufferSource();
+    // Todas las fuentes son one-shot. Declararlo explícitamente evita que una
+    // implementación o mock defectuoso conserve el ruido procedural en bucle.
+    src.loop = false;
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
     const maxFrequency = Math.max(1200, (Number(this.ctx.sampleRate) || 48000) * 0.45);
@@ -292,7 +309,7 @@ export class AudioSys {
     filter.Q.value = Math.max(0.1, Math.min(30, Number(filterQ) || 1));
     const g = this.ctx.createGain();
     if (!this._track(src, options.priority ?? 1, {
-      envelope: g, startAt: t, bus: options.bus || 'ui',
+      envelope: g, startAt: t, bus: options.bus || 'lifecycle',
     })) return false;
     src.buffer = this.noiseBuffer;
     const attack = Math.max(0.001, Math.min(0.003, safeDuration * 0.18));
@@ -301,7 +318,7 @@ export class AudioSys {
     g.gain.setValueAtTime(AUDIO_FLOOR, t);
     g.gain.linearRampToValueAtTime(safeGain, t + attack);
     g.gain.exponentialRampToValueAtTime(AUDIO_FLOOR, t + Math.max(attack + 0.001, releaseAt));
-    src.connect(filter).connect(g).connect(this._route(options.bus || 'ui', options.spatial));
+    src.connect(filter).connect(g).connect(this._route(options.bus || 'lifecycle', options.spatial));
     const tail = 0.003;
     const maxOffset = Math.max(0, (Number(this.noiseBuffer.duration) || safeDuration) - safeDuration - tail);
     const offset = Math.random() * maxOffset;
@@ -326,13 +343,13 @@ export class AudioSys {
     }
     const g = this.ctx.createGain();
     if (!this._track(osc, options.priority ?? 1, {
-      envelope: g, startAt: t, bus: options.bus || 'ui',
+      envelope: g, startAt: t, bus: options.bus || 'lifecycle',
     })) return false;
     const attack = Math.max(0.002, Math.min(0.004, safeDuration * 0.16));
     g.gain.setValueAtTime(AUDIO_FLOOR, t);
     g.gain.linearRampToValueAtTime(safeGain, t + attack);
     g.gain.exponentialRampToValueAtTime(AUDIO_FLOOR, t + safeDuration);
-    osc.connect(g).connect(this._route(options.bus || 'ui', options.spatial));
+    osc.connect(g).connect(this._route(options.bus || 'lifecycle', options.spatial));
     osc.start(t);
     osc.stop(t + safeDuration + 0.003);
     return true;
@@ -410,100 +427,32 @@ export class AudioSys {
     return mix;
   }
 
-  hit(critical = false) {
-    if (!this.ctx || this.masterVolume <= 0) return;
-    const now = this.ctx.currentTime;
-    if (now - this.lastHitAt < 0.025) return;
-    this.lastHitAt = now;
-    const pitch = critical ? 1760 : 1420;
-    this._tone(pitch, critical ? 1320 : 1080, 0.055, critical ? 0.3 : 0.22, 'sine', { bus: 'impacts', priority: 4 });
-    this._noise(0.035, critical ? 2600 : 2100, 2.4, 0.075, 0.028, { bus: 'impacts', priority: 4 });
-  }
-
-  kill() {
-    if (!this.ctx || this.masterVolume <= 0) return;
-    const now = this.ctx.currentTime;
-    if (now - this.lastKillAt < 0.045) return;
-    this.lastKillAt = now;
-    this._tone(760, 760, 0.065, 0.26, 'sine', { bus: 'impacts', priority: 5 });
-    this._tone(1140, 1140, 0.075, 0.3, 'sine', { bus: 'impacts', delay: 0.06, priority: 5 });
-    this._tone(1520, 1240, 0.11, 0.24, 'triangle', { bus: 'impacts', delay: 0.125, priority: 5 });
-  }
-
-  damaged() {
-    if (!this.ctx) return;
-    this._noise(0.15, 300, 0.8, 0.5, 0.12, { bus: 'impacts', priority: 5 });
-    this._tone(110, 60, 0.12, 0.35, 'triangle', { bus: 'impacts', priority: 5 });
-  }
-
-  impact(surface = 'concrete', volume = 1, spatial = null) {
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
-    if (now - this.lastImpactAt < 0.025) return;
-    this.lastImpactAt = now;
-    const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
-    const profiles = {
-      concrete: { freq: 620, q: 0.7, gain: 0.16, tone: 130 },
-      metal: { freq: 2800, q: 2.8, gain: 0.2, tone: 1680 },
-      wood: { freq: 900, q: 1.2, gain: 0.17, tone: 360 },
-      flesh: { freq: 360, q: 0.8, gain: 0.15, tone: 90 },
-    };
-    const profile = profiles[surface] || profiles.concrete;
-    this._noise(0.09, profile.freq, profile.q, profile.gain * safeVolume, 0.065, {
-      bus: 'impacts', spatial, priority: 2,
-    });
-    this._tone(profile.tone, Math.max(40, profile.tone * 0.62), surface === 'metal' ? 0.11 : 0.065,
-      0.08 * safeVolume, surface === 'metal' ? 'sine' : 'triangle', {
-        bus: 'impacts', spatial, priority: 2,
-      });
-  }
-
-  reload() {
-    if (!this.ctx) return;
-    this._tone(500, 350, 0.04, 0.2, 'square', { bus: 'weapons', priority: 2 });
-    this._tone(350, 500, 0.04, 0.2, 'square', { bus: 'weapons', delay: 0.18, priority: 2 });
-    this._tone(650, 650, 0.05, 0.25, 'square', { bus: 'weapons', delay: 0.42, priority: 2 });
-  }
-
   jump() {
     if (!this.ctx) return;
-    this._noise(0.08, 500, 1, 0.12, 0.06, { bus: 'movement' });
+    this._noise(0.055, 620, 0.85, 0.1, 0.04, { bus: 'movement', priority: 2 });
   }
 
-  land() {
+  weaponSwitch() {
     if (!this.ctx) return;
-    this._noise(0.1, 250, 0.9, 0.2, 0.08, { bus: 'movement' });
+    this._noise(0.04, 1050, 1.1, 0.09, 0.03, { bus: 'weapons', priority: 3 });
+    this._tone(480, 320, 0.065, 0.1, 'triangle', {
+      bus: 'weapons', delay: 0.012, priority: 3,
+    });
   }
 
-  dry() {
-    if (!this.ctx || this.masterVolume <= 0) return;
-    const now = this.ctx.currentTime;
-    if (now - this.lastDryAt < 0.12) return;
-    this.lastDryAt = now;
-    this._tone(900, 700, 0.04, 0.15, 'square', { bus: 'weapons', priority: 2 });
-  }
-
-  medkit() {
+  death() {
     if (!this.ctx) return;
-    this._tone(660, 660, 0.08, 0.25, 'sine', { bus: 'ui', priority: 2 });
-    this._tone(880, 880, 0.08, 0.25, 'sine', { bus: 'ui', delay: 0.09, priority: 2 });
-    this._tone(1100, 1100, 0.12, 0.25, 'sine', { bus: 'ui', delay: 0.18, priority: 2 });
+    this.stopAll(0.008);
+    this._noise(0.12, 240, 0.7, 0.22, 0.095, { bus: 'lifecycle', priority: 5 });
+    this._tone(165, 52, 0.24, 0.24, 'triangle', { bus: 'lifecycle', priority: 5 });
   }
 
-  buy() {
+  respawn() {
     if (!this.ctx) return;
-    this._tone(520, 520, 0.05, 0.2, 'square', { bus: 'ui', priority: 2 });
-    this._tone(780, 780, 0.05, 0.22, 'square', { bus: 'ui', delay: 0.07, priority: 2 });
-    this._tone(1180, 1180, 0.14, 0.24, 'sine', { bus: 'ui', delay: 0.14, priority: 2 });
-  }
-
-  streak(level) {
-    if (!this.ctx) return;
-    const base = 440 + level * 60;
-    [0, 90, 180, 270].forEach((delay, i) => {
-      this._tone(base * (1 + i * 0.25), base * (1 + i * 0.25), 0.12, 0.22, 'square', {
-        bus: 'ui', delay: delay / 1000, priority: 3,
-      });
+    this.stopAll(0.008);
+    this._tone(420, 620, 0.085, 0.16, 'sine', { bus: 'lifecycle', priority: 5 });
+    this._tone(620, 880, 0.1, 0.14, 'sine', {
+      bus: 'lifecycle', delay: 0.075, priority: 5,
     });
   }
 
@@ -512,10 +461,10 @@ export class AudioSys {
     const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0));
     if (safeVolume <= 0) return false;
     this._noise(0.7, 180, 0.5, 0.62 * safeVolume, 0.55, {
-      bus: 'impacts', spatial, priority: 5,
+      bus: 'grenades', spatial, priority: 5,
     });
     this._tone(90, 30, 0.5, 0.42 * safeVolume, 'sine', {
-      bus: 'impacts', spatial, priority: 5,
+      bus: 'grenades', spatial, priority: 5,
     });
     return true;
   }
@@ -530,17 +479,7 @@ export class AudioSys {
 
   nadeThrow() {
     if (!this.ctx) return;
-    this._noise(0.06, 900, 1, 0.12, 0.05, { bus: 'weapons' });
-  }
-
-  knife() {
-    if (!this.ctx) return;
-    this._noise(0.12, 2400, 2.5, 0.22, 0.1, { bus: 'weapons', priority: 2 }); // silbido del tajo
-  }
-
-  chat() {
-    if (!this.ctx) return;
-    this._tone(950, 950, 0.06, 0.15, 'sine', { bus: 'ui' });
+    this._noise(0.06, 900, 1, 0.12, 0.05, { bus: 'grenades', priority: 3 });
   }
 
   // volumen según distancia para disparos de bots

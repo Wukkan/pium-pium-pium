@@ -101,9 +101,9 @@ function schedulingHarness(currentTime = 4) {
   audio.master = destination;
   audio.buses = {
     weapons: destination,
-    impacts: destination,
+    grenades: destination,
     movement: destination,
-    ui: destination,
+    lifecycle: destination,
   };
   audio.noiseBuffer = {
     duration: 1.25,
@@ -358,26 +358,19 @@ test('muted, zero, and non-finite shots do not consume audio voices', () => {
   assert.equal(scheduled, 0);
 });
 
-test('muting prevents every low-level sound path from scheduling voices', () => {
+test('muting prevents every allowed sound path from scheduling voices', () => {
   const { audio, sources, gains } = schedulingHarness();
   audio.masterVolume = 0;
 
   audio.shot('ar');
-  audio.hit();
-  audio.kill();
-  audio.damaged();
-  audio.impact('metal');
-  audio.reload();
+  audio.shotAt('ar', { x: 2, y: 0, z: 0 }, { x: 0, y: 0, z: 0 });
+  audio.weaponSwitch();
   audio.jump();
-  audio.land();
-  audio.dry();
-  audio.medkit();
-  audio.buy();
-  audio.streak(4);
+  audio.death();
+  audio.respawn();
   audio.boom();
+  audio.boomAt({ x: 2, y: 0, z: 0 }, { x: 0, y: 0, z: 0 });
   audio.nadeThrow();
-  audio.knife();
-  audio.chat();
 
   assert.equal(sources.length, 0);
   assert.equal(gains.length, 0);
@@ -454,13 +447,13 @@ test('voice stealing fades the victim and stops it slightly in the future', () =
   assert.equal(audio.activeVoices.size, 1);
 });
 
-test('leaving combat releases scheduled combat voices but preserves UI audio', () => {
+test('leaving combat releases scheduled combat voices but preserves lifecycle audio', () => {
   const { audio, ctx, sources } = schedulingHarness(7);
   audio._tone(500, 350, 0.2, 0.2, 'square', {
     bus: 'weapons', delay: 0.4, priority: 2,
   });
   audio._tone(900, 900, 0.2, 0.2, 'sine', {
-    bus: 'ui', delay: 0.4, priority: 2,
+    bus: 'lifecycle', delay: 0.4, priority: 2,
   });
 
   audio.stopCombat();
@@ -469,7 +462,7 @@ test('leaving combat releases scheduled combat voices but preserves UI audio', (
   assert.ok(sources[0].stopCalls.some(([time]) => time === ctx.currentTime),
     'future combat audio must be cancelled before it can start');
   assert.equal(sources[1].stopCalls.length, 1,
-    'UI audio must keep only its natural scheduled stop');
+    'lifecycle audio must keep only its natural scheduled stop');
 });
 
 test('PIUM oscillator schedules positive start, vowel, and low tail ramps', () => {
