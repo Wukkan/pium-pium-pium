@@ -46,7 +46,10 @@ test('active loadout card reuses the personalized operator renderer', () => {
   assert.match(main, /active === 'play' \|\| active === 'operator'\) initOperatorPreview\(active\)/);
   assert.match(main, /const key = `\$\{name\}\|\$\{skin\.hat \|\| 'none'\}\|\$\{color\}\|\$\{weaponKind\}`/);
   assert.match(main, /makeHumanoid\(color, name,[\s\S]+skin\.hat \|\| 'none'\)/);
-  assert.match(main, /menu-operator-preview'\)\?\.setAttribute\('aria-label', operatorLabel\)/);
+  assert.match(main, /for \(const id of \['operator-preview', 'menu-operator-preview'\]\)/);
+  assert.match(main, /host\.setAttribute\('aria-label', operatorLabel\)/);
+  assert.match(main, /host\.dataset\.hat = meta\.hat \|\| 'none'/);
+  assert.match(main, /host\.dataset\.weapon = weapon\.kind/);
   assert.match(main, /previewRenderer\.domElement\.setAttribute\('aria-hidden', 'true'\)/);
   assert.match(main, /pagehide[\s\S]+disposeOperatorPreview\(\)/);
 });

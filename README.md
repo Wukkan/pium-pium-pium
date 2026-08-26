@@ -36,6 +36,8 @@ El parche **Clean SFX 1.7.2** elimina el falso ambiente producido por efectos re
 
 El parche **Rooftop Flow 1.7.3** reconstruye los accesos a techos, escaleras y el puente de Ciudad para eliminar bordes, barandas y colliders invisibles que atrapaban al jugador. Las plataformas de salto comparten ahora una única zona visible y autoritativa, aterrizan dentro de las azoteas y no se reactivan durante el vuelo. Bots locales y del servidor usan rutas validadas entre niveles, abandonan objetivos bloqueados y dejan de insistir contra muros. Nuevas regresiones recorren todos los accesos por varios carriles, simulan saltos reales, comprueban continuidad, spawns y cobertura, y ejecutan navegación autoritativa por ambos mapas.
 
+El parche **Safe Boot 1.7.4** impide que un contexto WebGL rechazado deje la portada congelada. El renderer principal y el operador reintentan con un perfil liviano, la tarjeta conserva un fallback personalizado mientras carga y un fallo del preview ya no detiene el juego. La portada muestra un estado real de arranque, ofrece reintento si el módulo no responde y añade **PROBAR EN LOCAL** para entrar inmediatamente con cinco bots aunque falle la conexión online.
+
 El parche **True Weapon Previews 1.3.1** elimina las siluetas genéricas del arsenal y la compra. Las siete imágenes se renderizan directamente desde los mismos modelos, geometrías y materiales que utiliza el jugador, se cachean una sola vez y se comparten entre ambas interfaces. La vista 3D del operador también equipa ahora el modelo detallado del arma seleccionada.
 
 **Los bots rellenan la partida** (máximo 5): 1 jugador → 5 bots, 7 jugadores → 3 bots, 10+ jugadores → 0 bots. Todos contra todos — y los bots también pelean entre ellos.

@@ -78,6 +78,13 @@ test('a late Pointer Lock grant cannot capture the cursor over an overlay', () =
   assert.match(mainSource, /if \(document\.pointerLockElement\) \{\s*if \(buyOpen \|\| botPanelOpen \|\| podiumOpen \|\| teamPickerOpen\) \{\s*document\.exitPointerLock\(\);\s*return;/);
 });
 
+test('early Pointer Lock cannot hide the lobby while the online handshake is pending', () => {
+  assert.match(
+    mainSource,
+    /setFallbackControls\(false\);\s*if \(connecting && !joined && !botsLocal\) return;\s*if \(state === 'menu'\) state = 'playing';/,
+  );
+});
+
 test('online lifecycle owns one heartbeat and tears down the dead session', () => {
   assert.match(mainSource, /net\.startHeartbeat\(3000\);/);
   assert.doesNotMatch(mainSource, /setInterval\([^)]*sendPing|setInterval\([\s\S]{0,120}?net\.sendPing/);

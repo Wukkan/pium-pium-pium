@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-game-boot="loading">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -526,6 +526,14 @@
     #play-btn span { font-size: 25px; line-height: 10px; }
     #play-btn:hover { transform: translateY(2px); box-shadow: 0 3px 0 #a55e12, 0 8px 20px rgba(0,0,0,.35); }
     #play-btn:disabled { filter: saturate(.35); opacity: .62; cursor: not-allowed; transform: none; box-shadow: 0 3px 0 #744a1b; }
+    #local-play-btn {
+      min-height: 49px; padding: 12px 15px; border: 1px solid rgba(126,170,217,.34); border-radius: 4px;
+      background: rgba(37,61,88,.42); color: #a9c8e9; cursor: pointer;
+      font: 900 9px Arial, sans-serif; letter-spacing: .9px; white-space: nowrap;
+      transition: color .15s, border-color .15s, background .15s, transform .15s;
+    }
+    #local-play-btn:hover, #local-play-btn:focus-visible { border-color: #ffc34d; background: rgba(255,195,77,.08); color: #ffd471; outline: 2px solid rgba(255,195,77,.2); outline-offset: 2px; transform: translateY(-1px); }
+    #local-play-btn:disabled { opacity: .45; cursor: wait; transform: none; }
     #menu-stats { min-height: 18px; margin-top: 20px; color: #7890b5; font: 12px Arial, sans-serif; }
     #menu-screen-play .controls { display: flex; flex-wrap: wrap; gap: 8px 18px; width: auto; margin: 24px 0 0; padding: 0; border: 0; background: transparent; color: #7890b5; text-align: left; font: 11px Arial, sans-serif; line-height: 1.5; }
     #menu-screen-play .controls .menu-buy-tip, #menu-screen-play .controls br { display: none; }
@@ -546,6 +554,58 @@
       mask-image: linear-gradient(180deg, transparent, #000 25%, #000 82%, transparent);
     }
     .mini-operator-art canvas { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; pointer-events: none; }
+    .operator-preview-fallback {
+      position: absolute; inset: 0; z-index: 0; display: grid; place-items: center; overflow: hidden;
+      opacity: 1; transition: opacity .18s ease; pointer-events: none;
+    }
+    .preview-ready > .operator-preview-fallback { opacity: 0; }
+    .operator-fallback-figure {
+      position: relative; display: block; width: 104px; height: 142px; margin-top: -3px;
+      filter: drop-shadow(0 13px 14px rgba(0,0,0,.42));
+      animation: operator-fallback-pulse 1.4s ease-in-out infinite alternate;
+    }
+    @keyframes operator-fallback-pulse { to { transform: translateY(-3px); filter: drop-shadow(0 16px 18px rgba(0,0,0,.5)); } }
+    .operator-fallback-head {
+      position: absolute; left: 34px; top: 8px; width: 36px; height: 40px;
+      border: 3px solid #142339; border-radius: 11px 11px 9px 9px; background: #dda06f;
+      box-shadow: inset -7px 0 rgba(105,61,43,.16);
+    }
+    .operator-fallback-head::after {
+      content: ''; position: absolute; left: 5px; right: 5px; top: 17px; height: 3px; border-radius: 3px;
+      background: linear-gradient(90deg, #192536 25%, transparent 25% 62%, #192536 62%);
+    }
+    .operator-fallback-head::before {
+      content: ''; position: absolute; left: -4px; right: -4px; top: -7px; height: 13px;
+      border-radius: 9px 9px 3px 3px; background: #111b2a; box-shadow: 0 3px 0 #324a67;
+    }
+    [data-hat="cap"] .operator-fallback-head::before { left: -8px; right: -12px; top: -8px; height: 12px; border-radius: 9px 9px 3px 3px; box-shadow: 13px 7px 0 -3px #172539; }
+    [data-hat="top"] .operator-fallback-head::before { left: 2px; right: 2px; top: -24px; height: 28px; border-radius: 3px; box-shadow: 0 20px 0 6px #111b2a; }
+    [data-hat="crown"] .operator-fallback-head::before { left: 1px; right: 1px; top: -18px; height: 21px; border-radius: 2px; background: #e8b83e; clip-path: polygon(0 28%,20% 60%,36% 0,54% 58%,75% 5%,100% 35%,92% 100%,8% 100%); box-shadow: none; }
+    .operator-fallback-body {
+      position: absolute; left: 23px; top: 49px; width: 58px; height: 68px;
+      border: 4px solid #132238; border-radius: 15px 15px 8px 8px;
+      background: var(--operator-color, #3f6ea8);
+      background: linear-gradient(90deg, color-mix(in srgb, var(--operator-color, #3f6ea8) 74%, #102033), var(--operator-color, #3f6ea8));
+      box-shadow: inset 0 -19px rgba(7,18,31,.48), inset 0 0 0 8px rgba(118,158,201,.12);
+    }
+    .operator-fallback-body::after { content: ''; position: absolute; left: 10px; right: 10px; top: 12px; height: 30px; border: 2px solid rgba(174,207,240,.24); border-radius: 7px; background: rgba(7,15,26,.35); }
+    .operator-fallback-arm { position: absolute; top: 58px; width: 18px; height: 61px; border: 3px solid #132238; border-radius: 8px; background: var(--operator-color, #3f6ea8); }
+    .operator-fallback-arm.left { left: 9px; transform: rotate(8deg); }
+    .operator-fallback-arm.right { right: 8px; transform: rotate(-18deg); transform-origin: top center; }
+    .operator-fallback-weapon {
+      position: absolute; right: -5px; top: 83px; width: var(--fallback-weapon-width, 64px); height: 11px;
+      border: 2px solid #0a111c; border-radius: 4px; background: linear-gradient(#34435a, #0c1320);
+      box-shadow: -13px 9px 0 -3px #111b29; transform: rotate(-10deg); transform-origin: right center;
+    }
+    [data-weapon="pistol"] { --fallback-weapon-width: 43px; }
+    [data-weapon="shotgun"], [data-weapon="ar"], [data-weapon="sniper"] { --fallback-weapon-width: 82px; }
+    [data-weapon="smg"] { --fallback-weapon-width: 66px; }
+    [data-weapon="launcher"] { --fallback-weapon-width: 72px; }
+    .operator-fallback-status {
+      position: absolute; left: 50%; bottom: 4px; translate: -50% 0; width: max-content;
+      color: #7089a8; font: 900 7px Arial, sans-serif; letter-spacing: 1.2px;
+    }
+    [data-preview-state="unavailable"] .operator-fallback-status { color: #82df9a; }
     .mini-operator-live {
       position: absolute; top: 7px; right: 6px; z-index: 2; display: inline-flex; align-items: center; gap: 5px;
       color: #8fa9c9; font: 900 7px Arial, sans-serif; letter-spacing: 1.15px; pointer-events: none;
@@ -725,7 +785,7 @@
     .high-contrast .hud-text { text-shadow: 0 2px 0 #000, 0 0 5px #000, 1px 1px 0 #000; }
     @media (max-width: 900px) { #menu-content { width: min(100% - 30px, 700px); } #menu-topbar { flex-wrap: wrap; gap: 14px; padding: 14px 0; } #menu-nav { order: 3; width: 100%; min-height: 48px; } .menu-nav-btn { flex: 1; padding: 0 6px; } #menu-screen-play.active { display: block; } .lobby-deployment { width: 100%; } .menu-hero-side { margin-top: 28px; } .menu-info-grid, .options-layout { grid-template-columns: 1fr; } .options-group.full-width { grid-column: auto; } .menu-arsenal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); height: min(537px, 62dvh); } .settings-shell { grid-template-columns: 1fr; } .settings-tabs { position: sticky; top: 0; z-index: 2; display: flex; overflow-x: auto; padding: 7px; backdrop-filter: blur(10px); scrollbar-width: thin; scrollbar-color: #ffc34d rgba(255,255,255,.07); } .settings-tabs::-webkit-scrollbar { display: block; height: 5px; } .settings-tabs::-webkit-scrollbar-track { background: rgba(255,255,255,.07); } .settings-tabs::-webkit-scrollbar-thumb { border-radius: 5px; background: #ffc34d; } .settings-tab { flex: 0 0 auto; min-height: 44px; } .crosshair-studio { grid-template-columns: 1fr; } .crosshair-preview-stage { min-height: 230px; } }
     @media (max-width: 640px) { .lobby-deployment { grid-template-columns: 1fr; } .lobby-choice-section + .lobby-choice-section { padding: 11px 0 0; border-top: 1px solid rgba(255,255,255,.075); border-left: 0; } #lobby-room-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 520px) { #menu-content { width: calc(100% - 22px); } #menu-main { padding-top: 28px; } #menu-screen-play h1 { font-size: 42px; } .hero-actions { align-items: stretch; flex-direction: column; } .lobby-name-field, #name-input, #play-btn { width: 100%; } .menu-arsenal-grid { grid-template-columns: minmax(0, 320px); grid-auto-rows: 270px; justify-content: center; } .screen-heading { align-items: start; flex-direction: column; } .settings-heading-actions { width: 100%; justify-content: stretch; } .settings-heading-actions button { flex: 1; } .settings-tabs { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; } .settings-tab { width: 100%; padding: 0 9px; font-size: 9px; } .settings-tab:last-child { grid-column: 1 / -1; } .option-row { align-items: start; flex-direction: column; gap: 10px; } .option-toggle { min-height: 66px; } .option-control { width: 100%; text-align: left; } .option-control input[type="range"], .option-control select { width: 100%; } .menu-footer { font-size: 8px; } #quick-mute { min-width: 48px; padding: 8px; margin-left: auto; } #quick-mute-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); } .audio-hero { grid-template-columns: 1fr; } .keybinding-toolbar { align-items: stretch; flex-direction: column; } .keybinding-toolbar .secondary-action { width: 100%; } #keybinding-list { grid-template-columns: 1fr; } .keybind-group-title { grid-column: auto; } .keybind-button { min-width: 102px; } .crosshair-studio-header { align-items: stretch; flex-direction: column; } .crosshair-editor { grid-template-columns: 1fr; } .crosshair-editor .option-row { align-items: center; flex-direction: row; } .crosshair-editor .option-control { width: auto; text-align: right; } .crosshair-editor .option-control input[type="range"], .crosshair-editor .option-control select { width: 128px; } }
+    @media (max-width: 520px) { #menu-content { width: calc(100% - 22px); } #menu-main { padding-top: 28px; } #menu-screen-play h1 { font-size: 42px; } .hero-actions { align-items: stretch; flex-direction: column; } .lobby-name-field, #name-input, #play-btn, #local-play-btn { width: 100%; } .menu-arsenal-grid { grid-template-columns: minmax(0, 320px); grid-auto-rows: 270px; justify-content: center; } .screen-heading { align-items: start; flex-direction: column; } .settings-heading-actions { width: 100%; justify-content: stretch; } .settings-heading-actions button { flex: 1; } .settings-tabs { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; } .settings-tab { width: 100%; padding: 0 9px; font-size: 9px; } .settings-tab:last-child { grid-column: 1 / -1; } .option-row { align-items: start; flex-direction: column; gap: 10px; } .option-toggle { min-height: 66px; } .option-control { width: 100%; text-align: left; } .option-control input[type="range"], .option-control select { width: 100%; } .menu-footer { font-size: 8px; } #quick-mute { min-width: 48px; padding: 8px; margin-left: auto; } #quick-mute-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); } .audio-hero { grid-template-columns: 1fr; } .keybinding-toolbar { align-items: stretch; flex-direction: column; } .keybinding-toolbar .secondary-action { width: 100%; } #keybinding-list { grid-template-columns: 1fr; } .keybind-group-title { grid-column: auto; } .keybind-button { min-width: 102px; } .crosshair-studio-header { align-items: stretch; flex-direction: column; } .crosshair-editor { grid-template-columns: 1fr; } .crosshair-editor .option-row { align-items: center; flex-direction: row; } .crosshair-editor .option-control { width: auto; text-align: right; } .crosshair-editor .option-control input[type="range"], .crosshair-editor .option-control select { width: 128px; } }
     @media (max-width: 520px) {
       #menu-nav .menu-nav-btn { min-width: 0; padding-inline: 3px; font-size: 9px; letter-spacing: .4px; }
     }
@@ -755,7 +815,7 @@
     #menu-screen-operator .operator-card::before { content: ''; position: absolute; inset: 12px; z-index: 0; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.04), transparent 40%); pointer-events: none; }
     #menu-screen-operator .operator-card::after { content: none; }
     #operator-preview { position: absolute; inset: 0; z-index: 1; }
-    #operator-preview canvas { display: block; width: 100%; height: 100%; }
+    #operator-preview canvas { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; }
     .operator-preview-badge { position: absolute; top: 24px; left: 25px; z-index: 3; color: #9fb9d9; font: 900 9px Arial, sans-serif; letter-spacing: 1.8px; }
     .operator-preview-badge i { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: #82df9a; box-shadow: 0 0 10px #82df9a; }
     .operator-preview-footer { position: absolute; left: 25px; right: 25px; bottom: 23px; z-index: 3; display: flex; align-items: end; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.1); text-align: left; }
@@ -1330,7 +1390,8 @@
 
       <div class="hero-actions">
         <label class="lobby-name-field" for="name-input"><span><b>03</b> Identidad</span><input id="name-input" type="text" maxlength="14" placeholder="Tu nombre" autocomplete="off" spellcheck="false" aria-label="Nombre del operador" /></label>
-        <button id="play-btn">JUGAR <span aria-hidden="true">→</span></button>
+        <button id="play-btn" disabled aria-busy="true">CARGANDO JUEGO... <span aria-hidden="true">→</span></button>
+        <button id="local-play-btn" type="button" disabled>PROBAR EN LOCAL</button>
       </div>
       <div id="menu-control-summary" class="controls" aria-label="Controles principales"></div>
       <div id="menu-stats"></div>
@@ -1338,7 +1399,8 @@
 
     <div class="menu-hero-side">
       <div class="eyebrow">LOADOUT ACTIVO</div>
-      <div id="menu-operator-preview" class="mini-operator-art" role="img" aria-label="Vista 3D de tu operador personalizado">
+      <div id="menu-operator-preview" class="mini-operator-art" role="img" aria-label="Vista 3D de tu operador personalizado" data-hat="none" data-weapon="pistol" data-preview-state="loading">
+        <span class="operator-preview-fallback" aria-hidden="true"><span class="operator-fallback-figure"><i class="operator-fallback-head"></i><i class="operator-fallback-body"></i><i class="operator-fallback-arm left"></i><i class="operator-fallback-arm right"></i><i class="operator-fallback-weapon"></i></span><span class="operator-fallback-status" data-operator-preview-status>CARGANDO OPERADOR...</span></span>
         <span class="mini-operator-live" aria-hidden="true"><i></i> TU OPERADOR · 3D</span>
       </div>
       <strong id="menu-quick-weapon">PISTOLA</strong>
@@ -1357,7 +1419,9 @@
     <div id="menu-loadout">
       <div class="operator-card">
         <div class="operator-preview-badge"><i></i> VISTA 3D EN VIVO</div>
-        <div id="operator-preview" role="img" aria-label="Vista 3D del operador equipado"></div>
+        <div id="operator-preview" role="img" aria-label="Vista 3D del operador equipado" data-hat="none" data-weapon="pistol" data-preview-state="loading">
+          <span class="operator-preview-fallback" aria-hidden="true"><span class="operator-fallback-figure"><i class="operator-fallback-head"></i><i class="operator-fallback-body"></i><i class="operator-fallback-arm left"></i><i class="operator-fallback-arm right"></i><i class="operator-fallback-weapon"></i></span><span class="operator-fallback-status" data-operator-preview-status>CARGANDO OPERADOR...</span></span>
+        </div>
         <div class="operator-preview-footer"><span>OPERADOR TÁCTICO</span><strong id="operator-preview-weapon">PISTOLA · PISTOL</strong></div>
       </div>
       <div>
@@ -1546,7 +1610,7 @@
       <div class="screen-footer">Configuración guardada automáticamente en este navegador · Las opciones mostradas modifican funciones reales del juego.</div>
     </section>
     </main>
-    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v1.7.3 // ROOFTOP FLOW</span></footer>
+    <footer class="menu-footer"><span>PIUM PIUM PIUM</span><span>ESC volver al juego</span><span>v1.7.4 // SAFE BOOT</span></footer>
     </div>
   </div>
 
@@ -1635,6 +1699,53 @@
     <div class="respawn">Reapareciendo<span id="respawn-dots">...</span></div>
   </div>
 
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const play = document.getElementById('play-btn');
+      const status = document.getElementById('net-status');
+      let finished = false;
+      let retryArmed = false;
+      const retry = () => location.reload();
+      const fail = () => {
+        if (finished) return;
+        root.dataset.gameBoot = 'failed';
+        if (status) {
+          status.textContent = root.dataset.gameBootReason === 'webgl'
+            ? '⚠ WebGL no inició — cierra otras pestañas 3D y pulsa REINTENTAR'
+            : location.protocol === 'file:'
+              ? '⚠ Abre el juego desde su servidor, no como archivo'
+              : '⚠ La carga se interrumpió — pulsa REINTENTAR';
+          status.classList.add('offline');
+        }
+        if (play) {
+          play.disabled = false;
+          play.removeAttribute('aria-busy');
+          play.innerHTML = 'REINTENTAR CARGA <span aria-hidden="true">↻</span>';
+          if (!retryArmed) {
+            play.addEventListener('click', retry);
+            retryArmed = true;
+          }
+        }
+      };
+      const onError = (event) => {
+        if (event.error || event.target?.tagName === 'SCRIPT') fail();
+      };
+      const onRejection = () => fail();
+      const watchdog = setTimeout(fail, 15000);
+      addEventListener('error', onError, true);
+      addEventListener('unhandledrejection', onRejection);
+      addEventListener('pium:ready', () => {
+        finished = true;
+        clearTimeout(watchdog);
+        root.dataset.gameBoot = 'ready';
+        play?.removeAttribute('aria-busy');
+        if (retryArmed) play?.removeEventListener('click', retry);
+        removeEventListener('error', onError, true);
+        removeEventListener('unhandledrejection', onRejection);
+      }, { once: true });
+    })();
+  </script>
   <script type="importmap">
     { "imports": {
       "three": "/vendor/three.module.js",

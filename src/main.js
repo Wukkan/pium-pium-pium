@@ -57,6 +57,7 @@ import {
 import { gameplayControlActive, requestPointerLockSafe } from './game-entry.js';
 import { frameSimulationPlan } from './frame-timing.js';
 import { segmentBlocked } from './shared/physics.js';
+import { createResilientWebGLRenderer } from './operator-preview-safety.js';
 
 // ---------------------------------------------------------------------------
 // PIUM PIUM PIUM — shooter multijugador original para navegador.
@@ -64,7 +65,15 @@ import { segmentBlocked } from './shared/physics.js';
 // Sin servidor (o si falla la conexión): modo local con hasta 5 bots.
 // ---------------------------------------------------------------------------
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+let mainRendererFailure = null;
+const renderer = createResilientWebGLRenderer(THREE, [
+  { antialias: true, powerPreference: 'high-performance' },
+  { antialias: false, powerPreference: 'default' },
+], (error) => { mainRendererFailure = error; });
+if (!renderer) {
+  document.documentElement.dataset.gameBootReason = 'webgl';
+  throw mainRendererFailure || new Error('No se pudo iniciar el motor gráfico WebGL');
+}
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
@@ -303,7 +312,23 @@ const operatorPreview = {
   key: '',
   angle: 0.08,
   renderAccumulator: 0,
+  unavailable: false,
+  failureReported: false,
+  hasRendered: false,
 };
+
+function setOperatorPreviewState(state) {
+  for (const id of ['menu-operator-preview', 'operator-preview']) {
+    const host = document.getElementById(id);
+    if (!host) continue;
+    host.dataset.previewState = state;
+    host.classList.toggle('preview-ready', state === 'ready');
+    const status = host.querySelector('[data-operator-preview-status]');
+    if (status) status.textContent = state === 'unavailable'
+      ? 'VISTA SEGURA · JUEGO DISPONIBLE'
+      : 'CARGANDO OPERADOR...';
+  }
+}
 
 function syncOperatorPreviewHost(screen = 'play') {
   const activeScreen = screen === 'operator' ? 'operator' : 'play';
@@ -323,15 +348,46 @@ function syncOperatorPreviewHost(screen = 'play') {
     operatorPreview.camera.lookAt(0, compact ? 1.12 : 1.15, 0);
     operatorPreview.camera.updateProjectionMatrix();
   }
+  if (operatorPreview.renderer && operatorPreview.hasRendered) setOperatorPreviewState('ready');
+  else if (operatorPreview.renderer) setOperatorPreviewState('loading');
+  else if (operatorPreview.unavailable) setOperatorPreviewState('unavailable');
   operatorPreview.renderAccumulator = 1 / 30;
   return host;
 }
 
 function disposePreviewRig() {
   if (!operatorPreview.rig) return;
-  operatorPreview.scene.remove(operatorPreview.rig.group);
+  operatorPreview.scene?.remove(operatorPreview.rig.group);
   disposeHumanoid(operatorPreview.rig);
   operatorPreview.rig = null;
+}
+
+function releaseOperatorPreviewResources() {
+  disposePreviewRig();
+  operatorPreview.scene?.traverse((object) => {
+    object.geometry?.dispose?.();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) material?.dispose?.();
+  });
+  operatorPreview.renderer?.dispose();
+  operatorPreview.renderer?.domElement.remove();
+  operatorPreview.renderer = null;
+  operatorPreview.scene = null;
+  operatorPreview.camera = null;
+  operatorPreview.keyLight = null;
+  operatorPreview.key = '';
+  operatorPreview.hasRendered = false;
+}
+
+function disableOperatorPreview(error) {
+  if (!operatorPreview.failureReported) {
+    console.warn('La vista 3D del operador no está disponible; el juego continuará con la vista segura.', error);
+    operatorPreview.failureReported = true;
+  }
+  releaseOperatorPreviewResources();
+  operatorPreview.unavailable = true;
+  setOperatorPreviewState('unavailable');
+  return false;
 }
 
 function equipOperatorPreviewWeapon(rig, kind) {
@@ -352,119 +408,140 @@ function equipOperatorPreviewWeapon(rig, kind) {
 }
 
 function refreshOperatorPreview() {
-  if (!operatorPreview.scene) return;
+  if (!operatorPreview.scene || operatorPreview.unavailable) return;
   const name = (nameInput?.value || 'OPERADOR').toUpperCase();
   const color = skin.color || DEFAULT_OPERATOR_COLOR;
   const weaponKind = WEAPON_DEFS[weapons.current]?.kind || 'pistol';
   const key = `${name}|${skin.hat || 'none'}|${color}|${weaponKind}`;
   if (key === operatorPreview.key) return;
   operatorPreview.key = key;
-  disposePreviewRig();
-  const rig = makeHumanoid(color, name, (part) => ({ preview: true, part }), '#ffffff', skin.hat || 'none');
-  rig.nameSprite.visible = false;
-  equipOperatorPreviewWeapon(rig, weaponKind);
-  rig.group.scale.setScalar(1.1);
-  rig.group.rotation.y = operatorPreview.angle;
-  operatorPreview.scene.add(rig.group);
-  operatorPreview.rig = rig;
+  try {
+    disposePreviewRig();
+    const rig = makeHumanoid(color, name, (part) => ({ preview: true, part }), '#ffffff', skin.hat || 'none');
+    rig.nameSprite.visible = false;
+    equipOperatorPreviewWeapon(rig, weaponKind);
+    rig.group.scale.setScalar(1.1);
+    rig.group.rotation.y = operatorPreview.angle;
+    operatorPreview.scene.add(rig.group);
+    operatorPreview.rig = rig;
+  } catch (error) {
+    disableOperatorPreview(error);
+  }
 }
 
 function initOperatorPreview(screen = 'play') {
   const host = syncOperatorPreviewHost(screen);
-  if (!host) return;
+  if (!host || operatorPreview.unavailable) return false;
   if (operatorPreview.renderer) {
     refreshOperatorPreview();
-    return;
+    return !operatorPreview.unavailable;
   }
-  const previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-  previewRenderer.setPixelRatio(effectivePixelRatio(settings.renderScale, devicePixelRatio));
-  previewRenderer.setClearColor(0x000000, 0);
-  previewRenderer.shadowMap.enabled = settings.shadowsEnabled;
-  previewRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
-  previewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  previewRenderer.toneMappingExposure = 1.08;
-  previewRenderer.domElement.setAttribute('aria-hidden', 'true');
-  host.appendChild(previewRenderer.domElement);
-
-  const previewScene = new THREE.Scene();
-  const previewCamera = new THREE.PerspectiveCamera(27, 1, 0.1, 50);
-  previewCamera.position.set(1.35, 1.8, -5.35);
-  previewCamera.lookAt(0, 1.15, 0);
-
-  const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x0b1220, 1.8);
-  const keyLight = new THREE.DirectionalLight(0xffe0ae, 3.2);
-  keyLight.position.set(-3.5, 5, -4.5);
-  keyLight.castShadow = settings.shadowsEnabled;
-  const shadowSize = { low: 512, medium: 1024, high: 2048 }[settings.shadowQuality] || 1024;
-  setShadowResolution(keyLight, Math.max(256, shadowSize / 2));
-  const rimLight = new THREE.PointLight(0x4e9eff, 2.5, 8);
-  rimLight.position.set(2.6, 2.2, 1.8);
-  previewScene.add(hemi, keyLight, rimLight);
-
-  const platform = new THREE.Mesh(
-    new THREE.CircleGeometry(1.35, 40),
-    new THREE.MeshBasicMaterial({ color: 0x14243a, transparent: true, opacity: 0.82 }),
+  let rendererFailure = null;
+  const previewRenderer = createResilientWebGLRenderer(
+    THREE,
+    [
+      { antialias: true, alpha: true, powerPreference: 'high-performance' },
+      { antialias: false, alpha: true, powerPreference: 'default' },
+    ],
+    (error) => { rendererFailure = error; },
   );
-  platform.rotation.x = -Math.PI / 2;
-  platform.position.y = 0.02;
-  previewScene.add(platform);
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(1.05, 0.012, 8, 48),
-    new THREE.MeshBasicMaterial({ color: 0xffc34d, transparent: true, opacity: 0.75 }),
-  );
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.035;
-  previewScene.add(ring);
-
-  operatorPreview.host = host;
+  if (!previewRenderer) return disableOperatorPreview(rendererFailure);
   operatorPreview.renderer = previewRenderer;
-  operatorPreview.scene = previewScene;
-  operatorPreview.camera = previewCamera;
-  operatorPreview.keyLight = keyLight;
-  syncOperatorPreviewHost(screen);
-  refreshOperatorPreview();
+
+  try {
+    previewRenderer.setPixelRatio(effectivePixelRatio(settings.renderScale, devicePixelRatio));
+    previewRenderer.setClearColor(0x000000, 0);
+    previewRenderer.shadowMap.enabled = settings.shadowsEnabled;
+    previewRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    previewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    previewRenderer.toneMappingExposure = 1.08;
+    previewRenderer.domElement.setAttribute('aria-hidden', 'true');
+    previewRenderer.domElement.addEventListener('webglcontextlost', (event) => {
+      event.preventDefault();
+      disableOperatorPreview(new Error('Contexto WebGL del operador perdido'));
+    }, { once: true });
+    host.appendChild(previewRenderer.domElement);
+
+    const previewScene = new THREE.Scene();
+    const previewCamera = new THREE.PerspectiveCamera(27, 1, 0.1, 50);
+    previewCamera.position.set(1.35, 1.8, -5.35);
+    previewCamera.lookAt(0, 1.15, 0);
+
+    const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x0b1220, 1.8);
+    const keyLight = new THREE.DirectionalLight(0xffe0ae, 3.2);
+    keyLight.position.set(-3.5, 5, -4.5);
+    keyLight.castShadow = settings.shadowsEnabled;
+    const shadowSize = { low: 512, medium: 1024, high: 2048 }[settings.shadowQuality] || 1024;
+    setShadowResolution(keyLight, Math.max(256, shadowSize / 2));
+    const rimLight = new THREE.PointLight(0x4e9eff, 2.5, 8);
+    rimLight.position.set(2.6, 2.2, 1.8);
+    previewScene.add(hemi, keyLight, rimLight);
+
+    const platform = new THREE.Mesh(
+      new THREE.CircleGeometry(1.35, 40),
+      new THREE.MeshBasicMaterial({ color: 0x14243a, transparent: true, opacity: 0.82 }),
+    );
+    platform.rotation.x = -Math.PI / 2;
+    platform.position.y = 0.02;
+    previewScene.add(platform);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1.05, 0.012, 8, 48),
+      new THREE.MeshBasicMaterial({ color: 0xffc34d, transparent: true, opacity: 0.75 }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.035;
+    previewScene.add(ring);
+
+    operatorPreview.host = host;
+    operatorPreview.scene = previewScene;
+    operatorPreview.camera = previewCamera;
+    operatorPreview.keyLight = keyLight;
+    syncOperatorPreviewHost(screen);
+    refreshOperatorPreview();
+    return !operatorPreview.unavailable;
+  } catch (error) {
+    return disableOperatorPreview(error);
+  }
 }
 
 function disposeOperatorPreview() {
-  disposePreviewRig();
-  operatorPreview.scene?.traverse((object) => {
-    object.geometry?.dispose?.();
-    const materials = Array.isArray(object.material) ? object.material : [object.material];
-    for (const material of materials) material?.dispose?.();
-  });
-  operatorPreview.renderer?.dispose();
-  operatorPreview.renderer?.domElement.remove();
+  releaseOperatorPreviewResources();
   operatorPreview.host = null;
-  operatorPreview.renderer = null;
-  operatorPreview.scene = null;
-  operatorPreview.camera = null;
-  operatorPreview.keyLight = null;
-  operatorPreview.key = '';
+  operatorPreview.unavailable = false;
+  operatorPreview.failureReported = false;
 }
 
 function renderOperatorPreview(dt) {
   if (!operatorPreview.renderer || !operatorPreview.host) return;
-  operatorPreview.renderAccumulator += Math.max(0, dt);
-  if (operatorPreview.renderAccumulator < 1 / 30) return;
-  const previewDt = Math.min(0.1, operatorPreview.renderAccumulator);
-  operatorPreview.renderAccumulator = 0;
-  const rect = operatorPreview.host.getBoundingClientRect();
-  if (rect.width < 4 || rect.height < 4) return;
-  const width = Math.floor(rect.width);
-  const height = Math.floor(rect.height);
-  const pixelRatio = operatorPreview.renderer.getPixelRatio();
-  if (operatorPreview.renderer.domElement.width !== Math.floor(width * pixelRatio) ||
-      operatorPreview.renderer.domElement.height !== Math.floor(height * pixelRatio)) {
-    operatorPreview.renderer.setSize(width, height, false);
-    operatorPreview.camera.aspect = width / height;
-    operatorPreview.camera.updateProjectionMatrix();
+  try {
+    operatorPreview.renderAccumulator += Math.max(0, dt);
+    if (operatorPreview.renderAccumulator < 1 / 30) return;
+    const previewDt = Math.min(0.1, operatorPreview.renderAccumulator);
+    operatorPreview.renderAccumulator = 0;
+    const rect = operatorPreview.host.getBoundingClientRect();
+    if (rect.width < 4 || rect.height < 4) return;
+    const width = Math.floor(rect.width);
+    const height = Math.floor(rect.height);
+    const pixelRatio = operatorPreview.renderer.getPixelRatio();
+    if (operatorPreview.renderer.domElement.width !== Math.floor(width * pixelRatio) ||
+        operatorPreview.renderer.domElement.height !== Math.floor(height * pixelRatio)) {
+      operatorPreview.renderer.setSize(width, height, false);
+      operatorPreview.camera.aspect = width / height;
+      operatorPreview.camera.updateProjectionMatrix();
+    }
+    if (operatorPreview.rig && !document.body.classList.contains('reduced-motion')) {
+      operatorPreview.angle += previewDt * 0.12;
+      operatorPreview.rig.group.rotation.y = operatorPreview.angle;
+    }
+    operatorPreview.renderer.render(operatorPreview.scene, operatorPreview.camera);
+    if (!operatorPreview.hasRendered) {
+      operatorPreview.hasRendered = true;
+      setOperatorPreviewState('ready');
+    }
+  } catch (error) {
+    disableOperatorPreview(error);
   }
-  if (operatorPreview.rig && !document.body.classList.contains('reduced-motion')) {
-    operatorPreview.angle += previewDt * 0.12;
-    operatorPreview.rig.group.rotation.y = operatorPreview.angle;
-  }
-  operatorPreview.renderer.render(operatorPreview.scene, operatorPreview.camera);
 }
 
 let settings = readSettings(safeStorageGet('pium_settings'));
@@ -1051,8 +1128,14 @@ function renderLoadoutPanel() {
   if (previewWeapon) previewWeapon.textContent = `${weapon.name} · ${weapon.kind.toUpperCase()}`;
   const colorLabel = `#${(meta.color || DEFAULT_OPERATOR_COLOR).toString(16).padStart(6, '0').toUpperCase()}`;
   const operatorLabel = `Tu operador personalizado: ${hat ? hat.name : 'Sin sombrero'}, uniforme ${colorLabel} y arma ${weapon.name}`;
-  document.getElementById('operator-preview')?.setAttribute('aria-label', operatorLabel);
-  document.getElementById('menu-operator-preview')?.setAttribute('aria-label', operatorLabel);
+  for (const id of ['operator-preview', 'menu-operator-preview']) {
+    const host = document.getElementById(id);
+    if (!host) continue;
+    host.setAttribute('aria-label', operatorLabel);
+    host.dataset.hat = meta.hat || 'none';
+    host.dataset.weapon = weapon.kind;
+    host.style.setProperty('--operator-color', colorLabel);
+  }
   const quickWeapon = document.getElementById('menu-quick-weapon');
   const quickDetail = document.getElementById('menu-quick-detail');
   const playerLabel = document.getElementById('menu-player-label');
@@ -1375,6 +1458,7 @@ function playCombatBoom(pos, volume = 1) {
 
 // --- interfaz del menú ---
 const playBtn = document.getElementById('play-btn');
+const localPlayBtn = document.getElementById('local-play-btn');
 const nameInput = document.getElementById('name-input');
 const lobbyModeGrid = document.getElementById('lobby-mode-grid');
 const lobbyRoomGrid = document.getElementById('lobby-room-grid');
@@ -1454,6 +1538,7 @@ function renderLobbySelector() {
 
   const selected = catalog.selection;
   playBtn.disabled = connecting || (!joined && !botsLocal && serverAvailable && selected.full);
+  playBtn.removeAttribute('aria-busy');
   const label = connecting
     ? 'CONECTANDO...'
     : joined
@@ -1468,6 +1553,11 @@ function renderLobbySelector() {
               ? `ENTRAR SALA ${selected.room}`
               : 'JUGAR LOCAL';
   playBtn.innerHTML = `${label} <span aria-hidden="true">→</span>`;
+  if (localPlayBtn) {
+    localPlayBtn.hidden = joined;
+    localPlayBtn.disabled = connecting || joined;
+    localPlayBtn.textContent = botsLocal ? 'VOLVER A ENTRENAMIENTO' : 'PROBAR EN LOCAL';
+  }
   renderRoomSummary();
 }
 
@@ -2004,6 +2094,20 @@ function setupOnline() {
 }
 
 // --- entrar al juego ---
+function prepareLocalMatch() {
+  if (!botsLocal) setupOffline();
+  player.spawn(safePlayerSpawn(null, botsLocal?.bots || []));
+  weapons.refill();
+  grenades.refill();
+}
+
+function enterPreparedMatch() {
+  hud.updateHealth(player.health, player.maxHealth);
+  hud.updateAmmo(weapons);
+  hud.updateScore(kills, deaths);
+  enterGameplayView();
+}
+
 async function joinAndPlay() {
   cancelBindingCapture('Asignación cancelada al iniciar la partida.');
   audio.ensure();
@@ -2062,20 +2166,37 @@ async function joinAndPlay() {
           : 'No se pudo confirmar esa sala · vuelve a intentarlo');
       await refreshLobbyRooms({ announce: error?.code !== 'ROOM_FULL' });
     } else {
-      setupOffline();
-      player.spawn(safePlayerSpawn(null, botsLocal?.bots || []));
-      weapons.refill();
-      grenades.refill();
+      prepareLocalMatch();
     }
+  } finally {
+    connecting = false;
+    renderLobbySelector();
   }
-  connecting = false;
+  if (joined || botsLocal) enterPreparedMatch();
+}
+
+function startLocalTraining() {
+  cancelBindingCapture('Asignación cancelada al iniciar entrenamiento local.');
+  audio.ensure();
+  if (joined || connecting) return;
+  if (botsLocal) {
+    enterPreparedMatch();
+    return;
+  }
+  connecting = true;
   renderLobbySelector();
-  if (joined || botsLocal) {
-    hud.updateHealth(player.health, player.maxHealth);
-    hud.updateAmmo(weapons);
-    hud.updateScore(kills, deaths);
-    enterGameplayView();
+  const name = nameInput.value.trim();
+  if (name) safeStorageSet('pium_name', name);
+  try {
+    prepareLocalMatch();
+  } catch (error) {
+    console.error('No se pudo preparar el entrenamiento local.', error);
+    hud.info('No se pudo iniciar el entrenamiento · recarga y vuelve a intentarlo');
+  } finally {
+    connecting = false;
+    renderLobbySelector();
   }
+  if (botsLocal) enterPreparedMatch();
 }
 
 function setFallbackControls(active) {
@@ -2135,6 +2256,7 @@ function openMainMenuFromGame() {
 }
 
 playBtn.addEventListener('click', joinAndPlay);
+localPlayBtn?.addEventListener('click', startLocalTraining);
 renderer.domElement.addEventListener('click', () => {
   if (state === 'playing' && !document.pointerLockElement && !player.dead &&
       !buyOpen && !botPanelOpen && !podiumOpen && !teamPickerOpen) tryLock();
@@ -2151,6 +2273,7 @@ document.addEventListener('pointerlockchange', () => {
       return;
     }
     setFallbackControls(false);
+    if (connecting && !joined && !botsLocal) return;
     if (state === 'menu') state = 'playing';
     hud.showMenu(false);
     hud.showHud(true);
@@ -2772,3 +2895,8 @@ window.__game = {
   setState: (s) => { state = s; },
   join: joinAndPlay,
 };
+document.documentElement.dataset.gameBoot = 'ready';
+// El watchdog puede haber sustituido el CTA mientras un dispositivo lento
+// terminaba de evaluar el módulo. Restaurar siempre el estado real del lobby.
+renderLobbySelector();
+window.dispatchEvent(new Event('pium:ready'));
