@@ -105,6 +105,10 @@ test('fallback border turn keeps rotating every frame and respects sensitivity a
   assert.ok(accumulated > TAU * 2, 'compatible mode stopped before completing multiple turns');
 });
 
+test('zero sensitivity disables fallback border turning', () => {
+  assert.equal(fallbackEdgeTurn(1, 0, 1 / 60), 0);
+});
+
 test('fallback edge rotation is frame-rate independent at 30, 60, and 144 FPS', () => {
   const intent = fallbackEdgeIntent(1099, 100, 1000);
   const simulate = (fps) => {

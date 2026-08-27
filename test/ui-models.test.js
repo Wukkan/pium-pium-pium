@@ -155,7 +155,7 @@ test('settings are sanitized for a stable AAA menu profile', () => {
   assert.deepEqual(readSettings(JSON.stringify({
     fov: 120, sensitivity: -2, masterVolume: 2, invertY: 1, showFps: true,
   })), {
-    fov: 110, sensitivity: 0.001, masterVolume: 1,
+    fov: 110, sensitivity: 0, masterVolume: 1,
     soundEnabled: true, renderScale: 1, shadowsEnabled: true,
     shadowQuality: 'medium', effectsQuality: 'balanced',
     invertY: true, showFps: true, showPing: true, aimMode: 'hold',
@@ -180,6 +180,11 @@ test('settings are sanitized for a stable AAA menu profile', () => {
     crosshairOpacity: 1, crosshairDynamic: true, crosshairDynamicAmount: 1,
     damageFlash: true, highContrast: false, reducedMotion: false,
   });
+});
+
+test('settings preserve zero mouse sensitivity', () => {
+  assert.equal(readSettings({ sensitivity: 0 }).sensitivity, 0);
+  assert.equal(readSettings({ sensitivity: -1 }).sensitivity, 0);
 });
 
 test('muting keeps the chosen volume and only changes the effective output', () => {

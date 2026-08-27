@@ -214,7 +214,7 @@ export function readSettings(raw) {
   } catch { /* preferencias corruptas: usar valores por defecto */ }
   return {
     fov: Math.round(clamp(value.fov, 70, 110, DEFAULT_SETTINGS.fov)),
-    sensitivity: clamp(value.sensitivity, 0.001, 0.006, DEFAULT_SETTINGS.sensitivity),
+    sensitivity: clamp(value.sensitivity, 0, 0.006, DEFAULT_SETTINGS.sensitivity),
     masterVolume: clamp(value.masterVolume, 0, 1, DEFAULT_SETTINGS.masterVolume),
     soundEnabled: readBoolean(value.soundEnabled, DEFAULT_SETTINGS.soundEnabled),
     renderScale: clamp(value.renderScale, 0.5, 1, DEFAULT_SETTINGS.renderScale),

@@ -52,7 +52,7 @@ export function fallbackEdgeTurn(intent, sensitivity, dt) {
   const amount = clamp(finite(intent), -1, 1);
   const safeSensitivity = clamp(
     finite(sensitivity, LOOK_CONTROL_LIMITS.baseSensitivity),
-    0.0001,
+    0,
     0.02,
   );
   const step = clamp(finite(dt), 0, LOOK_CONTROL_LIMITS.maxStep);
